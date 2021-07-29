@@ -22,13 +22,17 @@ pub fn zeucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     s.sqrt()
 }
 
+pub fn dot_slow(a: &[f64], b: &[f64]) -> f64 {
+    let mut s = 0.0;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        s += x * y;
+    }
+    s
+}
+
+#[inline]
 pub fn dot(a: &[f64], b: &[f64]) -> f64 {
-    use packed_simd::f64x4;
-    // let mut s = 0.0;
-    // for (&x, &y) in a.iter().zip(b.iter()) {
-    //     s += x * y;
-    // }
-    // s
+    use packed_simd::f64x8;
     let ac = a.chunks_exact(8);
     let bc = b.chunks_exact(8);
     let rem = ac
@@ -38,10 +42,10 @@ pub fn dot(a: &[f64], b: &[f64]) -> f64 {
         .map(|(a, b)| a * b)
         .sum::<f64>() as f64;
     let part = ac
-        .map(f64x4::from_slice_unaligned)
-        .zip(bc.map(f64x4::from_slice_unaligned))
+        .map(f64x8::from_slice_unaligned)
+        .zip(bc.map(f64x8::from_slice_unaligned))
         .map(|(a, b)| a * b)
-        .sum::<f64x4>()
+        .sum::<f64x8>()
         .sum() as f64;
     part + rem
 }

@@ -1,4 +1,7 @@
-use std::cell::RefCell;
+use std::{
+    cell::RefCell,
+    ops::{Index, IndexMut, Range},
+};
 
 use bumpalo::Bump;
 use rand::prelude::*;
@@ -7,24 +10,139 @@ use rand_xoshiro::Xoshiro256Plus;
 
 use crate::{distance::*, embedding::Embedder, types::WindowedTimeseries};
 
-#[derive(Debug)]
 pub struct TensorPool<'arena> {
     left: Vec<u32, &'arena Bump>,
     right: Vec<u32, &'arena Bump>,
 }
 
-#[derive(Debug)]
-pub struct HashCollection<'arena> {
+pub struct HashCollection<'hasher, 'arena> {
+    hasher: &'hasher Hasher,
     pools: Vec<TensorPool<'arena>, &'arena Bump>,
 }
 
-impl<'arena> HashCollection<'arena> {
-    pub fn from_ts(ts: &WindowedTimeseries, hasher: &Hasher, arena: &'arena Bump) -> Self {
+impl<'hasher, 'arena> HashCollection<'hasher, 'arena> {
+    pub fn from_ts(ts: &WindowedTimeseries, hasher: &'hasher Hasher, arena: &'arena Bump) -> Self {
         let mut pools = Vec::with_capacity_in(ts.num_subsequences(), arena);
         for i in 0..ts.num_subsequences() {
             pools.push(hasher.hash(ts, i, arena));
         }
-        Self { pools }
+        Self { hasher, pools }
+    }
+
+    pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
+        let lm = mask(depth - self.hasher.k_right) as u32;
+        let rm = mask(depth) as u32;
+
+        let rindex = 
+            self.pools[i]
+                .right
+                .iter()
+                .zip(self.pools[j].right.iter())
+                .enumerate()
+                .find(|(_i, (ibits, jbits))| (**ibits & rm) == (**jbits & rm))?.0;
+
+        if depth < self.hasher.k_right {
+            return Some(rindex);
+        }
+
+        let lindex = 
+            self.pools[i]
+                .left
+                .iter()
+                .zip(self.pools[j].left.iter())
+                .enumerate()
+                .find(|(_i, (ibits, jbits))| (**ibits & lm) == (**jbits & lm))?.0;
+            
+        Some(lindex * self.hasher.tensor_repetitions + rindex)
+    }
+
+    pub fn collision_probability(&self, i: usize, j: usize) -> f64 {
+        let mut n_collisions = 0;
+        let m_left = mask(self.hasher.k_left);
+        let m_right = mask(self.hasher.k_right);
+
+        n_collisions += count_collisions(&self.pools[i].left, &self.pools[j].left, m_left as u32);
+        n_collisions +=
+            count_collisions(&self.pools[i].right, &self.pools[j].right, m_right as u32);
+
+        n_collisions as f64
+            / ((self.hasher.k_left + self.hasher.k_right) * self.hasher.tensor_repetitions) as f64
+    }
+
+    pub fn get_hash_matrix(&self) -> HashMatrix {
+        HashMatrix::new(self)
+    }
+
+    fn hash_value(&self, i: usize, repetition: usize) -> u64 {
+        let l_idx = repetition / self.hasher.tensor_repetitions;
+        let r_idx = repetition % self.hasher.tensor_repetitions;
+        let pool = &self.pools[i];
+        let mut w = pool.left[l_idx] as u64;
+        w = w << self.hasher.k_right;
+        w = w | (pool.right[r_idx] as u64);
+        w
+    }
+}
+
+fn count_collisions(wa: &[u32], wb: &[u32], bitmask: u32) -> usize {
+    wa.iter()
+        .zip(wb.iter())
+        .map(|(&a, &b)| (!(a ^ b) & bitmask).count_ones() as usize)
+        .sum()
+}
+
+pub struct HashMatrix {
+    /// Outer vector has one entry per repetition, inner vector has one entry per subsequence,
+    /// and items are hash values and indices into the timeseries
+    hashes: Vec<Vec<(u64, usize)>>,
+}
+
+impl HashMatrix {
+    fn new(coll: &HashCollection) -> Self {
+        let mut hashes = Vec::with_capacity(coll.hasher.repetitions);
+        for repetition in 0..coll.hasher.repetitions {
+            let mut rephashes = Vec::with_capacity(coll.pools.len());
+            for i in 0..coll.pools.len() {
+                rephashes.push((coll.hash_value(i, repetition), i));
+            }
+            rephashes.sort_unstable();
+            hashes.push(rephashes);
+        }
+        Self { hashes }
+    }
+
+    pub fn buckets<'hashes>(
+        &'hashes self,
+        depth: usize,
+        repetition: usize,
+    ) -> BucketIterator<'hashes> {
+        BucketIterator {
+            hashes: &self.hashes[repetition],
+            mask: mask(depth),
+            idx: 0,
+        }
+    }
+}
+
+pub struct BucketIterator<'hashes> {
+    hashes: &'hashes Vec<(u64, usize)>,
+    mask: u64,
+    idx: usize,
+}
+
+impl<'hashes> Iterator for BucketIterator<'hashes> {
+    type Item = (Range<usize>, &'hashes [(u64, usize)]);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.hashes.len() {
+            return None;
+        }
+        let start = self.idx;
+        let current = self.hashes[self.idx].0 & self.mask;
+        while self.idx < self.hashes.len() && (self.hashes[self.idx].0 & self.mask) == current {
+            self.idx += 1;
+        }
+        Some((start..self.idx, &self.hashes[start..self.idx]))
     }
 }
 
@@ -44,7 +162,7 @@ pub struct Hasher {
     embedder: Embedder,
 }
 
-fn mask(bits: usize) -> u64 {
+pub fn mask(bits: usize) -> u64 {
     let mut m = 0;
     for _ in 0..bits {
         m = (m << 1) | 1;
