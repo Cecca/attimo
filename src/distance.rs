@@ -4,11 +4,10 @@ pub fn eucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     let mut s = 0.0;
     for (&x, &y) in ts.subsequence(i).iter().zip(ts.subsequence(j).iter()) {
         let d = x - y;
-        s += d*d;
+        s += d * d;
     }
     s.sqrt()
 }
-
 
 pub fn zeucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     let mut s = 0.0;
@@ -18,20 +17,35 @@ pub fn zeucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     let sj = ts.sd(j);
     for (&x, &y) in ts.subsequence(i).iter().zip(ts.subsequence(j).iter()) {
         let d = ((x - mi) / si) - ((y - mj) / sj);
-        s += d*d;
+        s += d * d;
     }
     s.sqrt()
 }
 
 pub fn dot(a: &[f64], b: &[f64]) -> f64 {
-    let mut s = 0.0;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        s += x * y;
-    }
-    s
+    use packed_simd::f64x4;
+    // let mut s = 0.0;
+    // for (&x, &y) in a.iter().zip(b.iter()) {
+    //     s += x * y;
+    // }
+    // s
+    let ac = a.chunks_exact(8);
+    let bc = b.chunks_exact(8);
+    let rem = ac
+        .remainder()
+        .iter()
+        .zip(bc.remainder().iter())
+        .map(|(a, b)| a * b)
+        .sum::<f64>() as f64;
+    let part = ac
+        .map(f64x4::from_slice_unaligned)
+        .zip(bc.map(f64x4::from_slice_unaligned))
+        .map(|(a, b)| a * b)
+        .sum::<f64x4>()
+        .sum() as f64;
+    part + rem
 }
 
 pub fn norm(a: &[f64]) -> f64 {
     dot(a, a)
 }
-
