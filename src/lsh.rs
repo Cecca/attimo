@@ -30,7 +30,7 @@ impl<'hasher, 'arena> HashCollection<'hasher, 'arena> {
     }
 
     pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
-        let lm = mask(depth - self.hasher.k_right) as u32;
+        // dbg!(depth);
         let rm = mask(depth) as u32;
 
         let rindex = 
@@ -44,6 +44,7 @@ impl<'hasher, 'arena> HashCollection<'hasher, 'arena> {
         if depth < self.hasher.k_right {
             return Some(rindex);
         }
+        let lm = mask(depth - self.hasher.k_right) as u32;
 
         let lindex = 
             self.pools[i]
@@ -153,13 +154,13 @@ thread_local! {
 
 /// Data structure to do LSH of subsequences.
 pub struct Hasher {
-    k: usize,
-    k_left: usize,
-    k_right: usize,
-    tensor_repetitions: usize,
-    repetitions: usize,
-    planes: Vec<Vec<Vec<f64>>>,
-    embedder: Embedder,
+    pub k: usize,
+    pub k_left: usize,
+    pub k_right: usize,
+    pub tensor_repetitions: usize,
+    pub repetitions: usize,
+    pub planes: Vec<Vec<Vec<f64>>>,
+    pub embedder: Embedder,
 }
 
 pub fn mask(bits: usize) -> u64 {

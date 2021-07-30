@@ -14,4 +14,5 @@ rand_xoshiro = "0.6"
 rand_distr = "0.4"
 bumpalo = { version = "3.7", features = ["allocator_api"] }
 packed_simd = { version = "0.3.4", package = "packed_simd_2" }
+indicatif = "0.16"
 

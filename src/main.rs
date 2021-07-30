@@ -22,9 +22,9 @@ use std::time::Instant;
 fn main() -> Result<()> {
     let path = std::env::args().nth(1).context("missing path to dataset")?;
     let w = 300;
-    let ts: Vec<f64> = loadts(path)?.into_iter().take(100000).collect();
+    let ts: Vec<f64> = loadts(path)?.into_iter().take(10000).collect();
     let ts = WindowedTimeseries::new(ts, w);
-    approx_mp(&ts, 1, 32, 200, 0.01, 1234);
+    approx_mp(&ts, 1, 64, 200, 0.01, 1234);
 
     // let dp = ts.distance_profile(0, eucl);
 
