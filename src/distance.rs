@@ -10,16 +10,18 @@ pub fn eucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
 }
 
 pub fn zeucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
-    let mut s = 0.0;
-    let mi = ts.mean(i);
-    let mj = ts.mean(j);
-    let si = ts.sd(i);
-    let sj = ts.sd(j);
-    for (&x, &y) in ts.subsequence(i).iter().zip(ts.subsequence(j).iter()) {
-        let d = ((x - mi) / si) - ((y - mj) / sj);
-        s += d * d;
-    }
-    s.sqrt()
+    let dotp = dot(ts.subsequence(i), ts.subsequence(j));
+    (2.0 * ts.w as f64 * ((dotp - ts.w as f64 * ts.mean(i) * ts.mean(j)) / ts.w as f64 * ts.sd(i) * ts.sd(j))).sqrt()
+    // let mut s = 0.0;
+    // let mi = ts.mean(i);
+    // let mj = ts.mean(j);
+    // let si = ts.sd(i);
+    // let sj = ts.sd(j);
+    // for (&x, &y) in ts.subsequence(i).iter().zip(ts.subsequence(j).iter()) {
+    //     let d = ((x - mi) / si) - ((y - mj) / sj);
+    //     s += d * d;
+    // }
+    // s.sqrt()
 }
 
 pub fn dot_slow(a: &[f64], b: &[f64]) -> f64 {
