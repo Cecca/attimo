@@ -22,18 +22,19 @@ use std::time::Instant;
 fn main() -> Result<()> {
     let path = std::env::args().nth(1).context("missing path to dataset")?;
     let w = 300;
-    let ts: Vec<f64> = loadts(path)?.into_iter().take(10000).collect();
+    let ts: Vec<f64> = loadts(path)?.into_iter().take(100000).collect();
     let ts = WindowedTimeseries::new(ts, w);
-    approx_mp(&ts, 1, 64, 200, 0.01, 1234);
+    let amp = approx_mp(&ts, 64, 500, 0.01, 1234);
+    let amp: Vec<f64> = amp.into_iter().map(|pair| pair.0).collect();
 
-    // let dp = ts.distance_profile(0, eucl);
+    // let dp = ts.distance_profile(0, zeucl);
 
-    // let lines = Scatter::new(0..probs.len(), probs)
-    //     .name("collision probabilities")
-    //     .mode(Mode::Lines);
-    // let mut plot = Plot::new();
-    // plot.add_trace(lines);
-    // plot.show();
+    let lines = Scatter::new(0..amp.len(), amp)
+        .name("distance profile")
+        .mode(Mode::Lines);
+    let mut plot = Plot::new();
+    plot.add_trace(lines);
+    plot.show();
 
     Ok(())
 }

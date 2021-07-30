@@ -226,7 +226,8 @@ impl Hasher {
             EMBED_BUFFER.with(|ebuf| {
                 let mut ebuf = ebuf.borrow_mut();
                 ebuf.resize(self.embedder.dim_out, 0.0);
-                self.embedder.embed(&zbuf.borrow(), &mut ebuf);
+                // FIXME: use this: self.embedder.embed(&zbuf.borrow(), &mut ebuf);
+                self.embedder.embed(&ts.subsequence(i), &mut ebuf);
 
                 // and finally do the hashing itself
                 let mask_right = mask(self.k_right);

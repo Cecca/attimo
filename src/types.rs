@@ -1,4 +1,3 @@
-
 pub struct WindowedTimeseries {
     data: Vec<f64>,
     pub w: usize,
@@ -11,16 +10,22 @@ impl WindowedTimeseries {
         let mut rolling_avg = Vec::with_capacity(ts.len() - w);
         let mut rolling_sd = Vec::with_capacity(ts.len() - w);
 
-        let mut s: f64 = ts[0..w].iter().sum();
-        let mut s2: f64 = ts[0..w].iter().map(|x| x * x).sum();
-        rolling_avg.push(s / w as f64);
-        rolling_sd.push((s2 - s * s) / w as f64);
+        let mut avg: f64 = ts[0..w].iter().sum::<f64>() / w as f64;
+        let mut var: f64 = (ts[0..w].iter().map(|x| x*x).sum::<f64>() - avg*avg) / w as f64;
+
+        rolling_avg.push(avg);
+        assert!(!var.is_nan() && var.is_finite());
+        rolling_sd.push((var.sqrt()) / w as f64);
 
         for i in 1..ts.len() - w {
-            s = s - ts[i - 1] + ts[i + w];
-            s2 = s2 - ts[i - 1].powi(2) + ts[i + w].powi(2);
-            rolling_avg.push(s / w as f64);
-            rolling_sd.push((s2 - s * s) / w as f64);
+            let new = ts[i + w];
+            let old = ts[i - 1];
+            let oldavg = avg;
+            avg = oldavg + (new - old) / w as f64;
+            var = (new - old) * (new - avg + old - oldavg) / w as f64;
+            rolling_avg.push(avg);
+            assert!(!var.is_nan() && var.is_finite());
+            rolling_sd.push(var.sqrt());
         }
 
         WindowedTimeseries {
@@ -32,7 +37,7 @@ impl WindowedTimeseries {
     }
 
     pub fn subsequence<'a>(&'a self, i: usize) -> &'a [f64] {
-        &self.data[i..i+self.w]
+        &self.data[i..i + self.w]
     }
 
     pub fn mean(&self, i: usize) -> f64 {
@@ -47,7 +52,11 @@ impl WindowedTimeseries {
         self.data.len() - self.w
     }
 
-    pub fn distance_profile<D: Fn(&WindowedTimeseries, usize, usize) -> f64>(&self, from: usize, d: D) -> Vec<f64> {
+    pub fn distance_profile<D: Fn(&WindowedTimeseries, usize, usize) -> f64>(
+        &self,
+        from: usize,
+        d: D,
+    ) -> Vec<f64> {
         let mut dp = vec![0.0; self.num_subsequences()];
 
         for i in 0..self.num_subsequences() {
@@ -57,4 +66,3 @@ impl WindowedTimeseries {
         dp
     }
 }
-

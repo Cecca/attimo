@@ -11,7 +11,9 @@ pub fn eucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
 
 pub fn zeucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     let dotp = dot(ts.subsequence(i), ts.subsequence(j));
-    (2.0 * ts.w as f64 * ((dotp - ts.w as f64 * ts.mean(i) * ts.mean(j)) / ts.w as f64 * ts.sd(i) * ts.sd(j))).sqrt()
+    let meanp = ts.w as f64 * ts.mean(i) * ts.mean(j);
+    let sdp = (ts.w as f64 * ts.sd(i) * ts.sd(j));
+    (2.0 * ts.w as f64 * ((dotp - meanp) / sdp)).sqrt()
     // let mut s = 0.0;
     // let mi = ts.mean(i);
     // let mj = ts.mean(j);

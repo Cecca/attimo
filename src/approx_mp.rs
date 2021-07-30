@@ -11,17 +11,17 @@ use std::time::Instant;
 
 pub fn approx_mp(
     ts: &WindowedTimeseries,
-    knn: usize,
     k: usize,
     repetitions: usize,
     delta: f64,
     seed: u64,
-) {
+) -> Vec<(f64, usize)> {
     let start = Instant::now();
-    let sf = scaling_factor(ts, zeucl, 0.01);
+    let sf = scaling_factor(ts, eucl, 0.01);
+    assert!(!sf.is_nan());
     println!("[{:?}] Scaling factor: {}", start.elapsed(), sf);
 
-    let hasher = Hasher::new(32, 200, Embedder::new(ts.w, ts.w, 1.0, 1234), 49875);
+    let hasher = Hasher::new(k, repetitions, Embedder::new(ts.w, ts.w, 1.0, seed), seed);
     let arena = Bump::new();
     let pools = HashCollection::from_ts(&ts, &hasher, &arena);
     println!("[{:?}] Computed hash pools", start.elapsed());
@@ -40,6 +40,7 @@ pub fn approx_mp(
     // for decreasing depths
     for depth in (0..k).rev() {
         let pbar = ProgressBar::new(repetitions as u64);
+        pbar.set_draw_rate(4);
         pbar.set_style(
             ProgressStyle::default_bar()
                 .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
@@ -63,7 +64,7 @@ pub fn approx_mp(
                                     .expect("hashes must collide in buckets");
                                 if first_colliding_repetition == rep {
                                     // push into the buffer of both nodes
-                                    let d = zeucl(ts, ref_idx, cand_idx);
+                                    let d = eucl(ts, ref_idx, cand_idx);
                                     if nearest_neighbor[ref_idx].is_none()
                                         || d < nearest_neighbor[ref_idx].unwrap().0
                                     {
@@ -90,4 +91,5 @@ pub fn approx_mp(
         pbar.finish();
     }
     println!("[{:?}] done!", start.elapsed());
+    nearest_neighbor.iter().map(|opt| opt.expect("missing nearest neighbor")).collect()
 }
