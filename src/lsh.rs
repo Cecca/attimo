@@ -196,8 +196,8 @@ pub struct Hasher {
     pub k_right: usize,
     pub tensor_repetitions: usize,
     pub repetitions: usize,
-    pub planes: Vec<Vec<Vec<f64>>>,
-    pub embedder: Embedder,
+    hyperplanes: HyperplaneLSH,
+    embedder: Embedder,
 }
 
 pub fn mask(bits: usize) -> u64 {
@@ -213,20 +213,7 @@ impl Hasher {
         let k_left = k / 2;
         let k_right = (k as f64 / 2.0).ceil() as usize;
         let tensor_repetitions = (repetitions as f64).sqrt().ceil() as usize;
-
-        let mut rng = Xoshiro256Plus::seed_from_u64(seed);
-        let mut planes = Vec::with_capacity(tensor_repetitions);
-        for _ in 0..tensor_repetitions {
-            let mut ks = Vec::with_capacity(k);
-            for _ in 0..k {
-                let mut v = Vec::with_capacity(embedder.dim_in);
-                for _ in 0..embedder.dim_in {
-                    v.push(rng.sample(StandardNormal));
-                }
-                ks.push(v);
-            }
-            planes.push(ks);
-        }
+        let hyperplanes = HyperplaneLSH::new(embedder.dim_in, k, tensor_repetitions, seed);
 
         Self {
             k,
@@ -234,7 +221,7 @@ impl Hasher {
             k_right,
             tensor_repetitions,
             repetitions,
-            planes,
+            hyperplanes,
             embedder,
         }
     }
@@ -262,15 +249,7 @@ impl Hasher {
                 let mut words_left = Vec::with_capacity_in(self.tensor_repetitions, arena);
                 let mut words_right = Vec::with_capacity_in(self.tensor_repetitions, arena);
 
-                for rep in 0..self.tensor_repetitions {
-                    let mut word = 0u64;
-                    for bit in 0..self.k {
-                        if dot(&ebuf, &self.planes[rep][bit]) >= 0.0 {
-                            word = (word << 1) | 1;
-                        } else {
-                            word = word << 1;
-                        }
-                    }
+                for word in self.hyperplanes.hash(&ebuf) {
                     words_left.push((word >> self.k_right) as u32);
                     words_right.push((word & mask_right) as u32);
                 }
