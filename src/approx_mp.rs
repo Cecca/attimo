@@ -17,7 +17,7 @@ pub fn approx_mp(
     seed: u64,
 ) -> Vec<(f64, usize)> {
     let start = Instant::now();
-    let sf = scaling_factor(ts, eucl, 0.01);
+    let sf = scaling_factor(ts, zeucl, 0.01);
     assert!(!sf.is_nan());
     println!("[{:?}] Scaling factor: {}", start.elapsed(), sf);
 
@@ -38,7 +38,7 @@ pub fn approx_mp(
     let mut nearest_neighbor: Vec<Option<(f64, usize)>> = vec![None; ts.num_subsequences()];
 
     // for decreasing depths
-    for depth in (0..k).rev() {
+    for depth in (0..=k).rev() {
         let pbar = ProgressBar::new(repetitions as u64);
         pbar.set_draw_rate(4);
         pbar.set_style(
@@ -56,21 +56,23 @@ pub fn approx_mp(
                     if active[ref_idx] {
                         let already_checked = &bounds[rep][ref_idx];
                         // FIXME: we can leverage the fact that the indexes are sorted to halve the number of computations
-                        for &(_, cand_idx) in bucket {
+                        for (offset, &(_, cand_idx)) in bucket.iter().enumerate() {
                             // FIXME: Maybe we can exclude trivial matches already here?
-                            if !already_checked.contains(&cand_idx) && cand_idx != ref_idx {
+                            let hash_idx = hash_range.start + offset;
+                            if !already_checked.contains(&hash_idx) && cand_idx != ref_idx
+                            {
+                                // FIXME: Fix issues with first colliding repetition
                                 let first_colliding_repetition: usize = pools
                                     .first_collision(ref_idx, cand_idx, depth)
                                     .expect("hashes must collide in buckets");
-                                if first_colliding_repetition == rep {
-                                    // push into the buffer of both nodes
-                                    let d = eucl(ts, ref_idx, cand_idx);
+                                // if first_colliding_repetition == rep {
+                                    let d = zeucl(ts, ref_idx, cand_idx);
                                     if nearest_neighbor[ref_idx].is_none()
                                         || d < nearest_neighbor[ref_idx].unwrap().0
                                     {
                                         nearest_neighbor[ref_idx] = Some((d, cand_idx));
                                     }
-                                }
+                                // }
                             }
                         }
 
@@ -87,9 +89,15 @@ pub fn approx_mp(
                 }
             }
             pbar.inc(1);
+            if depth==0 {
+                break;
+            }
         }
         pbar.finish();
     }
     println!("[{:?}] done!", start.elapsed());
-    nearest_neighbor.iter().map(|opt| opt.expect("missing nearest neighbor")).collect()
+    nearest_neighbor
+        .iter()
+        .map(|opt| opt.expect("missing nearest neighbor"))
+        .collect()
 }

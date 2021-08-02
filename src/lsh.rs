@@ -6,7 +6,7 @@ use std::{
 use bumpalo::Bump;
 use rand::prelude::*;
 use rand_distr::StandardNormal;
-use rand_xoshiro::Xoshiro256Plus;
+use rand_xoshiro::{Xoshiro256Plus, Xoshiro256PlusPlus};
 
 use crate::{distance::*, embedding::Embedder, types::WindowedTimeseries};
 
@@ -152,6 +152,43 @@ thread_local! {
     static EMBED_BUFFER: RefCell<Vec<f64>> = RefCell::new(Vec::new());
 }
 
+struct HyperplaneLSH {
+    planes: Vec<Vec<Vec<f64>>>,
+}
+
+impl HyperplaneLSH {
+    fn new(dim: usize, k: usize, repetitions: usize, seed: u64) -> Self {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let mut planes = Vec::with_capacity(repetitions);
+        for _ in 0..repetitions {
+            let mut ks = Vec::with_capacity(k);
+            for _ in 0..k {
+                let v: Vec<f64> = StandardNormal.sample_iter(&mut rng).take(dim).collect();
+                ks.push(v);
+            }
+            planes.push(ks);
+        }
+
+        Self {
+            planes,
+        }
+    }
+
+    fn hash<'hasher>(&'hasher self, v: &'hasher [f64]) -> impl Iterator<Item=u64> + 'hasher {
+        self.planes.iter().map(move |rep_planes| {
+            let mut word = 0u64;
+            for plane in rep_planes.iter() {
+                if dot(v, plane) >= 0.0 {
+                    word = (word << 1) | 1;
+                } else {
+                    word = word << 1;
+                }
+            }
+            word
+        })
+    }
+}
+
 /// Data structure to do LSH of subsequences.
 pub struct Hasher {
     pub k: usize,
@@ -212,22 +249,13 @@ impl Hasher {
 
         ZNORM_BUFFER.with(|zbuf| {
             // do z normalization
-            {
-                let mut zbuf = zbuf.borrow_mut();
-                zbuf.resize(ts.w, 0.0);
-                let m = ts.mean(i);
-                let sd = ts.sd(i);
-                for (j, &x) in ts.subsequence(i).iter().enumerate() {
-                    zbuf[j] = (x - m) / sd;
-                }
-            }
+            ts.znormalized(i, &mut zbuf.borrow_mut());
 
             // do the embedding
             EMBED_BUFFER.with(|ebuf| {
                 let mut ebuf = ebuf.borrow_mut();
                 ebuf.resize(self.embedder.dim_out, 0.0);
-                // FIXME: use this: self.embedder.embed(&zbuf.borrow(), &mut ebuf);
-                self.embedder.embed(&ts.subsequence(i), &mut ebuf);
+                self.embedder.embed(&zbuf.borrow(), &mut ebuf);
 
                 // and finally do the hashing itself
                 let mask_right = mask(self.k_right);
@@ -252,5 +280,70 @@ impl Hasher {
                 }
             })
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::lsh::HyperplaneLSH;
+
+    fn normalize(x: &[f64]) -> Vec<f64> {
+        let norm = crate::distance::norm(x);
+        let mut y = vec![0.0; x.len()];
+        for (i, xi) in x.iter().enumerate() {
+            y[i] = xi / norm;
+        }
+        y
+    }
+
+    #[test]
+    fn test_probability() {
+        use rand::prelude::*;
+        use rand_xoshiro::Xoroshiro128PlusPlus;
+        use rand_distr::StandardNormal;
+        let mut rng = Xoroshiro128PlusPlus::seed_from_u64(3462);
+        let dim = 2;
+        let repetitions = 10000;
+        let n = 1000;
+
+        let hasher = HyperplaneLSH::new(dim, 1, repetitions, 13462);
+
+        let a: Vec<f64> = StandardNormal.sample_iter(&mut rng).take(dim).collect();
+        let a = normalize(&a);
+
+        assert_eq!(
+            1.0,
+            hasher.hash(&a).zip(hasher.hash(&a)).filter(|(ha, hb)| ha == hb).count() as f64 / repetitions as f64
+        );
+
+        let mut angles = Vec::new();
+        let mut probs = Vec::new();
+        let mut expected = Vec::new();
+        for _ in 0..n {
+            let b: Vec<f64> = StandardNormal.sample_iter(&mut rng).take(dim).collect();
+            let b = normalize(&b);
+
+            let angle = dbg!(crate::distance::dot(&a, &b).acos());
+
+            let prob = hasher.hash(&a).zip(hasher.hash(&b)).filter(|(ha, hb)| ha == hb).count() as f64 / repetitions as f64;
+            let expected_prob = 1.0 - angle/(std::f64::consts::PI); 
+
+            angles.push(angle);
+            probs.push(prob);
+            expected.push(expected_prob);
+            assert!((expected_prob - prob).abs() <= 0.01, "discrepancy in probabilities:\n\texpected: {}\n\tactual:   {}", expected_prob, prob);
+        }
+
+        // let exp_trace = Scatter::new(angles.clone(), expected)
+        //     .name("expected")
+        //     .mode(Mode::Markers);
+        // let actual_trace = Scatter::new(angles.clone(), probs)
+        //     .name("actual")
+        //     .mode(Mode::Markers);
+        // let mut p = Plot::new();
+        // p.add_trace(exp_trace);
+        // p.add_trace(actual_trace);
+        // p.show();
+            
     }
 }
