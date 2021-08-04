@@ -37,6 +37,10 @@ pub fn approx_mp(
     // keep track of active subsequences
     let mut active: Vec<bool> = vec![true; ts.num_subsequences()];
 
+    // In this vector we will hold the solution: we have an entry for each subsequence, initialized
+    // to the empty value, and eventually replaced with a pair whose first element is the
+    // distance to the (estimated) nearest neighbor, and the second element is the index
+    // of the nearest neigbor itself.
     let mut nearest_neighbor: Vec<Option<(f64, usize)>> = vec![None; ts.num_subsequences()];
 
     let mut stats = Stats::new();
@@ -52,10 +56,8 @@ pub fn approx_mp(
             ProgressStyle::default_bar()
                 .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
         );
-        // println!("==== depth {}", depth);
 
         for rep in 0..repetitions {
-            // println!("----");
             pbar.set_message(format!(
                 "depth {}, active {}",
                 depth,
@@ -63,37 +65,55 @@ pub fn approx_mp(
             ));
             for (hash_range, bucket) in hashes.buckets(depth, rep) {
                 stats.push_bucket_size(depth, bucket.len());
-                for &(_, ref_idx) in bucket {
-                    if active[ref_idx] {
-                        let already_checked = &bounds[rep][ref_idx];
-                        // FIXME: we can leverage the fact that the indexes are sorted to halve the number of computations
-                        for (offset, &(_, cand_idx)) in bucket.iter().enumerate() {
-                            // FIXME: Maybe we can exclude trivial matches already here?
-                            let hash_idx = hash_range.start + offset;
-                            if cand_idx != ref_idx && !already_checked.contains(&hash_idx) {
-                                // FIXME: Fix issues with first colliding repetition
-                                let first_colliding_repetition: usize = pools
-                                    .first_collision(ref_idx, cand_idx, depth)
-                                    .expect("hashes must collide in buckets");
-                                if first_colliding_repetition == rep {
-                                    let d = zeucl(ts, ref_idx, cand_idx);
-                                    if nearest_neighbor[ref_idx].is_none()
-                                        || d < nearest_neighbor[ref_idx].unwrap().0
-                                    {
-                                        nearest_neighbor[ref_idx] = Some((d, cand_idx));
+                for (a_offset, &(_, a_idx)) in bucket.iter().enumerate() {
+                    if active[a_idx] {
+                        let a_already_checked = &bounds[rep][a_idx];
+                        let a_hash_idx = hash_range.start + a_offset;
+                        for (b_offset, &(_, b_idx)) in bucket.iter().enumerate() {
+                            if a_idx < b_idx {
+                                // FIXME: Maybe we can exclude trivial matches already here?
+                                let b_hash_idx = hash_range.start + b_offset;
+                                let b_already_checked = &bounds[rep][b_idx];
+                                let check_a = !a_already_checked.contains(&b_hash_idx);
+                                let check_b = !b_already_checked.contains(&a_hash_idx);
+                                if check_a || check_b {
+                                    // We only process the pair if this is the first repetition in which
+                                    // they collide. We get this information from the pool of bits
+                                    // from which hash values for all repetitions are extracted.
+                                    let first_colliding_repetition: usize = pools
+                                        .first_collision(a_idx, b_idx, depth)
+                                        .expect("hashes must collide in buckets");
+                                    if first_colliding_repetition == rep {
+                                        // After computing the distance between the two subsequences,
+                                        // we set `b` as the nearest neigbor of `a`, if it is closer 
+                                        // than the previous candidate.
+                                        let d = zeucl(ts, a_idx, b_idx);
+                                        if nearest_neighbor[a_idx].is_none()
+                                            || d < nearest_neighbor[a_idx].unwrap().0
+                                        {
+                                            nearest_neighbor[a_idx] = Some((d, b_idx));
+                                        }
+                                        // Similarly, set `a` as the nearest neighbor of `b`.
+                                        if nearest_neighbor[b_idx].is_none()
+                                            || d < nearest_neighbor[b_idx].unwrap().0
+                                        {
+                                            nearest_neighbor[b_idx] = Some((d, a_idx));
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        // mark the bucket as seen for the ref_idx subsequence
-                        bounds[rep][ref_idx] = hash_range.clone();
+                        // Mark the bucket as seen for the ref_idx subsequence. All the points in the 
+                        // bucket go through here, irrespective of how they were processed in 
+                        // the loop above.
+                        bounds[rep][a_idx] = hash_range.clone();
                         // Check the stopping condition, and if possible deactivate the subsequence
-                        if let Some((_, nn_idx)) = nearest_neighbor[ref_idx] {
-                            let p = pools.collision_probability(ref_idx, nn_idx);
+                        if let Some((_, nn_idx)) = nearest_neighbor[a_idx] {
+                            let p = pools.collision_probability(a_idx, nn_idx);
                             let threshold =
                                 ((2.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize;
-                            active[ref_idx] = rep < threshold;
+                            active[a_idx] = rep < threshold;
                         }
                     }
                 }
