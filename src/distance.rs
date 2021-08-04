@@ -1,5 +1,6 @@
 use crate::types::*;
 
+#[cfg(test)]
 pub fn euclidean(a: &[f64], b: &[f64]) -> f64 {
     let mut s = 0.0;
     for (&x, &y) in a.iter().zip(b.iter()) {
@@ -9,6 +10,7 @@ pub fn euclidean(a: &[f64], b: &[f64]) -> f64 {
     s.sqrt()
 }
 
+#[allow(dead_code)]
 pub fn eucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     let mut s = 0.0;
     for (&x, &y) in ts.subsequence(i).iter().zip(ts.subsequence(j).iter()) {
@@ -35,6 +37,7 @@ pub fn zeucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     s.sqrt()
 }
 
+#[cfg(test)]
 pub fn dot_slow(a: &[f64], b: &[f64]) -> f64 {
     assert_eq!(a.len(), b.len());
     let mut s = 0.0;
@@ -102,6 +105,7 @@ fn test_zeucl() {
     }
 }
 
+#[cfg(test)]
 pub fn normalize(x: &[f64]) -> Vec<f64> {
     let norm = crate::distance::norm(x);
     let mut y = vec![0.0; x.len()];

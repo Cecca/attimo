@@ -10,11 +10,7 @@ mod types;
 
 use anyhow::{Context, Result};
 use approx_mp::*;
-use bumpalo::Bump;
-use distance::*;
-use embedding::*;
 use load::*;
-use lsh::*;
 use plotly::common::Mode;
 use plotly::layout::LayoutGrid;
 use plotly::{Layout, Plot, Scatter};

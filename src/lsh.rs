@@ -1,9 +1,14 @@
-use std::{cell::RefCell, cmp::Ordering, fmt::Debug, hash::Hash, ops::{BitAnd, BitOr, BitXor, Index, IndexMut, Not, Range, Shl, Shr}};
+use std::{
+    cell::RefCell,
+    cmp::Ordering,
+    fmt::Debug,
+    ops::{BitAnd, BitOr, BitXor, Not, Range, Shl, Shr},
+};
 
 use bumpalo::Bump;
 use rand::prelude::*;
-use rand_distr::{Normal, StandardNormal};
-use rand_xoshiro::{Xoshiro256Plus, Xoshiro256PlusPlus};
+use rand_distr::Normal;
+use rand_xoshiro::Xoshiro256PlusPlus;
 
 use crate::{distance::*, embedding::Embedder, types::WindowedTimeseries};
 
@@ -139,11 +144,16 @@ impl<'hasher, 'arena> HashCollection<'hasher, 'arena> {
         }
         let select_left_mask = !mask(hasher.k_right);
         let select_right_mask = mask(hasher.k_right);
-        Self { hasher, pools, select_left_mask, select_right_mask }
+        Self {
+            hasher,
+            pools,
+            select_left_mask,
+            select_right_mask,
+        }
     }
 
-    pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
-        // FIXME: make this fast again
+    #[cfg(test)]
+    pub fn first_collision_baseline(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
         let m = mask(depth);
         (0..self.hasher.repetitions)
             .filter(|&rep| {
@@ -152,30 +162,38 @@ impl<'hasher, 'arena> HashCollection<'hasher, 'arena> {
                 hi == hj
             })
             .next()
-        // let rm = mask(depth) as u32;
+    }
 
-        // let rindex = self.pools[i]
-        //     .right
-        //     .iter()
-        //     .zip(self.pools[j].right.iter())
-        //     .enumerate()
-        //     .find(|(_i, (ibits, jbits))| (**ibits & rm) == (**jbits & rm))?
-        //     .0;
+    pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
+        let rm = mask(depth) & self.select_right_mask;
 
-        // if depth < self.hasher.k_right {
-        //     return Some(rindex);
-        // }
-        // let lm = mask(depth - self.hasher.k_right) as u32;
+        let rindex = self.pools[i]
+            .words
+            .iter()
+            .zip(self.pools[j].words.iter())
+            .enumerate()
+            .find(|(_i, (ibits, jbits))| (**ibits & rm) == (**jbits & rm))?
+            .0;
 
-        // let lindex = self.pools[i]
-        //     .left
-        //     .iter()
-        //     .zip(self.pools[j].left.iter())
-        //     .enumerate()
-        //     .find(|(_i, (ibits, jbits))| (**ibits & lm) == (**jbits & lm))?
-        //     .0;
+        if depth < self.hasher.k_right {
+            return Some(rindex);
+        }
+        let lm = (mask(depth - self.hasher.k_right) << self.hasher.k_right) & self.select_left_mask;
 
-        // Some(lindex * self.hasher.tensor_repetitions + rindex)
+        let lindex = self.pools[i]
+            .words
+            .iter()
+            .zip(self.pools[j].words.iter())
+            .enumerate()
+            .find(|(_i, (ibits, jbits))| (**ibits & lm) == (**jbits & lm))?
+            .0;
+
+        let idx = lindex * self.hasher.tensor_repetitions + rindex;
+        if idx < self.hasher.repetitions {
+            Some(idx)
+        } else {
+            None
+        }
     }
 
     pub fn collision_probability(&self, i: usize, j: usize) -> f64 {
@@ -381,8 +399,9 @@ impl Hasher {
 
 #[cfg(test)]
 mod test {
-    use crate::distance::{dot, normalize};
-    use crate::lsh::HyperplaneLSH;
+    use crate::distance::*;
+    use crate::embedding::*;
+    use crate::lsh::*;
 
     #[test]
     fn test_probability() {
@@ -506,6 +525,38 @@ mod test {
                     expected_prob,
                     prob
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn test_first_collision() {
+        let w = 300;
+        let ts = crate::load::loadts("data/ECG.csv")
+            .expect("problem loading data")
+            .into_iter()
+            .take(500)
+            .collect::<Vec<f64>>();
+        let ts = crate::WindowedTimeseries::new(ts, w);
+        let sf = scaling_factor(&ts, zeucl, 0.01);
+
+        let k = 32;
+        let repetitions = 200;
+
+        let hasher = Hasher::new(k, repetitions, Embedder::new(ts.w, ts.w, sf, 1245), 1245);
+        let arena = bumpalo::Bump::new();
+        let pools = HashCollection::from_ts(&ts, &hasher, &arena);
+
+        for &depth in &[32usize, 20, 10] {
+            println!("depth {}", depth);
+            for i in 0..ts.num_subsequences() {
+                for j in 0..ts.num_subsequences() {
+                    // println!("i={} j={}", i, j);
+                    assert_eq!(
+                        pools.first_collision(i, j, depth),
+                        pools.first_collision_baseline(i, j, depth)
+                    );
+                }
             }
         }
     }
