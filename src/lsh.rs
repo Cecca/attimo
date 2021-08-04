@@ -532,11 +532,7 @@ mod test {
     #[test]
     fn test_first_collision() {
         let w = 300;
-        let ts = crate::load::loadts("data/ECG.csv")
-            .expect("problem loading data")
-            .into_iter()
-            .take(500)
-            .collect::<Vec<f64>>();
+        let ts = crate::load::loadts("data/ECG.csv", Some(500)).expect("problem loading data");
         let ts = crate::WindowedTimeseries::new(ts, w);
         let sf = scaling_factor(&ts, zeucl, 0.01);
 

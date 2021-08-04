@@ -20,7 +20,7 @@ fn main() -> Result<()> {
     let path = std::env::args().nth(1).context("missing path to dataset")?;
     let k = std::env::args().nth(2).context("missing k")?.parse::<usize>().context("parsing k")?;
     let w = 300;
-    let ts: Vec<f64> = loadts(path)?.into_iter().take(10000).collect();
+    let ts: Vec<f64> = loadts(path, Some(10000))?;
     let ts = WindowedTimeseries::new(ts, w);
     let amp = approx_mp(&ts, k, 200, 0.001, 1234);
     let amp: Vec<f64> = amp.into_iter().map(|pair| pair.0).collect();
