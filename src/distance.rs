@@ -36,6 +36,7 @@ pub fn zeucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
 }
 
 pub fn dot_slow(a: &[f64], b: &[f64]) -> f64 {
+    assert_eq!(a.len(), b.len());
     let mut s = 0.0;
     for (&x, &y) in a.iter().zip(b.iter()) {
         s += x * y;

@@ -50,7 +50,9 @@ pub fn approx_mp(
             ProgressStyle::default_bar()
                 .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
         );
+        // println!("==== depth {}", depth);
         for rep in 0..repetitions {
+            // println!("----");
             pbar.set_message(format!(
                 "depth {}, active {}",
                 depth,
@@ -136,8 +138,7 @@ impl Debug for Stats {
             let median = buckets[buckets.len()/2];
             let min = buckets[0];
             let max = buckets[buckets.len()-1];
-            let mean = buckets.iter().sum::<usize>() as f64 / buckets.len() as f64;
-            (*depth, format!("bucket size at depth {}: min={} avg={} median={} max={}", depth, min, mean, median, max))
+            (*depth, format!("bucket size at depth {}: min={} median={} max={}", depth, min, median, max))
         }).collect();
         formatted.sort();
         formatted.reverse();
