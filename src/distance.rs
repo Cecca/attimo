@@ -1,5 +1,14 @@
 use crate::types::*;
 
+pub fn euclidean(a: &[f64], b: &[f64]) -> f64 {
+    let mut s = 0.0;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        let d = x - y;
+        s += d * d;
+    }
+    s.sqrt()
+}
+
 pub fn eucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     let mut s = 0.0;
     for (&x, &y) in ts.subsequence(i).iter().zip(ts.subsequence(j).iter()) {
@@ -91,3 +100,13 @@ fn test_zeucl() {
         }
     }
 }
+
+pub fn normalize(x: &[f64]) -> Vec<f64> {
+    let norm = crate::distance::norm(x);
+    let mut y = vec![0.0; x.len()];
+    for (i, xi) in x.iter().enumerate() {
+        y[i] = xi / norm;
+    }
+    y
+}
+

@@ -15,6 +15,28 @@ pub struct TensorPool<'arena> {
     right: Vec<u32, &'arena Bump>,
 }
 
+impl<'arena> TensorPool<'arena> {
+    fn from_words<I: IntoIterator<Item = u64>>(
+        words: I,
+        arena: &'arena Bump,
+        reps: usize,
+        k_right: usize,
+    ) -> Self {
+        let mask_right = mask(k_right);
+        let mut words_left = Vec::with_capacity_in(reps, arena);
+        let mut words_right = Vec::with_capacity_in(reps, arena);
+
+        for word in words.into_iter() {
+            words_left.push((word >> k_right) as u32);
+            words_right.push((word & mask_right) as u32);
+        }
+        TensorPool {
+            left: words_left,
+            right: words_right,
+        }
+    }
+}
+
 pub struct HashCollection<'hasher, 'arena> {
     hasher: &'hasher Hasher,
     pools: Vec<TensorPool<'arena>, &'arena Bump>,
@@ -30,31 +52,36 @@ impl<'hasher, 'arena> HashCollection<'hasher, 'arena> {
     }
 
     pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
-        // dbg!(depth);
-        let rm = mask(depth) as u32;
+        let m = mask(depth);
+        (0..self.hasher.repetitions).filter(|&rep| {
+            let hi = self.hash_value(i, rep) & m;
+            let hj = self.hash_value(j, rep) & m;
+            hi == hj
+        }).next()
+        // let rm = mask(depth) as u32;
 
-        let rindex = 
-            self.pools[i]
-                .right
-                .iter()
-                .zip(self.pools[j].right.iter())
-                .enumerate()
-                .find(|(_i, (ibits, jbits))| (**ibits & rm) == (**jbits & rm))?.0;
+        // let rindex = self.pools[i]
+        //     .right
+        //     .iter()
+        //     .zip(self.pools[j].right.iter())
+        //     .enumerate()
+        //     .find(|(_i, (ibits, jbits))| (**ibits & rm) == (**jbits & rm))?
+        //     .0;
 
-        if depth < self.hasher.k_right {
-            return Some(rindex);
-        }
-        let lm = mask(depth - self.hasher.k_right) as u32;
+        // if depth < self.hasher.k_right {
+        //     return Some(rindex);
+        // }
+        // let lm = mask(depth - self.hasher.k_right) as u32;
 
-        let lindex = 
-            self.pools[i]
-                .left
-                .iter()
-                .zip(self.pools[j].left.iter())
-                .enumerate()
-                .find(|(_i, (ibits, jbits))| (**ibits & lm) == (**jbits & lm))?.0;
-            
-        Some(lindex * self.hasher.tensor_repetitions + rindex)
+        // let lindex = self.pools[i]
+        //     .left
+        //     .iter()
+        //     .zip(self.pools[j].left.iter())
+        //     .enumerate()
+        //     .find(|(_i, (ibits, jbits))| (**ibits & lm) == (**jbits & lm))?
+        //     .0;
+
+        // Some(lindex * self.hasher.tensor_repetitions + rindex)
     }
 
     pub fn collision_probability(&self, i: usize, j: usize) -> f64 {
@@ -143,6 +170,7 @@ impl<'hashes> Iterator for BucketIterator<'hashes> {
         while self.idx < self.hashes.len() && (self.hashes[self.idx].0 & self.mask) == current {
             self.idx += 1;
         }
+        // println!("Bucket starting with {:08b}, width {}", current, self.idx - start);
         Some((start..self.idx, &self.hashes[start..self.idx]))
     }
 }
@@ -169,12 +197,10 @@ impl HyperplaneLSH {
             planes.push(ks);
         }
 
-        Self {
-            planes,
-        }
+        Self { planes }
     }
 
-    fn hash<'hasher>(&'hasher self, v: &'hasher [f64]) -> impl Iterator<Item=u64> + 'hasher {
+    fn hash<'hasher>(&'hasher self, v: &'hasher [f64]) -> impl Iterator<Item = u64> + 'hasher {
         self.planes.iter().map(move |rep_planes| {
             let mut word = 0u64;
             for plane in rep_planes.iter() {
@@ -244,19 +270,13 @@ impl Hasher {
                 ebuf.resize(self.embedder.dim_out, 0.0);
                 self.embedder.embed(&zbuf.borrow(), &mut ebuf);
 
-                // and finally do the hashing itself
-                let mask_right = mask(self.k_right);
-                let mut words_left = Vec::with_capacity_in(self.tensor_repetitions, arena);
-                let mut words_right = Vec::with_capacity_in(self.tensor_repetitions, arena);
-
-                for word in self.hyperplanes.hash(&ebuf) {
-                    words_left.push((word >> self.k_right) as u32);
-                    words_right.push((word & mask_right) as u32);
-                }
-                TensorPool {
-                    left: words_left,
-                    right: words_right,
-                }
+                // and finally do the hashing itself and construct the tensor pool
+                TensorPool::from_words(
+                    self.hyperplanes.hash(&ebuf),
+                    arena,
+                    self.tensor_repetitions,
+                    self.k_right,
+                )
             })
         })
     }
@@ -264,22 +284,14 @@ impl Hasher {
 
 #[cfg(test)]
 mod test {
-    use crate::lsh::HyperplaneLSH;
-
-    fn normalize(x: &[f64]) -> Vec<f64> {
-        let norm = crate::distance::norm(x);
-        let mut y = vec![0.0; x.len()];
-        for (i, xi) in x.iter().enumerate() {
-            y[i] = xi / norm;
-        }
-        y
-    }
+    use crate::lsh::{HyperplaneLSH, TensorPool, mask};
+    use crate::distance::normalize;
 
     #[test]
     fn test_probability() {
         use rand::prelude::*;
-        use rand_xoshiro::Xoroshiro128PlusPlus;
         use rand_distr::StandardNormal;
+        use rand_xoshiro::Xoroshiro128PlusPlus;
         let mut rng = Xoroshiro128PlusPlus::seed_from_u64(3462);
         let dim = 2;
         let repetitions = 10000;
@@ -292,7 +304,12 @@ mod test {
 
         assert_eq!(
             1.0,
-            hasher.hash(&a).zip(hasher.hash(&a)).filter(|(ha, hb)| ha == hb).count() as f64 / repetitions as f64
+            hasher
+                .hash(&a)
+                .zip(hasher.hash(&a))
+                .filter(|(ha, hb)| ha == hb)
+                .count() as f64
+                / repetitions as f64
         );
 
         let mut angles = Vec::new();
@@ -304,13 +321,23 @@ mod test {
 
             let angle = dbg!(crate::distance::dot(&a, &b).acos());
 
-            let prob = hasher.hash(&a).zip(hasher.hash(&b)).filter(|(ha, hb)| ha == hb).count() as f64 / repetitions as f64;
-            let expected_prob = 1.0 - angle/(std::f64::consts::PI); 
+            let prob = hasher
+                .hash(&a)
+                .zip(hasher.hash(&b))
+                .filter(|(ha, hb)| ha == hb)
+                .count() as f64
+                / repetitions as f64;
+            let expected_prob = 1.0 - angle / (std::f64::consts::PI);
 
             angles.push(angle);
             probs.push(prob);
             expected.push(expected_prob);
-            assert!((expected_prob - prob).abs() <= 0.01, "discrepancy in probabilities:\n\texpected: {}\n\tactual:   {}", expected_prob, prob);
+            assert!(
+                (expected_prob - prob).abs() <= 0.01,
+                "discrepancy in probabilities:\n\texpected: {}\n\tactual:   {}",
+                expected_prob,
+                prob
+            );
         }
 
         // let exp_trace = Scatter::new(angles.clone(), expected)
@@ -323,6 +350,13 @@ mod test {
         // p.add_trace(exp_trace);
         // p.add_trace(actual_trace);
         // p.show();
-            
+    }
+
+    #[test]
+    fn test_mask() {
+        for i in 0..64 {
+            let m = mask(i);
+            assert_eq!(m.count_ones(), i as u32);
+        }
     }
 }

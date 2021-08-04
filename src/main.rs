@@ -1,26 +1,27 @@
 #![feature(allocator_api)]
 
+mod approx_mp;
 mod distance;
 mod embedding;
 mod load;
 mod lsh;
 mod types;
-mod approx_mp;
 
 use anyhow::{Context, Result};
-use load::*;
-use plotly::common::Mode;
-use plotly::{Plot, Scatter};
-use types::*;
 use approx_mp::*;
-use distance::*;
-use lsh::*;
-use embedding::*;
 use bumpalo::Bump;
+use distance::*;
+use embedding::*;
+use load::*;
+use lsh::*;
+use plotly::common::Mode;
+use plotly::layout::LayoutGrid;
+use plotly::{Layout, Plot, Scatter};
+use types::*;
 
 fn main() -> Result<()> {
     let path = std::env::args().nth(1).context("missing path to dataset")?;
-    let w = 100;
+    let w = 300;
     let ts: Vec<f64> = loadts(path)?.into_iter().take(10000).collect();
     let ts = WindowedTimeseries::new(ts, w);
     let amp = approx_mp(&ts, 32, 200, 0.0001, 1234);
@@ -39,11 +40,16 @@ fn main() -> Result<()> {
     // let dists: Vec<f64> = data.iter().map(|p| p.0).collect();
     // let probs: Vec<f64> = data.iter().map(|p| p.1).collect();
 
-    let lines = Scatter::new(0..ts.num_subsequences(), amp)
+    let ts_lines = Scatter::new(0..ts.data.len(), ts.data.clone())
+        .name("time series")
+        .mode(Mode::Lines);
+    let amp_lines = Scatter::new(0..ts.num_subsequences(), amp)
         .name("approximate matrix profile")
-        .mode(Mode::LinesMarkers);
+        .mode(Mode::Lines);
     let mut plot = Plot::new();
-    plot.add_trace(lines);
+    plot.set_layout(Layout::new().grid(LayoutGrid::new().rows(2)));
+    plot.add_trace(ts_lines);
+    plot.add_trace(amp_lines);
     plot.show();
 
     Ok(())

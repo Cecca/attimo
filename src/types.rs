@@ -1,5 +1,5 @@
 pub struct WindowedTimeseries {
-    data: Vec<f64>,
+    pub data: Vec<f64>,
     pub w: usize,
     rolling_avg: Vec<f64>,
     rolling_sd: Vec<f64>,
