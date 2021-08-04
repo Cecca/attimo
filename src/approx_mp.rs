@@ -67,7 +67,7 @@ pub fn approx_mp(
                         for (offset, &(_, cand_idx)) in bucket.iter().enumerate() {
                             // FIXME: Maybe we can exclude trivial matches already here?
                             let hash_idx = hash_range.start + offset;
-                            if cand_idx != ref_idx //&& !already_checked.contains(&hash_idx)
+                            if cand_idx != ref_idx && !already_checked.contains(&hash_idx)
                             {
                                 // FIXME: Fix issues with first colliding repetition
                                 let first_colliding_repetition: usize = pools
