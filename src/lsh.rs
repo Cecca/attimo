@@ -1,4 +1,4 @@
-use std::{cell::RefCell, cmp::Ordering, fmt::Debug, hash::Hash, ops::{BitAnd, BitOr, BitXor, Index, IndexMut, Not, Range}};
+use std::{cell::RefCell, cmp::Ordering, fmt::Debug, hash::Hash, ops::{BitAnd, BitOr, BitXor, Index, IndexMut, Not, Range, Shl, Shr}};
 
 use bumpalo::Bump;
 use rand::prelude::*;
@@ -82,6 +82,22 @@ impl Not for HashValue {
     }
 }
 
+impl Shr<usize> for HashValue {
+    type Output = Self;
+
+    fn shr(self, shift: usize) -> Self::Output {
+        Self(self.0 >> shift)
+    }
+}
+
+impl Shl<usize> for HashValue {
+    type Output = Self;
+
+    fn shl(self, shift: usize) -> Self::Output {
+        Self(self.0 << shift)
+    }
+}
+
 pub fn mask(bits: usize) -> HashValue {
     let mut m = 0;
     for _ in 0..bits {
@@ -89,7 +105,6 @@ pub fn mask(bits: usize) -> HashValue {
     }
     HashValue(m)
 }
-
 
 pub struct TensorPool<'arena> {
     words: Vec<HashValue, &'arena Bump>,
@@ -100,7 +115,6 @@ impl<'arena> TensorPool<'arena> {
         input_words: I,
         arena: &'arena Bump,
         reps: usize,
-        k_right: usize,
     ) -> Self {
         let mut words = Vec::with_capacity_in(reps, arena);
         for word in input_words.into_iter() {
@@ -113,6 +127,8 @@ impl<'arena> TensorPool<'arena> {
 pub struct HashCollection<'hasher, 'arena> {
     hasher: &'hasher Hasher,
     pools: Vec<TensorPool<'arena>, &'arena Bump>,
+    select_left_mask: HashValue,
+    select_right_mask: HashValue,
 }
 
 impl<'hasher, 'arena> HashCollection<'hasher, 'arena> {
@@ -121,10 +137,13 @@ impl<'hasher, 'arena> HashCollection<'hasher, 'arena> {
         for i in 0..ts.num_subsequences() {
             pools.push(hasher.hash(ts, i, arena));
         }
-        Self { hasher, pools }
+        let select_left_mask = !mask(hasher.k_right);
+        let select_right_mask = mask(hasher.k_right);
+        Self { hasher, pools, select_left_mask, select_right_mask }
     }
 
     pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
+        // FIXME: make this fast again
         let m = mask(depth);
         (0..self.hasher.repetitions)
             .filter(|&rep| {
@@ -162,12 +181,6 @@ impl<'hasher, 'arena> HashCollection<'hasher, 'arena> {
     pub fn collision_probability(&self, i: usize, j: usize) -> f64 {
         let m = mask(self.hasher.k);
         let n_collisions = count_collisions(&self.pools[i].words, &self.pools[j].words, m);
-        // let m_left = mask(self.hasher.k_left);
-        // let m_right = mask(self.hasher.k_right);
-
-        // n_collisions += count_collisions(&self.pools[i].left, &self.pools[j].left, m_left as u32);
-        // n_collisions +=
-        //     count_collisions(&self.pools[i].right, &self.pools[j].right, m_right as u32);
 
         n_collisions as f64
             / ((self.hasher.k_left + self.hasher.k_right) * self.hasher.tensor_repetitions) as f64
@@ -178,14 +191,12 @@ impl<'hasher, 'arena> HashCollection<'hasher, 'arena> {
     }
 
     fn hash_value(&self, i: usize, repetition: usize) -> HashValue {
-        // let l_idx = repetition / self.hasher.tensor_repetitions;
-        // let r_idx = repetition % self.hasher.tensor_repetitions;
-        // let pool = &self.pools[i];
-        // let mut w = pool.left[l_idx] as u64;
-        // w = w << self.hasher.k_right;
-        // w = w | (pool.right[r_idx] as u64);
-        // w
-        self.pools[i].words[repetition]
+        let l_idx = repetition / self.hasher.tensor_repetitions;
+        let r_idx = repetition % self.hasher.tensor_repetitions;
+        let pool = &self.pools[i];
+        let l = pool.words[l_idx] & self.select_left_mask;
+        let r = pool.words[r_idx] & self.select_right_mask;
+        l | r
     }
 }
 
@@ -289,7 +300,10 @@ impl HyperplaneLSH {
         &self.rands[idx..idx + self.dim]
     }
 
-    fn hash<'hasher>(&'hasher self, v: &'hasher [f64]) -> impl Iterator<Item = HashValue> + 'hasher {
+    fn hash<'hasher>(
+        &'hasher self,
+        v: &'hasher [f64],
+    ) -> impl Iterator<Item = HashValue> + 'hasher {
         let mut repetition = 0;
         std::iter::from_fn(move || {
             if repetition >= self.repetitions {
@@ -325,8 +339,7 @@ impl Hasher {
         let k_left = k / 2;
         let k_right = (k as f64 / 2.0).ceil() as usize;
         let tensor_repetitions = (repetitions as f64).sqrt().ceil() as usize;
-        // FIXME: Use tensor_repetitions
-        let hyperplanes = HyperplaneLSH::new(embedder.dim_in, k, repetitions, seed);
+        let hyperplanes = HyperplaneLSH::new(embedder.dim_in, k, tensor_repetitions, seed);
 
         Self {
             k,
@@ -360,13 +373,7 @@ impl Hasher {
                 self.embedder.embed(&zbuf.borrow(), &mut ebuf);
 
                 // and finally do the hashing itself and construct the tensor pool
-                TensorPool::from_words(
-                    self.hyperplanes.hash(&ebuf),
-                    arena,
-                    // FIXME: Use self.tensor_repetitions
-                    self.repetitions,
-                    self.k_right,
-                )
+                TensorPool::from_words(self.hyperplanes.hash(&ebuf), arena, self.tensor_repetitions)
             })
         })
     }
@@ -375,7 +382,7 @@ impl Hasher {
 #[cfg(test)]
 mod test {
     use crate::distance::{dot, normalize};
-    use crate::lsh::{mask, HyperplaneLSH};
+    use crate::lsh::HyperplaneLSH;
 
     #[test]
     fn test_probability() {
@@ -502,5 +509,4 @@ mod test {
             }
         }
     }
-
 }

@@ -26,7 +26,7 @@ fn main() -> Result<()> {
     let w = 300;
     let ts: Vec<f64> = loadts(path)?.into_iter().take(10000).collect();
     let ts = WindowedTimeseries::new(ts, w);
-    let amp = approx_mp(&ts, k, 200, 0.0001, 1234);
+    let amp = approx_mp(&ts, k, 200, 0.001, 1234);
     let amp: Vec<f64> = amp.into_iter().map(|pair| pair.0).collect();
 
     // let dp = ts.distance_profile(0, zeucl);
@@ -52,7 +52,7 @@ fn main() -> Result<()> {
     plot.set_layout(Layout::new().grid(LayoutGrid::new().rows(2)));
     plot.add_trace(ts_lines);
     plot.add_trace(amp_lines);
-    // plot.show();
+    plot.show();
 
     Ok(())
 }

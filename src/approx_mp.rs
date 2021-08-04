@@ -6,7 +6,6 @@ use crate::embedding::*;
 use crate::lsh::*;
 use crate::types::*;
 use indicatif::ProgressBar;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -44,6 +43,9 @@ pub fn approx_mp(
 
     // for decreasing depths
     for depth in (0..=k).rev() {
+        if active.iter().filter(|a| **a).count() == 0 {
+            break;
+        }
         let pbar = ProgressBar::new(repetitions as u64);
         pbar.set_draw_rate(4);
         pbar.set_style(
@@ -51,6 +53,7 @@ pub fn approx_mp(
                 .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
         );
         // println!("==== depth {}", depth);
+
         for rep in 0..repetitions {
             // println!("----");
             pbar.set_message(format!(
@@ -67,20 +70,19 @@ pub fn approx_mp(
                         for (offset, &(_, cand_idx)) in bucket.iter().enumerate() {
                             // FIXME: Maybe we can exclude trivial matches already here?
                             let hash_idx = hash_range.start + offset;
-                            if cand_idx != ref_idx && !already_checked.contains(&hash_idx)
-                            {
+                            if cand_idx != ref_idx && !already_checked.contains(&hash_idx) {
                                 // FIXME: Fix issues with first colliding repetition
                                 let first_colliding_repetition: usize = pools
                                     .first_collision(ref_idx, cand_idx, depth)
                                     .expect("hashes must collide in buckets");
-                                // if first_colliding_repetition == rep {
+                                if first_colliding_repetition == rep {
                                     let d = zeucl(ts, ref_idx, cand_idx);
                                     if nearest_neighbor[ref_idx].is_none()
                                         || d < nearest_neighbor[ref_idx].unwrap().0
                                     {
                                         nearest_neighbor[ref_idx] = Some((d, cand_idx));
                                     }
-                                // }
+                                }
                             }
                         }
 
@@ -97,7 +99,7 @@ pub fn approx_mp(
                 }
             }
             pbar.inc(1);
-            if depth==0 {
+            if depth == 0 {
                 break;
             }
         }
@@ -112,34 +114,47 @@ pub fn approx_mp(
 }
 
 struct Stats {
-    bucket_size: HashMap<usize, Vec<usize>>
+    bucket_size: HashMap<usize, Vec<usize>>,
 }
 
 impl Stats {
     fn new() -> Self {
         Self {
-            bucket_size: HashMap::new()
+            bucket_size: HashMap::new(),
         }
     }
 
     fn push_bucket_size(&mut self, depth: usize, size: usize) {
-        self.bucket_size.entry(depth).or_insert_with(Vec::new).push(size);
+        self.bucket_size
+            .entry(depth)
+            .or_insert_with(Vec::new)
+            .push(size);
     }
 }
 
 impl Debug for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut formatted: Vec<(usize, String)> = self.bucket_size.iter().map(|(depth, buckets)| {
-            if buckets.is_empty() {
-                return (*depth, format!("no buckets at depth {}", depth));
-            }
-            let mut buckets = buckets.clone();
-            buckets.sort();
-            let median = buckets[buckets.len()/2];
-            let min = buckets[0];
-            let max = buckets[buckets.len()-1];
-            (*depth, format!("bucket size at depth {}: min={} median={} max={}", depth, min, median, max))
-        }).collect();
+        let mut formatted: Vec<(usize, String)> = self
+            .bucket_size
+            .iter()
+            .map(|(depth, buckets)| {
+                if buckets.is_empty() {
+                    return (*depth, format!("no buckets at depth {}", depth));
+                }
+                let mut buckets = buckets.clone();
+                buckets.sort();
+                let median = buckets[buckets.len() / 2];
+                let min = buckets[0];
+                let max = buckets[buckets.len() - 1];
+                (
+                    *depth,
+                    format!(
+                        "bucket size at depth {}: min={} median={} max={}",
+                        depth, min, median, max
+                    ),
+                )
+            })
+            .collect();
         formatted.sort();
         formatted.reverse();
         for (_, s) in formatted {
@@ -148,4 +163,3 @@ impl Debug for Stats {
         Ok(())
     }
 }
-
