@@ -5,8 +5,6 @@ use crate::types::*;
 use bumpalo::Bump;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
-use std::collections::HashMap;
-use std::fmt::Debug;
 use std::ops::Range;
 use std::time::Instant;
 
@@ -71,7 +69,6 @@ pub fn approx_mp(
                 active.iter().filter(|a| **a).count()
             ));
             for (hash_range, bucket) in hashes.buckets(depth, rep) {
-                // stats.push_bucket_size(depth, bucket.len());
                 for (a_offset, &(_, a_idx)) in bucket.iter().enumerate() {
                     if active[a_idx] {
                         let a_already_checked = &bounds[rep][a_idx];
@@ -145,55 +142,4 @@ pub fn approx_mp(
         .iter()
         .map(|opt| opt.expect("missing nearest neighbor"))
         .collect()
-}
-
-struct Stats {
-    bucket_size: HashMap<usize, Vec<usize>>,
-}
-
-impl Stats {
-    fn new() -> Self {
-        Self {
-            bucket_size: HashMap::new(),
-        }
-    }
-
-    fn push_bucket_size(&mut self, depth: usize, size: usize) {
-        self.bucket_size
-            .entry(depth)
-            .or_insert_with(Vec::new)
-            .push(size);
-    }
-}
-
-impl Debug for Stats {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut formatted: Vec<(usize, String)> = self
-            .bucket_size
-            .iter()
-            .map(|(depth, buckets)| {
-                if buckets.is_empty() {
-                    return (*depth, format!("no buckets at depth {}", depth));
-                }
-                let mut buckets = buckets.clone();
-                buckets.sort();
-                let median = buckets[buckets.len() / 2];
-                let min = buckets[0];
-                let max = buckets[buckets.len() - 1];
-                (
-                    *depth,
-                    format!(
-                        "bucket size at depth {}: min={} median={} max={}",
-                        depth, min, median, max
-                    ),
-                )
-            })
-            .collect();
-        formatted.sort();
-        formatted.reverse();
-        for (_, s) in formatted {
-            writeln!(f, "{}", s)?
-        }
-        Ok(())
-    }
 }
