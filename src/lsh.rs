@@ -1,16 +1,11 @@
-use std::{
-    cell::RefCell,
-    cmp::Ordering,
-    fmt::Debug,
-    ops::{BitAnd, BitOr, BitXor, Not, Range, Shl, Shr},
-};
+use std::{cell::RefCell, cmp::Ordering, collections::HashMap, fmt::Debug, ops::{BitAnd, BitOr, BitXor, Not, Range, Shl, Shr}};
 
 use bumpalo::Bump;
 use rand::prelude::*;
 use rand_distr::Normal;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
-use crate::{distance::*, embedding::Embedder, types::WindowedTimeseries};
+use crate::{distance::*, embedding::Embedder, types::{BytesSize, PrettyBytes, WindowedTimeseries}};
 
 /// Wrapper structx for 64-bits words, which sort lexicographically from the lowest significant bit
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -280,6 +275,13 @@ impl<'hashes> Iterator for BucketIterator<'hashes> {
         }
         // println!("boundary {:?} (mask {:?}) size {}", current, self.mask, self.idx - start);
         Some((start..self.idx, &self.hashes[start..self.idx]))
+    }
+}
+
+impl BytesSize for HashMatrix {
+    fn bytes_size(&self) -> PrettyBytes {
+        use std::mem::size_of;
+        PrettyBytes(size_of::<(HashValue, usize)>() * self.hashes.len() * self.hashes[0].len())
     }
 }
 

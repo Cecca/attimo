@@ -1,3 +1,5 @@
+use std::{fmt::Display, str::Bytes};
+
 use crate::distance::{dot, norm};
 
 pub struct WindowedTimeseries {
@@ -118,3 +120,41 @@ fn test_meanstd() {
         assert_eq!(sd, actual_sd);
     }
 }
+
+
+pub struct PrettyBytes(pub usize);
+
+impl Display for PrettyBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0 >= 1024*1024*1024 {
+            write!(f, "{} Gbytes", self.0/(1024*1024*1024))
+        } else if self.0 >= 1024*1024 {
+            write!(f, "{} Mbytes", self.0/(1024*1024))
+        } else if self.0 >= 1024 {
+            write!(f, "{} Kbytes", self.0/1024)
+        } else {
+            write!(f, "{} bytes", self.0)
+        }
+    }
+}
+
+pub trait BytesSize {
+    fn bytes_size(&self) -> PrettyBytes;
+}
+
+impl BytesSize for WindowedTimeseries {
+    fn bytes_size(&self) -> PrettyBytes {
+        PrettyBytes(8*(self.data.len() + (self.num_subsequences()*3)))
+    }
+}
+
+impl<T> BytesSize for Vec<T> {
+    fn bytes_size(&self) -> PrettyBytes {
+        if self.is_empty() {
+            PrettyBytes(0)
+        } else {
+            PrettyBytes(self.len() * std::mem::size_of::<T>())
+        }
+    }
+}
+

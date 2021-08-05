@@ -71,6 +71,7 @@ fn main() -> Result<()> {
     let w = config.window;
     let ts: Vec<f64> = loadts(path, config.prefix)?;
     let ts = WindowedTimeseries::new(ts, w);
+    println!("Loaded time series, taking {}", ts.bytes_size());
     let amp = approx_mp(&ts, config.k, config.repetitions, config.delta, config.seed);
     let amp: Vec<f64> = amp.into_iter().map(|pair| pair.0).collect();
 

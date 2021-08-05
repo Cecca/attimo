@@ -1,11 +1,10 @@
-use bumpalo::Bump;
-use indicatif::ProgressStyle;
-
 use crate::distance::*;
 use crate::embedding::*;
 use crate::lsh::*;
 use crate::types::*;
+use bumpalo::Bump;
 use indicatif::ProgressBar;
+use indicatif::ProgressStyle;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -26,9 +25,17 @@ pub fn approx_mp(
     let hasher = Hasher::new(k, repetitions, Embedder::new(ts.w, ts.w, 1.0, seed), seed);
     let arena = Bump::new();
     let pools = HashCollection::from_ts(&ts, &hasher, &arena);
-    println!("[{:?}] Computed hash pools", start.elapsed());
+    println!(
+        "[{:?}] Computed hash pools, taking {}",
+        start.elapsed(),
+        PrettyBytes(arena.allocated_bytes())
+    );
     let hashes = pools.get_hash_matrix();
-    println!("[{:?}] Computed hash matrix", start.elapsed());
+    println!(
+        "[{:?}] Computed hash matrix, taking {}",
+        start.elapsed(),
+        hashes.bytes_size()
+    );
 
     // Define upper and lower bounds, to avoid repeating already-done comparisons
     // We have a range of already examined hash indices for each element and repetition
@@ -43,7 +50,7 @@ pub fn approx_mp(
     // of the nearest neigbor itself.
     let mut nearest_neighbor: Vec<Option<(f64, usize)>> = vec![None; ts.num_subsequences()];
 
-    // let mut stats = Stats::new();
+    let mut cnt_dist = 0;
 
     // for decreasing depths
     for depth in (0..=k).rev() {
@@ -85,9 +92,10 @@ pub fn approx_mp(
                                         .expect("hashes must collide in buckets");
                                     if first_colliding_repetition == rep {
                                         // After computing the distance between the two subsequences,
-                                        // we set `b` as the nearest neigbor of `a`, if it is closer 
+                                        // we set `b` as the nearest neigbor of `a`, if it is closer
                                         // than the previous candidate.
                                         let d = zeucl(ts, a_idx, b_idx);
+                                        cnt_dist += 1;
                                         if nearest_neighbor[a_idx].is_none()
                                             || d < nearest_neighbor[a_idx].unwrap().0
                                         {
@@ -104,8 +112,8 @@ pub fn approx_mp(
                             }
                         }
 
-                        // Mark the bucket as seen for the ref_idx subsequence. All the points in the 
-                        // bucket go through here, irrespective of how they were processed in 
+                        // Mark the bucket as seen for the ref_idx subsequence. All the points in the
+                        // bucket go through here, irrespective of how they were processed in
                         // the loop above.
                         bounds[rep][a_idx] = hash_range.clone();
                         // Check the stopping condition, and if possible deactivate the subsequence
@@ -125,8 +133,14 @@ pub fn approx_mp(
         }
         pbar.finish();
     }
-    println!("[{:?}] done!", start.elapsed());
-    // println!("Stats: \n{:?}", stats);
+    let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
+    println!(
+        "[{:?}] done! Computed {}/{} distances ({:.2}%)",
+        start.elapsed(),
+        cnt_dist,
+        total_distances,
+        (cnt_dist as f64 / total_distances as f64) * 100.0
+    );
     nearest_neighbor
         .iter()
         .map(|opt| opt.expect("missing nearest neighbor"))
