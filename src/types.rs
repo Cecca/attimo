@@ -1,14 +1,19 @@
+use crate::distance::{dot, norm};
+
 pub struct WindowedTimeseries {
     pub data: Vec<f64>,
     pub w: usize,
     rolling_avg: Vec<f64>,
     rolling_sd: Vec<f64>,
+    /// The squared norm of the z-normalized vector, to speed up the computation of the euclidean distance
+    squared_norms: Vec<f64>,
 }
 
 impl WindowedTimeseries {
     pub fn new(ts: Vec<f64>, w: usize) -> Self {
         let mut rolling_avg = Vec::with_capacity(ts.len() - w);
         let mut rolling_sd = Vec::with_capacity(ts.len() - w);
+        let mut squared_norms = Vec::with_capacity(ts.len() - w);
 
         // let mut avg: f64 = ts[0..w].iter().sum::<f64>() / w as f64;
         // let mut var: f64 = (ts[0..w].iter().map(|x| x*x).sum::<f64>() - avg*avg) / w as f64;
@@ -27,11 +32,17 @@ impl WindowedTimeseries {
         //     assert!(!var.is_nan() && var.is_finite());
         //     rolling_sd.push(var.sqrt());
         // }
+        let mut buffer = vec![0.0; w];
         for i in 0..ts.len() - w {
             let mean = ts[i..i+w].iter().sum::<f64>() / w as f64;
             let sd = ((ts[i..i+w].iter().map(|x| x*x).sum::<f64>() - mean*mean) / w as f64).sqrt();
+            buffer.fill(0.0);
+            for (i, x) in ts[i..i+w].iter().enumerate() {
+                buffer[i] = (x - mean) / sd;
+            }
             rolling_avg.push(mean);
             rolling_sd.push(sd);
+            squared_norms.push(dot(&buffer, &buffer));
         }
 
         WindowedTimeseries {
@@ -39,6 +50,7 @@ impl WindowedTimeseries {
             w,
             rolling_avg,
             rolling_sd,
+            squared_norms,
         }
     }
 
@@ -61,6 +73,10 @@ impl WindowedTimeseries {
 
     pub fn sd(&self, i: usize) -> f64 {
         self.rolling_sd[i]
+    }
+
+    pub fn squared_norm(&self, i: usize) -> f64 {
+        self.squared_norms[i]
     }
 
     pub fn num_subsequences(&self) -> usize {

@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crate::types::*;
 
 #[cfg(test)]
@@ -20,11 +22,27 @@ pub fn eucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     s.sqrt()
 }
 
+thread_local! {
+    static BUFFER_I: RefCell<Vec<f64>> = RefCell::new(Vec::new());
+    static BUFFER_J: RefCell<Vec<f64>> = RefCell::new(Vec::new());
+}
+
 pub fn zeucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
-    // let dotp = dot(ts.subsequence(i), ts.subsequence(j));
-    // let meanp = ts.w as f64 * ts.mean(i) * ts.mean(j);
-    // let sdp = (ts.w as f64 * ts.sd(i) * ts.sd(j));
-    // (2.0 * ts.w as f64 * ((dotp - meanp) / sdp)).sqrt()
+    if i == j {
+        return 0.0;
+    }
+    let dotp = zdot(
+        ts.subsequence(i),
+        ts.mean(i),
+        ts.sd(i),
+        ts.subsequence(j),
+        ts.mean(j),
+        ts.sd(j),
+    );
+    (ts.squared_norm(i) + ts.squared_norm(j) - 2.0 * dotp).sqrt()
+}
+
+pub fn zeucl_slow(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     let mut s = 0.0;
     let mi = ts.mean(i);
     let mj = ts.mean(j);
@@ -45,6 +63,30 @@ pub fn dot_slow(a: &[f64], b: &[f64]) -> f64 {
         s += x * y;
     }
     s
+}
+
+#[inline]
+pub fn zdot(a: &[f64], ma: f64, sda: f64, b: &[f64], mb: f64, sdb: f64) -> f64 {
+    use packed_simd::f64x8;
+    let ac = a.chunks_exact(8);
+    let bc = b.chunks_exact(8);
+    let rem = ac
+        .remainder()
+        .iter()
+        .zip(bc.remainder().iter())
+        .map(|(a, b)| (a - ma) / sda * (b - mb) / sdb)
+        .sum::<f64>() as f64;
+    let ma = f64x8::splat(ma);
+    let mb = f64x8::splat(mb);
+    let sda = f64x8::splat(sda);
+    let sdb = f64x8::splat(sdb);
+    let part = ac
+        .map(f64x8::from_slice_unaligned)
+        .zip(bc.map(f64x8::from_slice_unaligned))
+        .map(|(a, b)| (a - ma) / sda * (b - mb) / sdb)
+        .sum::<f64x8>()
+        .sum() as f64;
+    part + rem
 }
 
 #[inline]
@@ -93,14 +135,22 @@ fn test_zeucl() {
     };
 
     for i in 0..ts.num_subsequences() {
-        for j in 0..ts.num_subsequences() {
+        for j in i..ts.num_subsequences() {
+            dbg!((i, j));
             let mut za = Vec::new();
             let mut zb = Vec::new();
             ts.znormalized(i, &mut za);
             ts.znormalized(j, &mut zb);
             let expected = euclidean(&za, &zb);
+            let slow = zeucl_slow(&ts, i, j);
             let actual = zeucl(&ts, i, j);
-            assert_eq!(expected, actual);
+            assert_eq!(expected, slow);
+            assert!(
+                (expected - actual).abs() < 0.0001,
+                "distances are too different: \n\texpected={} \n\tactual={}",
+                expected,
+                actual
+            );
         }
     }
 }
@@ -114,4 +164,3 @@ pub fn normalize(x: &[f64]) -> Vec<f64> {
     }
     y
 }
-
