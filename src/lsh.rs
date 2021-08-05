@@ -1,6 +1,5 @@
 use std::{cell::RefCell, cmp::Ordering, collections::HashMap, fmt::Debug, ops::{BitAnd, BitOr, BitXor, Not, Range, Shl, Shr}};
 
-use bumpalo::Bump;
 use rand::prelude::*;
 use rand_distr::Normal;
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -106,17 +105,16 @@ pub fn mask(bits: usize) -> HashValue {
     HashValue(m)
 }
 
-pub struct TensorPool<'arena> {
-    words: Vec<HashValue, &'arena Bump>,
+pub struct TensorPool {
+    words: Vec<HashValue>,
 }
 
-impl<'arena> TensorPool<'arena> {
+impl TensorPool {
     fn from_words<I: IntoIterator<Item = HashValue>>(
         input_words: I,
-        arena: &'arena Bump,
         reps: usize,
     ) -> Self {
-        let mut words = Vec::with_capacity_in(reps, arena);
+        let mut words = Vec::with_capacity(reps);
         for word in input_words.into_iter() {
             words.push(word);
         }
@@ -124,18 +122,18 @@ impl<'arena> TensorPool<'arena> {
     }
 }
 
-pub struct HashCollection<'hasher, 'arena> {
+pub struct HashCollection<'hasher> {
     hasher: &'hasher Hasher,
-    pools: Vec<TensorPool<'arena>, &'arena Bump>,
+    pools: Vec<TensorPool>,
     select_left_mask: HashValue,
     select_right_mask: HashValue,
 }
 
-impl<'hasher, 'arena> HashCollection<'hasher, 'arena> {
-    pub fn from_ts(ts: &WindowedTimeseries, hasher: &'hasher Hasher, arena: &'arena Bump) -> Self {
-        let mut pools = Vec::with_capacity_in(ts.num_subsequences(), arena);
+impl<'hasher> HashCollection<'hasher> {
+    pub fn from_ts(ts: &WindowedTimeseries, hasher: &'hasher Hasher) -> Self {
+        let mut pools = Vec::with_capacity(ts.num_subsequences());
         for i in 0..ts.num_subsequences() {
-            pools.push(hasher.hash(ts, i, arena));
+            pools.push(hasher.hash(ts, i));
         }
         let select_left_mask = !mask(hasher.k_right);
         let select_right_mask = mask(hasher.k_right);
@@ -372,12 +370,11 @@ impl Hasher {
         }
     }
 
-    pub fn hash<'arena>(
+    pub fn hash(
         &self,
         ts: &WindowedTimeseries,
         i: usize,
-        arena: &'arena Bump,
-    ) -> TensorPool<'arena> {
+    ) -> TensorPool {
         assert!(ts.w == self.embedder.dim_in);
 
         ZNORM_BUFFER.with(|zbuf| {
@@ -393,7 +390,7 @@ impl Hasher {
                 self.embedder.embed(&zbuf.borrow(), &mut ebuf);
 
                 // and finally do the hashing itself and construct the tensor pool
-                TensorPool::from_words(self.hyperplanes.hash(&ebuf), arena, self.tensor_repetitions)
+                TensorPool::from_words(self.hyperplanes.hash(&ebuf), self.tensor_repetitions)
             })
         })
     }
@@ -542,8 +539,7 @@ mod test {
         let repetitions = 200;
 
         let hasher = Hasher::new(k, repetitions, Embedder::new(ts.w, ts.w, sf, 1245), 1245);
-        let arena = bumpalo::Bump::new();
-        let pools = HashCollection::from_ts(&ts, &hasher, &arena);
+        let pools = HashCollection::from_ts(&ts, &hasher);
 
         for &depth in &[32usize, 20, 10] {
             println!("depth {}", depth);

@@ -2,7 +2,6 @@ use crate::distance::*;
 use crate::embedding::*;
 use crate::lsh::*;
 use crate::types::*;
-use bumpalo::Bump;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use std::ops::Range;
@@ -21,12 +20,13 @@ pub fn approx_mp(
     println!("[{:?}] Scaling factor: {}", start.elapsed(), sf);
 
     let hasher = Hasher::new(k, repetitions, Embedder::new(ts.w, ts.w, 1.0, seed), seed);
-    let arena = Bump::new();
-    let pools = HashCollection::from_ts(&ts, &hasher, &arena);
+    // let arena = Bump::new();
+    let pools = HashCollection::from_ts(&ts, &hasher);
     println!(
         "[{:?}] Computed hash pools, taking {}",
         start.elapsed(),
-        PrettyBytes(arena.allocated_bytes())
+        0
+        // PrettyBytes(arena.allocated_bytes())
     );
     let hashes = pools.get_hash_matrix();
     println!(
