@@ -129,6 +129,12 @@ pub struct HashCollection<'hasher> {
     select_right_mask: HashValue,
 }
 
+impl<'hasher> BytesSize for HashCollection<'hasher> {
+    fn bytes_size(&self) -> PrettyBytes {
+        PrettyBytes(self.hasher.tensor_repetitions*self.pools.len() * std::mem::size_of::<u64>())
+    }
+}
+
 impl<'hasher> HashCollection<'hasher> {
     pub fn from_ts(ts: &WindowedTimeseries, hasher: &'hasher Hasher) -> Self {
         let mut pools = Vec::with_capacity(ts.num_subsequences());

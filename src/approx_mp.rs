@@ -25,8 +25,7 @@ pub fn approx_mp(
     println!(
         "[{:?}] Computed hash pools, taking {}",
         start.elapsed(),
-        0
-        // PrettyBytes(arena.allocated_bytes())
+        pools.bytes_size()
     );
     let hashes = pools.get_hash_matrix();
     println!(
