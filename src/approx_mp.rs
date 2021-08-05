@@ -43,7 +43,7 @@ pub fn approx_mp(
     // of the nearest neigbor itself.
     let mut nearest_neighbor: Vec<Option<(f64, usize)>> = vec![None; ts.num_subsequences()];
 
-    let mut stats = Stats::new();
+    // let mut stats = Stats::new();
 
     // for decreasing depths
     for depth in (0..=k).rev() {
@@ -64,7 +64,7 @@ pub fn approx_mp(
                 active.iter().filter(|a| **a).count()
             ));
             for (hash_range, bucket) in hashes.buckets(depth, rep) {
-                stats.push_bucket_size(depth, bucket.len());
+                // stats.push_bucket_size(depth, bucket.len());
                 for (a_offset, &(_, a_idx)) in bucket.iter().enumerate() {
                     if active[a_idx] {
                         let a_already_checked = &bounds[rep][a_idx];
@@ -126,7 +126,7 @@ pub fn approx_mp(
         pbar.finish();
     }
     println!("[{:?}] done!", start.elapsed());
-    println!("Stats: \n{:?}", stats);
+    // println!("Stats: \n{:?}", stats);
     nearest_neighbor
         .iter()
         .map(|opt| opt.expect("missing nearest neighbor"))
