@@ -19,6 +19,8 @@ pub fn approx_mp(
     assert!(!sf.is_nan());
     println!("[{:?}] Scaling factor: {}", start.elapsed(), sf);
 
+    let exclusion_zone = ts.w / 4;
+
     let hasher = Hasher::new(k, repetitions, Embedder::new(ts.w, ts.w, 1.0, seed), seed);
     // let arena = Bump::new();
     let pools = HashCollection::from_ts(&ts, &hasher);
@@ -73,8 +75,9 @@ pub fn approx_mp(
                         let a_already_checked = &bounds[rep][a_idx];
                         let a_hash_idx = hash_range.start + a_offset;
                         for (b_offset, &(_, b_idx)) in bucket.iter().enumerate() {
-                            if a_idx < b_idx {
-                                // FIXME: Maybe we can exclude trivial matches already here?
+                            // Here we handle trivial matches: we don't consider a pair if the difference between
+                            // the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
+                            if a_idx + exclusion_zone < b_idx {
                                 let b_hash_idx = hash_range.start + b_offset;
                                 let b_already_checked = &bounds[rep][b_idx];
                                 let check_a = !a_already_checked.contains(&b_hash_idx);
