@@ -1,3 +1,7 @@
+// Computation of the approximate matrix profile, as a 1-NN join based on LSH.
+// The algorithm is inspired by [PUFFINN [Aumüller et al. 2019]](https://arxiv.org/pdf/1906.12211.pdf),
+// which is a LSH adaptive nearest neighbor algorithm.
+
 use crate::distance::*;
 use crate::embedding::*;
 use crate::lsh::*;
@@ -15,14 +19,17 @@ pub fn approx_mp(
     seed: u64,
 ) -> Vec<(f64, usize)> {
     let start = Instant::now();
+    // The scaling factor is a very important component for the performance
+    // of the algorithm. It allows to control where very dissimilar points
+    // are placed in the range `[0, 1]`, which in turn controls the probability
+    // of collision of a subsequence with far away ones.
     let sf = scaling_factor(ts, zeucl, 0.01);
     assert!(!sf.is_nan());
     println!("[{:?}] Scaling factor: {}", start.elapsed(), sf);
 
     let exclusion_zone = ts.w / 4;
 
-    let hasher = Hasher::new(k, repetitions, Embedder::new(ts.w, ts.w, 1.0, seed), seed);
-    // let arena = Bump::new();
+    let hasher = Hasher::new(k, repetitions, Embedder::new(ts.w, ts.w, sf, seed), seed);
     let pools = HashCollection::from_ts(&ts, &hasher);
     println!(
         "[{:?}] Computed hash pools, taking {}",
@@ -42,6 +49,9 @@ pub fn approx_mp(
 
     // keep track of active subsequences
     let mut active: Vec<bool> = vec![true; ts.num_subsequences()];
+    // These two array of counters is just for inspection
+    let mut count_evaluations = vec![0usize; ts.num_subsequences()];
+    let mut thresholds = vec![usize::MAX; ts.num_subsequences()];
 
     // In this vector we will hold the solution: we have an entry for each subsequence, initialized
     // to the empty value, and eventually replaced with a pair whose first element is the
@@ -95,6 +105,8 @@ pub fn approx_mp(
                                         // than the previous candidate.
                                         let d = zeucl(ts, a_idx, b_idx);
                                         cnt_dist += 1;
+                                        count_evaluations[a_idx] += 1;
+                                        count_evaluations[b_idx] += 1;
                                         if nearest_neighbor[a_idx].is_none()
                                             || d < nearest_neighbor[a_idx].unwrap().0
                                         {
@@ -119,7 +131,8 @@ pub fn approx_mp(
                         if let Some((_, nn_idx)) = nearest_neighbor[a_idx] {
                             let p = pools.collision_probability(a_idx, nn_idx);
                             let threshold =
-                                ((2.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize;
+                                ((1.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize;
+                            thresholds[a_idx] = threshold;
                             active[a_idx] = rep < threshold;
                         }
                     }
@@ -139,6 +152,18 @@ pub fn approx_mp(
         cnt_dist,
         total_distances,
         (cnt_dist as f64 / total_distances as f64) * 100.0
+    );
+    println!(
+        "distance evaluations min {} mean {} max {}",
+        count_evaluations.iter().min().unwrap(),
+        count_evaluations.iter().sum::<usize>() as f64 / count_evaluations.len() as f64,
+        count_evaluations.iter().max().unwrap()
+    );
+    println!(
+        "thresholds min {} mean {} max {}",
+        thresholds.iter().min().unwrap(),
+        thresholds.iter().sum::<usize>() as f64 / count_evaluations.len() as f64,
+        thresholds.iter().max().unwrap()
     );
     nearest_neighbor
         .iter()
