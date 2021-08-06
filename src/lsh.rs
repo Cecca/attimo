@@ -217,6 +217,7 @@ impl<'hasher> HashCollection<'hasher> {
     }
 }
 
+#[inline]
 fn count_collisions(wa: &[HashValue], wb: &[HashValue], bitmask: HashValue) -> usize {
     wa.iter()
         .zip(wb.iter())

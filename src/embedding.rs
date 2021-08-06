@@ -1,14 +1,19 @@
-use crate::types::WindowedTimeseries;
-use crate::distance::*;
-use rand::prelude::*;
-use rand_distr::{StandardNormal, Uniform};
-use rand_xoshiro::Xoshiro256Plus;
-
 // # Embedding
 //
 // To be able to use simple LSH functions like HyperplaneLSH,
 // we need to embed vectors in the Euclidean space into a kernel
 // space whose inner product is related to the euclidean distance.
+//
+//  - [Rahimi and Recht paper](https://people.eecs.berkeley.edu/~brecht/papers/07.rah.rec.nips.pdf) on random Fourier features
+//  - [Sutherland and Schneider paper](https://arxiv.org/pdf/1506.02785.pdf) on more accurate analysis of the above
+//  - [Christiani paper](https://arxiv.org/pdf/1605.02687v1.pdf) on LSH framework, including embeddings
+
+
+use crate::types::WindowedTimeseries;
+use crate::distance::*;
+use rand::prelude::*;
+use rand_distr::{StandardNormal, Uniform};
+use rand_xoshiro::Xoshiro256Plus;
 
 pub fn scaling_factor<D: Fn(&WindowedTimeseries, usize, usize) -> f64>(
     ts: &WindowedTimeseries,

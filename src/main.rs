@@ -66,6 +66,9 @@ fn default_delta() -> f64 {
 }
 
 fn main() -> Result<()> {
+    setup_logger()?;
+
+    // read configuration
     let config: Config = argh::from_env();
     let path = config.path;
     let w = config.window;
@@ -88,5 +91,9 @@ fn main() -> Result<()> {
         plot.add_trace(amp_lines);
         plot.show();
     }
+    Ok(())
+}
+
+fn setup_logger() -> Result<()> {
     Ok(())
 }
