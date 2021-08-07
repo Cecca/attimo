@@ -8,6 +8,7 @@ use crate::lsh::*;
 use crate::types::*;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
+use slog_scope::info;
 use std::ops::Range;
 use std::time::Instant;
 
@@ -28,6 +29,7 @@ pub fn approx_mp(
     println!("[{:?}] Scaling factor: {}", start.elapsed(), sf);
 
     let exclusion_zone = ts.w / 4;
+    info!("Approximate Matrix Profile setup"; "k" => k, "repetitions" => repetitions, "delta" => delta, "seed" => seed, "scaling_factor" => sf, "exclusion_zone" => exclusion_zone);
 
     let hasher = Hasher::new(k, repetitions, Embedder::new(ts.w, ts.w, sf, seed), seed);
     let pools = HashCollection::from_ts(&ts, &hasher);
@@ -63,7 +65,9 @@ pub fn approx_mp(
 
     // for decreasing depths
     for depth in (0..=k).rev() {
-        if active.iter().filter(|a| **a).count() == 0 {
+        let n_active = active.iter().filter(|a| **a).count();
+        info!(""; "depth" => depth, "active" => n_active);
+        if n_active == 0 {
             break;
         }
         let pbar = ProgressBar::new(repetitions as u64);
@@ -74,6 +78,7 @@ pub fn approx_mp(
         );
 
         for rep in 0..repetitions {
+            let mut rep_cnt_dists = 0;
             pbar.set_message(format!(
                 "depth {}, active {}",
                 depth,
@@ -105,6 +110,7 @@ pub fn approx_mp(
                                         // than the previous candidate.
                                         let d = zeucl(ts, a_idx, b_idx);
                                         cnt_dist += 1;
+                                        rep_cnt_dists += 1;
                                         count_evaluations[a_idx] += 1;
                                         count_evaluations[b_idx] += 1;
                                         if nearest_neighbor[a_idx].is_none()
@@ -128,22 +134,41 @@ pub fn approx_mp(
                         // the loop above.
                         bounds[rep][a_idx] = hash_range.clone();
                         // Check the stopping condition, and if possible deactivate the subsequence
-                        if let Some((_, nn_idx)) = nearest_neighbor[a_idx] {
+                        if let Some((d, nn_idx)) = nearest_neighbor[a_idx] {
                             let p = pools.collision_probability(a_idx, nn_idx);
                             let threshold =
                                 ((1.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize;
                             thresholds[a_idx] = threshold;
                             active[a_idx] = rep < threshold;
+                            if !active[a_idx] {
+                                info!("report nearest neighbor"; 
+                                    "elapsed" => start.elapsed().as_secs_f64(),
+                                    "depth" => depth,
+                                    "repetition" => rep,
+                                    "idx" => a_idx,
+                                    "nn_idx" => nn_idx,
+                                    "distance" => d,
+                                    "threshold" => threshold,
+                                    "single_collision_probability" => p,
+                                    "collision_probability_at_depth" => p.powi(depth as i32),
+                                );
+                            }
                         }
                     }
                 }
             }
+            info!("completed repetition"; "computed_distances" => rep_cnt_dists, "depth" => depth, "repetition" => rep);
             pbar.inc(1);
             if depth == 0 {
                 break;
             }
         }
         pbar.finish();
+        info!("completed depth"; 
+            "min_threshold" => thresholds.iter().min().unwrap(), 
+            "max_threshold" => thresholds.iter().max().unwrap(), 
+            "avg_threshold" => thresholds.iter().sum::<usize>() as f64 / thresholds.len() as f64
+        );
     }
     let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
     println!(

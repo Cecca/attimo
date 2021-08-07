@@ -15,6 +15,11 @@ rand_distr = "0.4"
 packed_simd = { version = "0.3.4", package = "packed_simd_2" }
 indicatif = "0.16"
 argh = "0.1"
+log = "0.4"
+slog = "2.7"
+slog-json = "2.4"
+slog-scope = "4.4"
+slog-async = "2.7"
 
 [profile.release]
 debug = true

@@ -8,6 +8,8 @@ mod load;
 mod lsh;
 mod types;
 
+use std::fs::OpenOptions;
+use slog::*;
 use anyhow::Result;
 use approx_mp::*;
 use argh::FromArgs;
@@ -15,6 +17,7 @@ use load::*;
 use plotly::common::Mode;
 use plotly::layout::LayoutGrid;
 use plotly::{Layout, Plot, Scatter};
+use slog_scope::GlobalLoggerGuard;
 use types::*;
 
 #[derive(FromArgs)]
@@ -66,7 +69,7 @@ fn default_delta() -> f64 {
 }
 
 fn main() -> Result<()> {
-    setup_logger()?;
+    let _guard = setup_logger()?;
 
     // read configuration
     let config: Config = argh::from_env();
@@ -94,6 +97,24 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn setup_logger() -> Result<()> {
-    Ok(())
+fn setup_logger() -> Result<GlobalLoggerGuard> {
+    let log_path = ".trace.log";
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(log_path)
+        .unwrap();
+
+    let drain = slog_json::Json::new(file)
+        .set_pretty(false)
+        .add_default_keys()
+        .build()
+        .fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let logger = slog::Logger::root(drain, o!());
+
+    let guard = slog_scope::set_global_logger(logger);
+
+    Ok(guard)
 }
