@@ -1,10 +1,75 @@
-use std::{cell::RefCell, cmp::Ordering, collections::HashMap, fmt::Debug, ops::{BitAnd, BitOr, BitXor, Not, Range, Shl, Shr}};
+//// # Locality Sensitive Hashing
+////
+//// The purpose of Locality Sensitive Hashing (LSH for short) is to speed up nearest neighbor
+//// queries, resulting in potentially sublinear query times. The technique can also be used
+//// for similarity joins, like we do in this work.
+////
+//// The intuition is simple: for a given distance function between points (which in our case
+//// is the z-normalized Euclidean distance between subsequences), we choose a _family_ of hash
+//// functions. From this family we sample an appropriate number of functions (more on this later).
+//// For a given subsequence of our time series, each of the sampled functions will output a
+//// _hash value_, whose domain depends on the family of hash functions.
+////
+//// ## Simhash, a popular LSH family
+////
+//// A very popular family of hash functions is [Simhash](https://www.cs.princeton.edu/courses/archive/spr04/cos598B/bib/CharikarEstim.pdf).
+//// It works for the _angular distance_ (or cosine similarity) and produces
+//// binary hash values. It is very simple (just a dot product of the input vector with a random
+//// vector with coordinated sampled from a standard normal distribution) but does not readily
+//// support the Euclidean distance. Not all hope is lost, however, since we can _embed_ our input
+//// vectors into a _kernel space_ such that the dot product in the kernel space is a function of the
+//// euclidean distance of the original vectors. This is discussed in the [embedding
+//// module](embedding.html).
+////
+//// Embedding a subsequence of length `w` into a space of dimension `w` has a cost which is
+//// $O(w^2)$, since it requires a matrix-vector multiplication.
+////
+////
+//// ## LSH for p-stable distributions
+////
+//// The cost of the aforementioned approach might be too high, since we have to pay w^2 time for
+//// each subsequence.
+//// An alternative scheme is to use the approach for distances related to p-stable distributions,
+//// described in [this paper](http://theory.csail.mit.edu/~mirrokni/pstable.ps).
+//// The idea is rather simple: for each input vector (in our case the subsequences of the input time
+//// series) we compute the inner product with a random vector, whose components are distributed
+//// according to the p-stable distribution associated with the distance. For the Euclidean
+//// distance such distribution is the Standard Normal. The result is then bucketed into bins whose
+//// width is a parameter of the algorithm.
+//// The nice property of this approach is that we can compute the dot products in one go using the
+//// same trick of [MASS](https://www.cs.unm.edu/~mueen/FastestSimilaitySearch.html), i.e. by doing
+//// element-wise multiplication in the frequency domain. This way, computing a single hash
+//// function for the entire time series takes time n log n. Therefore, for k concatenations
+//// and L repetitions (without tensoring) we have that we require just k L n log n to compute all
+//// hash values.
+//// This is obviously desirable, and also leverages the fact that subsequences are overlapping, a
+//// fact that makes this problem different from traditional nearest neighbor search.
+////
+//// ## Computing dot procuts in n log n time
+////
+//// This trick is at the base of the fast MASS algorithm for computing the distance profile.
+//// The approach is based on the definition of convolution (see these [lecture notes](http://www.dei.unipd.it/~geppo/DA2/DOCS/FFT.pdf))
+
+use std::{
+    cell::RefCell,
+    cmp::Ordering,
+    collections::HashMap,
+    fmt::Debug,
+    ops::{BitAnd, BitOr, BitXor, Not, Range, Shl, Shr},
+};
 
 use rand::prelude::*;
 use rand_distr::Normal;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
-use crate::{distance::*, embedding::Embedder, types::{BytesSize, PrettyBytes, WindowedTimeseries}};
+use crate::{
+    distance::*,
+    embedding::Embedder,
+    types::{BytesSize, PrettyBytes, WindowedTimeseries},
+};
+
+//// ## Hash values
+//// We consider hash values of at most 64 bits, so to be able to pack them into 64 bits words.
 
 /// Wrapper structx for 64-bits words, which sort lexicographically from the lowest significant bit
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -16,18 +81,15 @@ impl Debug for HashValue {
     }
 }
 
-impl PartialOrd for HashValue {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
+//// We also use a custom implementation of the ordering, that sorts lexicographically the
+//// bit strings from the _lowest significant bit_.
+//// This comparator is equivalent to the following implementation
+////
+////     let selfstr = format!("{:064b}", self.0).chars().rev().collect::<String>();
+////     let otherstr = format!("{:064b}", other.0).chars().rev().collect::<String>();
+////     selfstr.cmp(&otherstr)
 impl Ord for HashValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        // This comparator is equivalent to the following implementation
-        // let selfstr = format!("{:064b}", self.0).chars().rev().collect::<String>();
-        // let otherstr = format!("{:064b}", other.0).chars().rev().collect::<String>();
-        // selfstr.cmp(&otherstr)
         if self.0 == other.0 {
             return Ordering::Equal;
         }
@@ -46,6 +108,12 @@ impl Ord for HashValue {
             otherword = otherword >> 1;
         }
         panic!("equality is handled with the special case above");
+    }
+}
+
+impl PartialOrd for HashValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -110,10 +178,7 @@ pub struct TensorPool {
 }
 
 impl TensorPool {
-    fn from_words<I: IntoIterator<Item = HashValue>>(
-        input_words: I,
-        reps: usize,
-    ) -> Self {
+    fn from_words<I: IntoIterator<Item = HashValue>>(input_words: I, reps: usize) -> Self {
         let mut words = Vec::with_capacity(reps);
         for word in input_words.into_iter() {
             words.push(word);
@@ -131,7 +196,7 @@ pub struct HashCollection<'hasher> {
 
 impl<'hasher> BytesSize for HashCollection<'hasher> {
     fn bytes_size(&self) -> PrettyBytes {
-        PrettyBytes(self.hasher.tensor_repetitions*self.pools.len() * std::mem::size_of::<u64>())
+        PrettyBytes(self.hasher.tensor_repetitions * self.pools.len() * std::mem::size_of::<u64>())
     }
 }
 
@@ -377,11 +442,7 @@ impl Hasher {
         }
     }
 
-    pub fn hash(
-        &self,
-        ts: &WindowedTimeseries,
-        i: usize,
-    ) -> TensorPool {
+    pub fn hash(&self, ts: &WindowedTimeseries, i: usize) -> TensorPool {
         assert!(ts.w == self.embedder.dim_in);
 
         ZNORM_BUFFER.with(|zbuf| {
