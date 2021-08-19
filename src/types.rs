@@ -17,29 +17,14 @@ impl WindowedTimeseries {
         let mut rolling_sd = Vec::with_capacity(ts.len() - w);
         let mut squared_norms = Vec::with_capacity(ts.len() - w);
 
-        // let mut avg: f64 = ts[0..w].iter().sum::<f64>() / w as f64;
-        // let mut var: f64 = (ts[0..w].iter().map(|x| x*x).sum::<f64>() - avg*avg) / w as f64;
-
-        // rolling_avg.push(avg);
-        // assert!(!var.is_nan() && var.is_finite());
-        // rolling_sd.push((var.sqrt()) / w as f64);
-
-        // for i in 1..ts.len() - w {
-        //     let new = ts[i + w];
-        //     let old = ts[i - 1];
-        //     let oldavg = avg;
-        //     avg = oldavg + (new - old) / w as f64;
-        //     var = (new - old) * (new - avg + old - oldavg) / w as f64;
-        //     rolling_avg.push(avg);
-        //     assert!(!var.is_nan() && var.is_finite());
-        //     rolling_sd.push(var.sqrt());
-        // }
+        // FIXME: compute it using sliding window
         let mut buffer = vec![0.0; w];
         for i in 0..ts.len() - w {
-            let mean = ts[i..i+w].iter().sum::<f64>() / w as f64;
-            let sd = ((ts[i..i+w].iter().map(|x| x*x).sum::<f64>() - mean*mean) / w as f64).sqrt();
+            let mean = ts[i..i + w].iter().sum::<f64>() / w as f64;
+            let sd =
+                ((ts[i..i + w].iter().map(|x| x * x).sum::<f64>() - mean * mean) / w as f64).sqrt();
             buffer.fill(0.0);
-            for (i, x) in ts[i..i+w].iter().enumerate() {
+            for (i, x) in ts[i..i + w].iter().enumerate() {
                 buffer[i] = (x - mean) / sd;
             }
             rolling_avg.push(mean);
@@ -85,6 +70,36 @@ impl WindowedTimeseries {
         self.data.len() - self.w
     }
 
+    pub fn sliding_dot_product(&self, v: &[f64], output: &mut Vec<f64>) {
+        assert!(v.len() == self.w);
+        //// Pre-allocate the output
+        output.clear();
+        output.resize(self.num_subsequences(), 0.0);
+
+        for i in 0..self.num_subsequences() {
+            output[i] = dot(v, self.subsequence(i));
+        }
+    }
+
+    pub fn znormalized_sliding_dot_product(&self, v: &[f64], output: &mut Vec<f64>) {
+        assert!(v.len() == self.w);
+        //// Pre-allocate the output
+        output.clear();
+        output.resize(self.num_subsequences(), 0.0);
+
+        let mut buffer = vec![0.0; self.w];
+        let (mv, sv) = meansd(v);
+        let mut vnorm = vec![0.0; self.w];
+        for i in 0..v.len() {
+            vnorm[i] = (v[i] - mv) / sv;
+        }
+
+        for i in 0..self.num_subsequences() {
+            self.znormalized(i, &mut buffer);
+            output[i] = dot(&vnorm, &buffer);
+        }
+    }
+
     pub fn distance_profile<D: Fn(&WindowedTimeseries, usize, usize) -> f64>(
         &self,
         from: usize,
@@ -100,11 +115,17 @@ impl WindowedTimeseries {
     }
 }
 
+fn meansd(v: &[f64]) -> (f64, f64) {
+    let mean: f64 = v.iter().sum::<f64>() / v.len() as f64;
+    let sd = ((v.iter().map(|x| x * x).sum::<f64>() - mean * mean) / v.len() as f64).sqrt();
+    (mean, sd)
+}
+
 #[test]
 fn test_meanstd() {
     use rand::prelude::*;
-    use rand_xoshiro::Xoroshiro128Plus;
     use rand_distr::Uniform;
+    use rand_xoshiro::Xoroshiro128Plus;
     let rng = Xoroshiro128Plus::seed_from_u64(3462);
     let ts: Vec<f64> = rng.sample_iter(Uniform::new(0.0, 1.0)).take(1000).collect();
     let w = 100;
@@ -114,24 +135,23 @@ fn test_meanstd() {
         let a = ts.subsequence(i);
         let mean: f64 = a.iter().sum::<f64>() / a.len() as f64;
         let actual_mean = ts.mean(i);
-        let sd = ((a.iter().map(|x| x*x).sum::<f64>() - mean*mean) / a.len() as f64).sqrt();
+        let sd = ((a.iter().map(|x| x * x).sum::<f64>() - mean * mean) / a.len() as f64).sqrt();
         let actual_sd = ts.sd(i);
         assert_eq!(mean, actual_mean);
         assert_eq!(sd, actual_sd);
     }
 }
 
-
 pub struct PrettyBytes(pub usize);
 
 impl Display for PrettyBytes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.0 >= 1024*1024*1024 {
-            write!(f, "{} Gbytes", self.0/(1024*1024*1024))
-        } else if self.0 >= 1024*1024 {
-            write!(f, "{} Mbytes", self.0/(1024*1024))
+        if self.0 >= 1024 * 1024 * 1024 {
+            write!(f, "{} Gbytes", self.0 / (1024 * 1024 * 1024))
+        } else if self.0 >= 1024 * 1024 {
+            write!(f, "{} Mbytes", self.0 / (1024 * 1024))
         } else if self.0 >= 1024 {
-            write!(f, "{} Kbytes", self.0/1024)
+            write!(f, "{} Kbytes", self.0 / 1024)
         } else {
             write!(f, "{} bytes", self.0)
         }
@@ -144,7 +164,7 @@ pub trait BytesSize {
 
 impl BytesSize for WindowedTimeseries {
     fn bytes_size(&self) -> PrettyBytes {
-        PrettyBytes(8*(self.data.len() + (self.num_subsequences()*3)))
+        PrettyBytes(8 * (self.data.len() + (self.num_subsequences() * 3)))
     }
 }
 
@@ -157,4 +177,3 @@ impl<T> BytesSize for Vec<T> {
         }
     }
 }
-

@@ -50,17 +50,16 @@
 //// This trick is at the base of the fast MASS algorithm for computing the distance profile.
 //// The approach is based on the definition of convolution (see these [lecture notes](http://www.dei.unipd.it/~geppo/DA2/DOCS/FFT.pdf))
 
-use std::{
-    cell::RefCell,
-    cmp::Ordering,
-    collections::HashMap,
-    fmt::Debug,
-    ops::{BitAnd, BitOr, BitXor, Not, Range, Shl, Shr},
-};
-
+use bumpalo::Bump;
 use rand::prelude::*;
 use rand_distr::Normal;
 use rand_xoshiro::Xoshiro256PlusPlus;
+use std::{
+    cell::RefCell,
+    cmp::Ordering,
+    fmt::Debug,
+    ops::{BitAnd, BitOr, BitXor, Not, Range, Shl, Shr},
+};
 
 use crate::{
     distance::*,
@@ -72,185 +71,154 @@ use crate::{
 //// We consider hash values of at most 64 bits, so to be able to pack them into 64 bits words.
 
 /// Wrapper structx for 64-bits words, which sort lexicographically from the lowest significant bit
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub struct HashValue(u64);
+#[derive(Clone, Eq, PartialEq)]
+pub struct HashValue<'arena> {
+    hashes: Vec<i64, &'arena Bump>,
+}
 
-impl Debug for HashValue {
+impl<'arena> Debug for HashValue<'arena> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:064b}", self.0)
+        write!(f, "{:?}", self.hashes)
     }
 }
 
 //// We also use a custom implementation of the ordering, that sorts lexicographically the
-//// bit strings from the _lowest significant bit_.
-//// This comparator is equivalent to the following implementation
-////
-////     let selfstr = format!("{:064b}", self.0).chars().rev().collect::<String>();
-////     let otherstr = format!("{:064b}", other.0).chars().rev().collect::<String>();
-////     selfstr.cmp(&otherstr)
-impl Ord for HashValue {
+//// hash values from the first value, so that hashes _with the same prefix_ are all
+//// grouped together.
+impl<'arena> Ord for HashValue<'arena> {
     fn cmp(&self, other: &Self) -> Ordering {
-        if self.0 == other.0 {
-            return Ordering::Equal;
-        }
-        let mut selfword = self.0;
-        let mut otherword = other.0;
-        for _ in 0..64 {
-            let selfbit = selfword & 1;
-            let otherbit = otherword & 1;
-            if selfbit < otherbit {
+        debug_assert!(self.hashes.len() == other.hashes.len());
+        for (x, y) in self.hashes.iter().zip(other.hashes.iter()) {
+            if x < y {
                 return Ordering::Less;
-            }
-            if selfbit > otherbit {
+            } else if x > y {
                 return Ordering::Greater;
             }
-            selfword = selfword >> 1;
-            otherword = otherword >> 1;
         }
-        panic!("equality is handled with the special case above");
+        return Ordering::Equal;
     }
 }
 
-impl PartialOrd for HashValue {
+impl<'arena> PartialOrd for HashValue<'arena> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl BitAnd for HashValue {
-    type Output = Self;
-
-    fn bitand(self, rhs: Self) -> Self::Output {
-        Self(self.0 & rhs.0)
+impl<'arena> HashValue<'arena> {
+    //// Furthermore, we need a way to compare for equality on prefixes
+    //// with this method, which checks if two hash values have the same
+    //// prefix of a given length.
+    #[inline]
+    fn prefix_eq(&self, other: &Self, l: usize) -> bool {
+        debug_assert!(self.hashes.len() == other.hashes.len());
+        debug_assert!(l <= self.hashes.len());
+        self.hashes[..l] == other.hashes[..l]
     }
-}
-
-impl BitOr for HashValue {
-    type Output = Self;
-
-    fn bitor(self, rhs: Self) -> Self::Output {
-        Self(self.0 | rhs.0)
-    }
-}
-
-impl BitXor for HashValue {
-    type Output = Self;
-
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        Self(self.0 ^ rhs.0)
-    }
-}
-
-impl Not for HashValue {
-    type Output = Self;
-
-    fn not(self) -> Self::Output {
-        Self(!self.0)
-    }
-}
-
-impl Shr<usize> for HashValue {
-    type Output = Self;
-
-    fn shr(self, shift: usize) -> Self::Output {
-        Self(self.0 >> shift)
-    }
-}
-
-impl Shl<usize> for HashValue {
-    type Output = Self;
-
-    fn shl(self, shift: usize) -> Self::Output {
-        Self(self.0 << shift)
-    }
-}
-
-pub fn mask(bits: usize) -> HashValue {
-    let mut m = 0;
-    for _ in 0..bits {
-        m = (m << 1) | 1;
-    }
-    HashValue(m)
 }
 
 pub struct TensorPool {
-    words: Vec<HashValue>,
+    hashes: Vec<i64>,
 }
 
 impl TensorPool {
-    fn from_words<I: IntoIterator<Item = HashValue>>(input_words: I, reps: usize) -> Self {
-        let mut words = Vec::with_capacity(reps);
-        for word in input_words.into_iter() {
-            words.push(word);
-        }
-        TensorPool { words }
+    fn new(k: usize, tensor_repetitions: usize) -> Self {
+        let hashes = Vec::with_capacity(tensor_repetitions);
+        Self { hashes }
+    }
+
+    fn append(&mut self, hash: i64) {
+        self.hashes.push(hash);
     }
 }
 
 pub struct HashCollection<'hasher> {
     hasher: &'hasher Hasher,
     pools: Vec<TensorPool>,
-    select_left_mask: HashValue,
-    select_right_mask: HashValue,
 }
 
 impl<'hasher> BytesSize for HashCollection<'hasher> {
     fn bytes_size(&self) -> PrettyBytes {
-        PrettyBytes(self.hasher.tensor_repetitions * self.pools.len() * std::mem::size_of::<u64>())
+        // PrettyBytes(self.hasher.tensor_repetitions * self.pools.len() * std::mem::size_of::<u64>())
+        PrettyBytes(0)
     }
 }
 
 impl<'hasher> HashCollection<'hasher> {
     pub fn from_ts(ts: &WindowedTimeseries, hasher: &'hasher Hasher) -> Self {
         let mut pools = Vec::with_capacity(ts.num_subsequences());
-        for i in 0..ts.num_subsequences() {
-            pools.push(hasher.hash(ts, i));
+        for _ in 0..ts.num_subsequences() {
+            pools.push(TensorPool::new(hasher.k, hasher.tensor_repetitions));
         }
-        let select_left_mask = !mask(hasher.k_right);
-        let select_right_mask = mask(hasher.k_right);
-        Self {
-            hasher,
-            pools,
-            select_left_mask,
-            select_right_mask,
+        let mut buffer = vec![0; ts.num_subsequences()];
+        for repetition in 0..hasher.tensor_repetitions {
+            for k in 0..hasher.k {
+                hasher.hash_all(ts, k, repetition, &mut buffer);
+                for (i, h) in buffer.iter().enumerate() {
+                    pools[i].append(*h);
+                }
+            }
         }
+        Self { hasher, pools }
+    }
+
+    fn left(&self, i: usize, repetition: usize) -> &[i64] {
+        let idx = repetition % self.hasher.tensor_repetitions;
+        let idx = idx * self.hasher.k_left;
+        &self.pools[i].hashes[idx..idx + self.hasher.k_left]
+    }
+
+    fn right(&self, i: usize, repetition: usize) -> &[i64] {
+        let idx = repetition / self.hasher.tensor_repetitions;
+        let idx = self.hasher.tensor_repetitions * self.hasher.k_left + idx * self.hasher.k_right;
+        &self.pools[i].hashes[idx..idx + self.hasher.k_right]
+    }
+
+    fn hash_value<'arena>(
+        &self,
+        i: usize,
+        repetition: usize,
+        arena: &'arena Bump,
+    ) -> HashValue<'arena> {
+        let mut output = Vec::with_capacity_in(self.hasher.k, arena);
+        output.extend_from_slice(self.left(i, repetition));
+        output.extend_from_slice(self.right(i, repetition));
+        HashValue { hashes: output }
     }
 
     #[cfg(test)]
     pub fn first_collision_baseline(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
-        let m = mask(depth);
+        let arena = Bump::new();
         (0..self.hasher.repetitions)
             .filter(|&rep| {
-                let hi = self.hash_value(i, rep) & m;
-                let hj = self.hash_value(j, rep) & m;
-                hi == hj
+                self.hash_value(i, rep, &arena)
+                    .prefix_eq(&self.hash_value(j, rep, &arena), depth)
             })
             .next()
     }
 
     pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
-        let rm = mask(depth) & self.select_right_mask;
+        let depth_l = std::cmp::min(depth, self.hasher.k_left);
+        let lindex = (0..self.hasher.tensor_repetitions)
+            .find(|&rep| {
+                let idx = rep * self.hasher.k_left;
+                let hi = &self.pools[i].hashes[idx..idx + depth_l];
+                let hj= &self.pools[j].hashes[idx..idx + depth_l];
+                hi == hj
+            })?;
 
-        let rindex = self.pools[i]
-            .words
-            .iter()
-            .zip(self.pools[j].words.iter())
-            .enumerate()
-            .find(|(_i, (ibits, jbits))| (**ibits & rm) == (**jbits & rm))?
-            .0;
-
-        if depth < self.hasher.k_right {
-            return Some(rindex);
+        if depth < self.hasher.k_left {
+            return Some(lindex);
         }
-        let lm = (mask(depth - self.hasher.k_right) << self.hasher.k_right) & self.select_left_mask;
 
-        let lindex = self.pools[i]
-            .words
-            .iter()
-            .zip(self.pools[j].words.iter())
-            .enumerate()
-            .find(|(_i, (ibits, jbits))| (**ibits & lm) == (**jbits & lm))?
-            .0;
+        let depth_r = depth - self.hasher.k_left;
+        let rindex = (0..self.hasher.tensor_repetitions)
+            .find(|&rep| {
+                let idx = self.hasher.tensor_repetitions * self.hasher.k_left + rep * self.hasher.k_right;
+                let hi = &self.pools[i].hashes[idx..idx + depth_r];
+                let hj= &self.pools[j].hashes[idx..idx + depth_r];
+                hi == hj
+            })?;
 
         let idx = lindex * self.hasher.tensor_repetitions + rindex;
         if idx < self.hasher.repetitions {
@@ -261,51 +229,38 @@ impl<'hasher> HashCollection<'hasher> {
     }
 
     pub fn collision_probability(&self, i: usize, j: usize) -> f64 {
-        let m = mask(self.hasher.k);
-        let n_collisions = count_collisions(&self.pools[i].words, &self.pools[j].words, m);
+        let n_collisions = self.pools[i]
+            .hashes
+            .iter()
+            .zip(self.pools[j].hashes.iter())
+            .filter(|(hi, hj)| hi == hj)
+            .count();
 
         n_collisions as f64
             / ((self.hasher.k_left + self.hasher.k_right) * self.hasher.tensor_repetitions) as f64
     }
 
-    pub fn get_hash_matrix(&self) -> HashMatrix {
-        HashMatrix::new(self)
-    }
-
-    fn hash_value(&self, i: usize, repetition: usize) -> HashValue {
-        let l_idx = repetition / self.hasher.tensor_repetitions;
-        let r_idx = repetition % self.hasher.tensor_repetitions;
-        let pool = &self.pools[i];
-        let l = pool.words[l_idx] & self.select_left_mask;
-        let r = pool.words[r_idx] & self.select_right_mask;
-        l | r
+    pub fn get_hash_matrix<'arena>(&self, arena: &'arena Bump) -> HashMatrix<'arena> {
+        HashMatrix::new(self, arena)
     }
 }
 
-#[inline]
-fn count_collisions(wa: &[HashValue], wb: &[HashValue], bitmask: HashValue) -> usize {
-    wa.iter()
-        .zip(wb.iter())
-        .map(|(&a, &b)| (!(a ^ b) & bitmask).0.count_ones() as usize)
-        .sum()
-}
-
-pub struct HashMatrix {
+pub struct HashMatrix<'arena> {
     /// Outer vector has one entry per repetition, inner vector has one entry per subsequence,
     /// and items are hash values and indices into the timeseries
-    hashes: Vec<Vec<(HashValue, usize)>>,
+    hashes: Vec<Vec<(HashValue<'arena>, usize)>>,
 }
 
-impl HashMatrix {
-    fn new(coll: &HashCollection) -> Self {
+impl<'arena> HashMatrix<'arena> {
+    fn new(coll: &HashCollection, arena: &'arena Bump) -> Self {
         let mut hashes = Vec::with_capacity(coll.hasher.repetitions);
         for repetition in 0..coll.hasher.repetitions {
             let mut rephashes = Vec::with_capacity(coll.pools.len());
             for i in 0..coll.pools.len() {
-                rephashes.push((coll.hash_value(i, repetition), i));
+                rephashes.push((coll.hash_value(i, repetition, arena), i));
             }
             rephashes.sort_unstable();
-            debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0));
+            debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));
             hashes.push(rephashes);
         }
         Self { hashes }
@@ -315,301 +270,130 @@ impl HashMatrix {
         &'hashes self,
         depth: usize,
         repetition: usize,
-    ) -> BucketIterator<'hashes> {
-        debug_assert!(self.hashes[repetition].is_sorted_by_key(|pair| pair.0));
+    ) -> BucketIterator<'hashes, 'arena> {
+        debug_assert!(self.hashes[repetition].is_sorted_by_key(|pair| pair.0.clone()));
         BucketIterator {
             hashes: &self.hashes[repetition],
-            mask: mask(depth),
+            depth,
             idx: 0,
         }
     }
 }
 
-pub struct BucketIterator<'hashes> {
-    hashes: &'hashes Vec<(HashValue, usize)>,
-    mask: HashValue,
+pub struct BucketIterator<'hashes, 'arena> {
+    hashes: &'hashes Vec<(HashValue<'arena>, usize)>,
+    depth: usize,
     idx: usize,
 }
 
-impl<'hashes> Iterator for BucketIterator<'hashes> {
-    type Item = (Range<usize>, &'hashes [(HashValue, usize)]);
+impl<'hashes, 'arena> Iterator for BucketIterator<'hashes, 'arena> {
+    type Item = (Range<usize>, &'hashes [(HashValue<'arena>, usize)]);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.idx >= self.hashes.len() {
             return None;
         }
         let start = self.idx;
-        let current = self.hashes[self.idx].0 & self.mask;
-        while self.idx < self.hashes.len() && (self.hashes[self.idx].0 & self.mask) == current {
+        let current = &self.hashes[self.idx].0;
+        while self.idx < self.hashes.len() && self.hashes[self.idx].0.prefix_eq(current, self.depth)
+        {
             self.idx += 1;
         }
-        // println!("boundary {:?} (mask {:?}) size {}", current, self.mask, self.idx - start);
         Some((start..self.idx, &self.hashes[start..self.idx]))
     }
 }
 
-impl BytesSize for HashMatrix {
+impl<'arena> BytesSize for HashMatrix<'arena> {
     fn bytes_size(&self) -> PrettyBytes {
         use std::mem::size_of;
         PrettyBytes(size_of::<(HashValue, usize)>() * self.hashes.len() * self.hashes[0].len())
     }
 }
 
-thread_local! {
-    static ZNORM_BUFFER: RefCell<Vec<f64>> = RefCell::new(Vec::new());
-    static EMBED_BUFFER: RefCell<Vec<f64>> = RefCell::new(Vec::new());
-}
-
-struct HyperplaneLSH {
-    /// Organized like a three dimensional matrix
-    rands: Vec<f64>,
-    repetitions: usize,
-    k: usize,
-    dim: usize,
-}
-
-impl HyperplaneLSH {
-    fn new(dim: usize, k: usize, repetitions: usize, seed: u64) -> Self {
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        let mut rands = Vec::with_capacity(dim * k * repetitions);
-        let normal = Normal::new(0.0, 1.0).expect("problem instantiating normal distribution");
-        for _ in 0..(repetitions * k * dim) {
-            rands.push(normal.sample(&mut rng));
-        }
-
-        Self {
-            rands,
-            repetitions,
-            k,
-            dim,
-        }
-    }
-
-    fn plane(&self, repetition: usize, bit: usize) -> &'_ [f64] {
-        let idx = repetition * self.k * self.dim + bit * self.dim;
-        &self.rands[idx..idx + self.dim]
-    }
-
-    fn hash<'hasher>(
-        &'hasher self,
-        v: &'hasher [f64],
-    ) -> impl Iterator<Item = HashValue> + 'hasher {
-        let mut repetition = 0;
-        std::iter::from_fn(move || {
-            if repetition >= self.repetitions {
-                return None;
-            }
-            let mut word = 0u64;
-            for bit in 0..self.k {
-                if dot(v, &self.plane(repetition, bit)) > 0.0 {
-                    word = (word << 1) | 1;
-                } else {
-                    word = word << 1;
-                }
-            }
-            repetition += 1;
-            Some(HashValue(word))
-        })
-    }
-}
-
 /// Data structure to do LSH of subsequences.
 pub struct Hasher {
+    pub dimension: usize,
     pub k: usize,
     pub k_left: usize,
     pub k_right: usize,
     pub tensor_repetitions: usize,
     pub repetitions: usize,
-    hyperplanes: HyperplaneLSH,
-    embedder: Embedder,
+    // this is organized like a three dimensional matrix
+    vectors: Vec<f64>,
+    width: f64,
 }
 
 impl Hasher {
-    pub fn new(k: usize, repetitions: usize, embedder: Embedder, seed: u64) -> Self {
+    pub fn new(dimension: usize, k: usize, repetitions: usize, width: f64, seed: u64) -> Self {
         let k_left = k / 2;
         let k_right = (k as f64 / 2.0).ceil() as usize;
         let tensor_repetitions = (repetitions as f64).sqrt().ceil() as usize;
-        let hyperplanes = HyperplaneLSH::new(embedder.dim_in, k, tensor_repetitions, seed);
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let mut vectors = Vec::with_capacity(dimension * k * tensor_repetitions);
+        let normal = Normal::new(0.0, 1.0).expect("problem instantiating normal distribution");
+        for _ in 0..(repetitions * k * dimension) {
+            vectors.push(normal.sample(&mut rng));
+        }
 
         Self {
+            dimension,
             k,
             k_left,
             k_right,
             tensor_repetitions,
             repetitions,
-            hyperplanes,
-            embedder,
+            vectors,
+            width,
         }
     }
 
-    pub fn hash(&self, ts: &WindowedTimeseries, i: usize) -> TensorPool {
-        assert!(ts.w == self.embedder.dim_in);
+    fn get_vector(&self, repetition: usize, concat: usize) -> &'_ [f64] {
+        let idx = repetition * self.k * self.dimension + concat * self.dimension;
+        &self.vectors[idx..idx + self.dimension]
+    }
 
-        ZNORM_BUFFER.with(|zbuf| {
-            // do z normalization
-            zbuf.borrow_mut().clear();
-            ts.znormalized(i, &mut zbuf.borrow_mut());
-
-            // do the embedding
-            EMBED_BUFFER.with(|ebuf| {
-                let mut ebuf = ebuf.borrow_mut();
-                ebuf.clear();
-                ebuf.resize(self.embedder.dim_out, 0.0);
-                self.embedder.embed(&zbuf.borrow(), &mut ebuf);
-
-                // and finally do the hashing itself and construct the tensor pool
-                TensorPool::from_words(self.hyperplanes.hash(&ebuf), self.tensor_repetitions)
-            })
-        })
+    //// With this function we hash all the subsequences of the timeseries in one go.
+    //// The hash values are placed in the output buffer, which can be reused across calls.
+    pub fn hash_all(
+        &self,
+        ts: &WindowedTimeseries,
+        k: usize,
+        repetition: usize,
+        buffer: &mut [i64],
+    ) {
+        assert!(buffer.len() == ts.num_subsequences());
+        let v = self.get_vector(repetition, k);
+        DOTP_BUFFER.with(|dotp_buf| {
+            ts.znormalized_sliding_dot_product(v, &mut dotp_buf.borrow_mut());
+            for (i, dotp) in dotp_buf.borrow().iter().enumerate() {
+                buffer[i] = (dotp / self.width) as i64;
+            }
+        });
     }
 }
 
+//// And this is the buffer that is reused across sliding dot product invocations.
+//// It's thread local, so it is safe to use if there are multiple concurrent threads.
+thread_local! { static DOTP_BUFFER: RefCell<Vec<f64>> = RefCell::new(Vec::new()); }
+
 #[cfg(test)]
 mod test {
-    use crate::distance::*;
-    use crate::embedding::*;
     use crate::lsh::*;
-
-    #[test]
-    fn test_probability() {
-        use rand::prelude::*;
-        use rand_distr::StandardNormal;
-        use rand_xoshiro::Xoroshiro128PlusPlus;
-        let mut rng = Xoroshiro128PlusPlus::seed_from_u64(3462);
-        let dim = 2;
-        let repetitions = 10000;
-        let n = 1000;
-
-        let hasher = HyperplaneLSH::new(dim, 1, repetitions, 13462);
-
-        let a: Vec<f64> = StandardNormal.sample_iter(&mut rng).take(dim).collect();
-        let a = normalize(&a);
-
-        assert_eq!(
-            1.0,
-            hasher
-                .hash(&a)
-                .zip(hasher.hash(&a))
-                .filter(|(ha, hb)| ha == hb)
-                .count() as f64
-                / repetitions as f64
-        );
-
-        let mut angles = Vec::new();
-        let mut probs = Vec::new();
-        let mut expected = Vec::new();
-        for _ in 0..n {
-            let b: Vec<f64> = StandardNormal.sample_iter(&mut rng).take(dim).collect();
-            let b = normalize(&b);
-
-            let angle = crate::distance::dot(&a, &b).acos();
-
-            let prob = hasher
-                .hash(&a)
-                .zip(hasher.hash(&b))
-                .filter(|(ha, hb)| ha == hb)
-                .count() as f64
-                / repetitions as f64;
-            let expected_prob = 1.0 - angle / (std::f64::consts::PI);
-
-            angles.push(angle);
-            probs.push(prob);
-            expected.push(expected_prob);
-            assert!(
-                (expected_prob - prob).abs() <= 0.01,
-                "discrepancy in probabilities:\n\texpected: {}\n\tactual:   {}",
-                expected_prob,
-                prob
-            );
-        }
-
-        // let exp_trace = Scatter::new(angles.clone(), expected)
-        //     .name("expected")
-        //     .mode(Mode::Markers);
-        // let actual_trace = Scatter::new(angles.clone(), probs)
-        //     .name("actual")
-        //     .mode(Mode::Markers);
-        // let mut p = Plot::new();
-        // p.add_trace(exp_trace);
-        // p.add_trace(actual_trace);
-        // p.show();
-    }
-
-    #[test]
-    fn test_probability_k() {
-        use rand::prelude::*;
-        use rand_distr::StandardNormal;
-        use rand_xoshiro::Xoroshiro128PlusPlus;
-        let mut rng = Xoroshiro128PlusPlus::seed_from_u64(3462);
-        let dim = 10;
-        let repetitions = 10000;
-        let n = 10;
-
-        for k in 1..=8 {
-            let hasher = HyperplaneLSH::new(dim, k, repetitions, 13462);
-
-            let a: Vec<f64> = StandardNormal.sample_iter(&mut rng).take(dim).collect();
-            let a = normalize(&a);
-
-            assert_eq!(
-                1.0,
-                hasher
-                    .hash(&a)
-                    .zip(hasher.hash(&a))
-                    .filter(|(ha, hb)| ha == hb)
-                    .count() as f64
-                    / repetitions as f64
-            );
-
-            let mut bs: Vec<(f64, Vec<f64>)> = (0..n)
-                .map(|_| {
-                    let b: Vec<f64> = StandardNormal.sample_iter(&mut rng).take(dim).collect();
-                    let b = normalize(&b);
-                    let angle = crate::distance::dot(&a, &b).acos();
-                    let expected_prob = (1.0 - angle / (std::f64::consts::PI)).powi(k as i32);
-                    (expected_prob, b)
-                })
-                .collect();
-            bs.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap().reverse());
-
-            for (expected_prob, b) in bs {
-                if expected_prob >= 0.8 {
-                    continue;
-                }
-                let prob = hasher
-                    .hash(&a)
-                    .zip(hasher.hash(&b))
-                    .filter(|(ha, hb)| ha == hb)
-                    .count() as f64
-                    / repetitions as f64;
-                println!("expected: {} actual: {}", expected_prob, prob);
-                println!("dot product {}", dot(&a, &b));
-
-                assert!(
-                    (expected_prob - prob).abs() <= 0.05,
-                    "discrepancy in probabilities for k={}:\n\texpected: {}\n\tactual:   {}",
-                    k,
-                    expected_prob,
-                    prob
-                );
-            }
-        }
-    }
 
     #[test]
     fn test_first_collision() {
         let w = 300;
         let ts = crate::load::loadts("data/ECG.csv", Some(500)).expect("problem loading data");
         let ts = crate::WindowedTimeseries::new(ts, w);
-        let sf = scaling_factor(&ts, zeucl, 0.01);
 
         let k = 32;
         let repetitions = 200;
 
-        let hasher = Hasher::new(k, repetitions, Embedder::new(ts.w, ts.w, sf, 1245), 1245);
+        let hasher = Hasher::new(w, k, repetitions, 5.0, 1245);
         let pools = HashCollection::from_ts(&ts, &hasher);
 
-        for &depth in &[32usize, 20, 10] {
+        // for &depth in &[32usize, 20, 10] {
+        for &depth in &[10] {
             println!("depth {}", depth);
             for i in 0..ts.num_subsequences() {
                 for j in 0..ts.num_subsequences() {

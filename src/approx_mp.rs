@@ -3,7 +3,6 @@
 // which is a LSH adaptive nearest neighbor algorithm.
 
 use crate::distance::*;
-use crate::embedding::*;
 use crate::lsh::*;
 use crate::types::*;
 use indicatif::ProgressBar;
@@ -11,6 +10,7 @@ use indicatif::ProgressStyle;
 use slog_scope::info;
 use std::ops::Range;
 use std::time::Instant;
+use bumpalo::Bump;
 
 pub fn approx_mp(
     ts: &WindowedTimeseries,
@@ -20,25 +20,21 @@ pub fn approx_mp(
     seed: u64,
 ) -> Vec<(f64, usize)> {
     let start = Instant::now();
-    // The scaling factor is a very important component for the performance
-    // of the algorithm. It allows to control where very dissimilar points
-    // are placed in the range `[0, 1]`, which in turn controls the probability
-    // of collision of a subsequence with far away ones.
-    let sf = scaling_factor(ts, zeucl, 0.01);
-    assert!(!sf.is_nan());
-    println!("[{:?}] Scaling factor: {}", start.elapsed(), sf);
 
     let exclusion_zone = ts.w / 4;
-    info!("Approximate Matrix Profile setup"; "k" => k, "repetitions" => repetitions, "delta" => delta, "seed" => seed, "scaling_factor" => sf, "exclusion_zone" => exclusion_zone);
+    info!("Approximate Matrix Profile setup"; "k" => k, "repetitions" => repetitions, "delta" => delta, "seed" => seed, "exclusion_zone" => exclusion_zone);
 
-    let hasher = Hasher::new(k, repetitions, Embedder::new(ts.w, ts.w, sf, seed), seed);
+    // FIXME find a good width parameter
+    let hasher_width = 10.0;
+    let hasher = Hasher::new(ts.w, k, repetitions, hasher_width, seed);
     let pools = HashCollection::from_ts(&ts, &hasher);
     println!(
         "[{:?}] Computed hash pools, taking {}",
         start.elapsed(),
         pools.bytes_size()
     );
-    let hashes = pools.get_hash_matrix();
+    let hashes_arena = Bump::new();
+    let hashes = pools.get_hash_matrix(&hashes_arena);
     println!(
         "[{:?}] Computed hash matrix, taking {}",
         start.elapsed(),
