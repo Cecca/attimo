@@ -62,10 +62,9 @@ pub fn bench_sliding_dot_product(c: &mut Criterion) {
 
 pub fn bench_hash_ts(c: &mut Criterion) {
     let mut group = c.benchmark_group("hash-time-series");
-    // Configure Criterion.rs to detect smaller differences and increase sample size to improve
-    // precision and counteract the resulting noise.
+    group.sampling_mode(criterion::SamplingMode::Flat);
     group.sample_size(10);
-    let w = 200;
+    let w = 500;
     let ts = WindowedTimeseries::gen_randomwalk(10000, w, 12345);
     let hasher = Hasher::new(w, 32, 200, 10.0, 12345);
     group.bench_function("hash time series", |b| {
