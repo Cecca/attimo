@@ -97,8 +97,6 @@ impl WindowedTimeseries {
 
     pub fn sliding_dot_product(&self, v: &[f64], output: &mut Vec<f64>) {
         let n = self.data.len();
-        dbg!(&self.data);
-        dbg!(v);
         assert!(v.len() == self.w);
         //// Pre-allocate the output
         output.clear();
@@ -112,11 +110,9 @@ impl WindowedTimeseries {
             for (i, &x) in v.iter().enumerate() {
                 vfft[self.w - i - 1] = Complex { re: x, im: 0.0 };
             }
-            dbg!(&vfft);
             let mut planner = FftPlanner::new();
             let fft = planner.plan_fft_forward(n);
             fft.process(&mut vfft);
-            dbg!(&vfft);
 
             //// Then compute the element-wise multiplication between the dot products, inplace
             for i in 0..n {
