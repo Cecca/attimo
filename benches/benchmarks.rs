@@ -27,5 +27,5 @@ pub fn bench_hash_ts(c: &mut Criterion) {
     c.bench_function("hash time series", |b| b.iter(|| HashCollection::from_ts(&ts, &hasher)));
 }
 
-criterion_group!(benches, bench_hash_ts);
+criterion_group!(benches, bench_construct_ts, bench_hash_ts);
 criterion_main!(benches);
