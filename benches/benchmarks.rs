@@ -28,10 +28,10 @@ pub fn bench_sliding_dot_product(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("Sliding dot product");
 
-    let n = 1000000;
     let w = 400;
 
-    for n in [10000usize, 100000, 1000000] {
+    for n in [1, 2, 3, 4, 5, 6] {
+        let n = n*10000;
         group.bench_with_input(
             BenchmarkId::new("sliding dot product slow", n),
             &n,

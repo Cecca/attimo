@@ -142,22 +142,30 @@ impl WindowedTimeseries {
         }
     }
 
+    //// This function allows to compute the sliding dot product between the input vector
+    //// and the z-normalized subsequences of the time series. Note that the input
+    //// is not z-normalized by this function.
     pub fn znormalized_sliding_dot_product(&self, v: &[f64], output: &mut Vec<f64>) {
+        self.sliding_dot_product(v, output);
+        let sumv: f64= v.iter().sum();
+        for i in 0..self.num_subsequences() {
+            let m = self.mean(i);
+            let sd = self.sd(i);
+            output[i] = output[i] / sd - sumv * m/sd;
+        }
+    }
+
+    pub fn znormalized_sliding_dot_product_slow(&self, v: &[f64], output: &mut Vec<f64>) {
         assert!(v.len() == self.w);
         //// Pre-allocate the output
         output.clear();
         output.resize(self.num_subsequences(), 0.0);
 
         let mut buffer = vec![0.0; self.w];
-        let (mv, sv) = meansd(v);
-        let mut vnorm = vec![0.0; self.w];
-        for i in 0..v.len() {
-            vnorm[i] = (v[i] - mv) / sv;
-        }
 
         for i in 0..self.num_subsequences() {
             self.znormalized(i, &mut buffer);
-            output[i] = dot(&vnorm, &buffer);
+            output[i] = dot(&v, &buffer);
         }
     }
 
@@ -251,6 +259,35 @@ mod test {
             }
         }
     }
+
+    #[test]
+    fn test_znormalized_sliding_dot_product() {
+        use rand::prelude::*;
+        use rand_distr::StandardNormal;
+        use rand_xoshiro::Xoroshiro128Plus;
+
+        for n in [10, 100, 1234, 4000] {
+            for w in [3, 100, 200, 500] {
+                if w < n {
+                    let ts = WindowedTimeseries::gen_randomwalk(n, w, 12345);
+
+                    let rng = Xoroshiro128Plus::seed_from_u64(12344);
+                    let v: Vec<f64> = rng.sample_iter(StandardNormal).take(w).collect();
+                    let mut expected = vec![0.0; ts.num_subsequences()];
+                    let mut actual = vec![0.0; ts.num_subsequences()];
+
+                    ts.znormalized_sliding_dot_product_slow(&v, &mut expected);
+                    ts.znormalized_sliding_dot_product(&v, &mut actual);
+
+                    assert!(expected
+                        .into_iter()
+                        .zip(actual.into_iter())
+                        .all(|(e, a)| (e - a).abs() <= 0.00001));
+                }
+            }
+        }
+    }
+
 
     #[test]
     fn test_meanstd() {
