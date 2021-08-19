@@ -50,22 +50,12 @@
 //// This trick is at the base of the fast MASS algorithm for computing the distance profile.
 //// The approach is based on the definition of convolution (see these [lecture notes](http://www.dei.unipd.it/~geppo/DA2/DOCS/FFT.pdf))
 
+use crate::types::{BytesSize, PrettyBytes, WindowedTimeseries};
 use bumpalo::Bump;
 use rand::prelude::*;
 use rand_distr::Normal;
 use rand_xoshiro::Xoshiro256PlusPlus;
-use std::{
-    cell::RefCell,
-    cmp::Ordering,
-    fmt::Debug,
-    ops::{BitAnd, BitOr, BitXor, Not, Range, Shl, Shr},
-};
-
-use crate::{
-    distance::*,
-    embedding::Embedder,
-    types::{BytesSize, PrettyBytes, WindowedTimeseries},
-};
+use std::{cell::RefCell, cmp::Ordering, fmt::Debug, ops::Range};
 
 //// ## Hash values
 //// We consider hash values of at most 64 bits, so to be able to pack them into 64 bits words.
@@ -122,7 +112,7 @@ pub struct TensorPool {
 }
 
 impl TensorPool {
-    fn new(k: usize, tensor_repetitions: usize) -> Self {
+    fn new(_k: usize, tensor_repetitions: usize) -> Self {
         let hashes = Vec::with_capacity(tensor_repetitions);
         Self { hashes }
     }
@@ -199,26 +189,25 @@ impl<'hasher> HashCollection<'hasher> {
 
     pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
         let depth_l = std::cmp::min(depth, self.hasher.k_left);
-        let lindex = (0..self.hasher.tensor_repetitions)
-            .find(|&rep| {
-                let idx = rep * self.hasher.k_left;
-                let hi = &self.pools[i].hashes[idx..idx + depth_l];
-                let hj= &self.pools[j].hashes[idx..idx + depth_l];
-                hi == hj
-            })?;
+        let lindex = (0..self.hasher.tensor_repetitions).find(|&rep| {
+            let idx = rep * self.hasher.k_left;
+            let hi = &self.pools[i].hashes[idx..idx + depth_l];
+            let hj = &self.pools[j].hashes[idx..idx + depth_l];
+            hi == hj
+        })?;
 
         if depth < self.hasher.k_left {
             return Some(lindex);
         }
 
         let depth_r = depth - self.hasher.k_left;
-        let rindex = (0..self.hasher.tensor_repetitions)
-            .find(|&rep| {
-                let idx = self.hasher.tensor_repetitions * self.hasher.k_left + rep * self.hasher.k_right;
-                let hi = &self.pools[i].hashes[idx..idx + depth_r];
-                let hj= &self.pools[j].hashes[idx..idx + depth_r];
-                hi == hj
-            })?;
+        let rindex = (0..self.hasher.tensor_repetitions).find(|&rep| {
+            let idx =
+                self.hasher.tensor_repetitions * self.hasher.k_left + rep * self.hasher.k_right;
+            let hi = &self.pools[i].hashes[idx..idx + depth_r];
+            let hj = &self.pools[j].hashes[idx..idx + depth_r];
+            hi == hj
+        })?;
 
         let idx = lindex * self.hasher.tensor_repetitions + rindex;
         if idx < self.hasher.repetitions {

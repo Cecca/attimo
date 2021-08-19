@@ -1,6 +1,6 @@
-use std::{fmt::Display, str::Bytes};
+use std::{fmt::Display};
 
-use crate::distance::{dot, norm};
+use crate::distance::{dot};
 
 pub struct WindowedTimeseries {
     pub data: Vec<f64>,
