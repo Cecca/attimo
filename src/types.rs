@@ -41,6 +41,20 @@ impl WindowedTimeseries {
         }
     }
 
+    //// We have the possiblity of generating a random walk windowed 
+    //// time series for testing purposes
+    pub fn gen_randomwalk(n: usize, w: usize, seed: u64) -> Self {
+        use rand::prelude::*;
+        use rand_distr::StandardNormal;
+        use rand_xoshiro::Xoroshiro128Plus;
+        let rng = Xoroshiro128Plus::seed_from_u64(seed);
+        let mut ts: Vec<f64> = rng.sample_iter(StandardNormal).take(n).collect();
+        for i in 1..n {
+            ts[i] = ts[i-1] + ts[i];
+        }
+        Self::new(ts, w)
+    }
+
     pub fn subsequence<'a>(&'a self, i: usize) -> &'a [f64] {
         &self.data[i..i + self.w]
     }
