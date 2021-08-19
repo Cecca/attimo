@@ -1,5 +1,5 @@
 use std::{fmt::Display};
-
+use rustfft::{FftPlanner, num_complex::Complex};
 use crate::distance::{dot};
 
 pub struct WindowedTimeseries {
@@ -9,17 +9,19 @@ pub struct WindowedTimeseries {
     rolling_sd: Vec<f64>,
     /// The squared norm of the z-normalized vector, to speed up the computation of the euclidean distance
     squared_norms: Vec<f64>,
+    data_fft: Vec<Complex<f64>>,
 }
 
 impl WindowedTimeseries {
     pub fn new(ts: Vec<f64>, w: usize) -> Self {
-        let mut rolling_avg = Vec::with_capacity(ts.len() - w);
-        let mut rolling_sd = Vec::with_capacity(ts.len() - w);
-        let mut squared_norms = Vec::with_capacity(ts.len() - w);
+        let n_subs = ts.len() - w;
+        let mut rolling_avg = Vec::with_capacity(n_subs);
+        let mut rolling_sd = Vec::with_capacity(n_subs);
+        let mut squared_norms = Vec::with_capacity(n_subs);
 
         // FIXME: compute it using sliding window
         let mut buffer = vec![0.0; w];
-        for i in 0..ts.len() - w {
+        for i in 0..n_subs {
             let mean = ts[i..i + w].iter().sum::<f64>() / w as f64;
             let sd =
                 ((ts[i..i + w].iter().map(|x| x * x).sum::<f64>() - mean * mean) / w as f64).sqrt();
@@ -32,12 +34,20 @@ impl WindowedTimeseries {
             squared_norms.push(dot(&buffer, &buffer));
         }
 
+        //// Now we pre-compute the FFT of the time series, which will be needed to compute
+        //// dot products for the hash values faster.
+        let mut data_fft: Vec<Complex<f64>> = ts.iter().map(|x| Complex{re: *x, im: 0.0}).collect();
+        let mut planner = FftPlanner::new();
+        let fft = planner.plan_fft_forward(ts.len());
+        fft.process(&mut data_fft);
+
         WindowedTimeseries {
             data: ts,
             w,
             rolling_avg,
             rolling_sd,
             squared_norms,
+            data_fft
         }
     }
 
