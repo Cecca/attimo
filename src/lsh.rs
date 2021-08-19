@@ -209,7 +209,7 @@ impl<'hasher> HashCollection<'hasher> {
             hi == hj
         })?;
 
-        let idx = lindex * self.hasher.tensor_repetitions + rindex;
+        let idx = rindex * self.hasher.tensor_repetitions + lindex;
         if idx < self.hasher.repetitions {
             Some(idx)
         } else {
@@ -225,8 +225,7 @@ impl<'hasher> HashCollection<'hasher> {
             .filter(|(hi, hj)| hi == hj)
             .count();
 
-        n_collisions as f64
-            / ((self.hasher.k_left + self.hasher.k_right) * self.hasher.tensor_repetitions) as f64
+        n_collisions as f64 / self.pools[i].hashes.len() as f64
     }
 
     pub fn get_hash_matrix<'arena>(&self, arena: &'arena Bump) -> HashMatrix<'arena> {
@@ -381,8 +380,7 @@ mod test {
         let hasher = Hasher::new(w, k, repetitions, 5.0, 1245);
         let pools = HashCollection::from_ts(&ts, &hasher);
 
-        // for &depth in &[32usize, 20, 10] {
-        for &depth in &[10] {
+        for &depth in &[32usize, 20, 10] {
             println!("depth {}", depth);
             for i in 0..ts.num_subsequences() {
                 for j in 0..ts.num_subsequences() {
