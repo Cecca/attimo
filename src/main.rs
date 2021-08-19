@@ -1,24 +1,14 @@
-#![feature(allocator_api)]
-#![feature(is_sorted)]
-
-mod approx_mp;
-mod distance;
-mod embedding;
-mod load;
-mod lsh;
-mod types;
-
 use std::fs::OpenOptions;
 use slog::*;
 use anyhow::Result;
-use approx_mp::*;
+use attimo::approx_mp::*;
 use argh::FromArgs;
-use load::*;
+use attimo::load::*;
 use plotly::common::Mode;
 use plotly::layout::LayoutGrid;
 use plotly::{Layout, Plot, Scatter};
 use slog_scope::GlobalLoggerGuard;
-use types::*;
+use attimo::types::*;
 
 #[derive(FromArgs)]
 /// ATTIMO computes ApproximaTe TImeseries MOtifs.

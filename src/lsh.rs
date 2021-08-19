@@ -372,7 +372,7 @@ mod test {
     fn test_first_collision() {
         let w = 300;
         let ts = crate::load::loadts("data/ECG.csv", Some(500)).expect("problem loading data");
-        let ts = crate::WindowedTimeseries::new(ts, w);
+        let ts = crate::types::WindowedTimeseries::new(ts, w);
 
         let k = 32;
         let repetitions = 200;
