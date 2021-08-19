@@ -1,6 +1,6 @@
-use std::{fmt::Display};
-use rustfft::{FftPlanner, num_complex::Complex};
-use crate::distance::{dot};
+use crate::distance::dot;
+use rustfft::{num_complex::Complex, FftPlanner};
+use std::{cell::RefCell, fmt::Display};
 
 pub struct WindowedTimeseries {
     pub data: Vec<f64>,
@@ -36,7 +36,8 @@ impl WindowedTimeseries {
 
         //// Now we pre-compute the FFT of the time series, which will be needed to compute
         //// dot products for the hash values faster.
-        let mut data_fft: Vec<Complex<f64>> = ts.iter().map(|x| Complex{re: *x, im: 0.0}).collect();
+        let mut data_fft: Vec<Complex<f64>> =
+            ts.iter().map(|x| Complex { re: *x, im: 0.0 }).collect();
         let mut planner = FftPlanner::new();
         let fft = planner.plan_fft_forward(ts.len());
         fft.process(&mut data_fft);
@@ -47,11 +48,11 @@ impl WindowedTimeseries {
             rolling_avg,
             rolling_sd,
             squared_norms,
-            data_fft
+            data_fft,
         }
     }
 
-    //// We have the possiblity of generating a random walk windowed 
+    //// We have the possiblity of generating a random walk windowed
     //// time series for testing purposes
     pub fn gen_randomwalk(n: usize, w: usize, seed: u64) -> Self {
         use rand::prelude::*;
@@ -60,7 +61,7 @@ impl WindowedTimeseries {
         let rng = Xoroshiro128Plus::seed_from_u64(seed);
         let mut ts: Vec<f64> = rng.sample_iter(StandardNormal).take(n).collect();
         for i in 1..n {
-            ts[i] = ts[i-1] + ts[i];
+            ts[i] = ts[i - 1] + ts[i];
         }
         Self::new(ts, w)
     }
@@ -95,6 +96,46 @@ impl WindowedTimeseries {
     }
 
     pub fn sliding_dot_product(&self, v: &[f64], output: &mut Vec<f64>) {
+        let n = self.data.len();
+        dbg!(&self.data);
+        dbg!(v);
+        assert!(v.len() == self.w);
+        //// Pre-allocate the output
+        output.clear();
+        output.resize(self.num_subsequences(), 0.0);
+
+        FFT_BUFFER.with(|vfft| {
+            //// Then compute the FFT of the reversed input vector, padded with zeros
+            let mut vfft = vfft.borrow_mut();
+            vfft.clear();
+            vfft.resize(n, Complex { re: 0.0, im: 0.0 });
+            for (i, &x) in v.iter().enumerate() {
+                vfft[self.w - i - 1] = Complex { re: x, im: 0.0 };
+            }
+            dbg!(&vfft);
+            let mut planner = FftPlanner::new();
+            let fft = planner.plan_fft_forward(n);
+            fft.process(&mut vfft);
+            dbg!(&vfft);
+
+            //// Then compute the element-wise multiplication between the dot products, inplace
+            for i in 0..n {
+                vfft[i] = vfft[i] * self.data_fft[i];
+            }
+
+            //// And go back to the time domain
+            let ifft = planner.plan_fft_inverse(n);
+            ifft.process(&mut vfft);
+
+            //// Copy the values to the output buffer, rescaling on the go (`rustfft` 
+            //// does not perform normalization automatically)
+            for i in 0..self.num_subsequences() {
+                output[i] = vfft[(i + v.len() - 1) % n].re / n as f64
+            }
+        })
+    }
+
+    pub fn sliding_dot_product_slow(&self, v: &[f64], output: &mut Vec<f64>) {
         assert!(v.len() == self.w);
         //// Pre-allocate the output
         output.clear();
@@ -139,31 +180,12 @@ impl WindowedTimeseries {
     }
 }
 
+thread_local! { static FFT_BUFFER: RefCell<Vec<Complex<f64>>> = RefCell::new(Vec::new()); }
+
 fn meansd(v: &[f64]) -> (f64, f64) {
     let mean: f64 = v.iter().sum::<f64>() / v.len() as f64;
     let sd = ((v.iter().map(|x| x * x).sum::<f64>() - mean * mean) / v.len() as f64).sqrt();
     (mean, sd)
-}
-
-#[test]
-fn test_meanstd() {
-    use rand::prelude::*;
-    use rand_distr::Uniform;
-    use rand_xoshiro::Xoroshiro128Plus;
-    let rng = Xoroshiro128Plus::seed_from_u64(3462);
-    let ts: Vec<f64> = rng.sample_iter(Uniform::new(0.0, 1.0)).take(1000).collect();
-    let w = 100;
-    let ts = WindowedTimeseries::new(ts, w);
-
-    for i in 0..ts.num_subsequences() {
-        let a = ts.subsequence(i);
-        let mean: f64 = a.iter().sum::<f64>() / a.len() as f64;
-        let actual_mean = ts.mean(i);
-        let sd = ((a.iter().map(|x| x * x).sum::<f64>() - mean * mean) / a.len() as f64).sqrt();
-        let actual_sd = ts.sd(i);
-        assert_eq!(mean, actual_mean);
-        assert_eq!(sd, actual_sd);
-    }
 }
 
 pub struct PrettyBytes(pub usize);
@@ -198,6 +220,60 @@ impl<T> BytesSize for Vec<T> {
             PrettyBytes(0)
         } else {
             PrettyBytes(self.len() * std::mem::size_of::<T>())
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::types::WindowedTimeseries;
+
+    #[test]
+    fn test_sliding_dot_product() {
+        use rand::prelude::*;
+        use rand_distr::StandardNormal;
+        use rand_xoshiro::Xoroshiro128Plus;
+
+        for n in [10, 100, 1234, 4000] {
+            for w in [3, 100, 200, 500] {
+                if w < n {
+                    let ts = WindowedTimeseries::gen_randomwalk(n, w, 12345);
+
+                    let rng = Xoroshiro128Plus::seed_from_u64(12344);
+                    let v: Vec<f64> = rng.sample_iter(StandardNormal).take(w).collect();
+                    let mut expected = vec![0.0; ts.num_subsequences()];
+                    let mut actual = vec![0.0; ts.num_subsequences()];
+
+                    ts.sliding_dot_product_slow(&v, &mut expected);
+                    ts.sliding_dot_product(&v, &mut actual);
+
+                    assert!(expected
+                        .into_iter()
+                        .zip(actual.into_iter())
+                        .all(|(e, a)| (e - a).abs() <= 0.00001));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_meanstd() {
+        use rand::prelude::*;
+        use rand_distr::Uniform;
+        use rand_xoshiro::Xoroshiro128Plus;
+        let rng = Xoroshiro128Plus::seed_from_u64(3462);
+        let ts: Vec<f64> = rng.sample_iter(Uniform::new(0.0, 1.0)).take(1000).collect();
+        let w = 100;
+        let ts = WindowedTimeseries::new(ts, w);
+
+        for i in 0..ts.num_subsequences() {
+            let a = ts.subsequence(i);
+            let mean: f64 = a.iter().sum::<f64>() / a.len() as f64;
+            let actual_mean = ts.mean(i);
+            let sd = ((a.iter().map(|x| x * x).sum::<f64>() - mean * mean) / a.len() as f64).sqrt();
+            let actual_sd = ts.sd(i);
+            assert_eq!(mean, actual_mean);
+            assert_eq!(sd, actual_sd);
         }
     }
 }

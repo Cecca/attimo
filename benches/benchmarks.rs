@@ -20,6 +20,23 @@ pub fn bench_construct_ts(c: &mut Criterion) {
     c.bench_function("construct windowed time series", |b| b.iter(|| WindowedTimeseries::new(ts.clone(), black_box(w))));
 }
 
+pub fn bench_sliding_dot_product(c: &mut Criterion) {
+    use rand::prelude::*;
+    use rand_distr::StandardNormal;
+    use rand_xoshiro::Xoroshiro128Plus;
+
+    let n = 1000000;
+    let w = 400;
+
+    let ts = WindowedTimeseries::gen_randomwalk(n, w, 12345);
+
+    let rng = Xoroshiro128Plus::seed_from_u64(12344);
+    let v: Vec<f64> = rng.sample_iter(StandardNormal).take(w).collect();
+    let mut output = vec![0.0; ts.num_subsequences()];
+
+    c.bench_function("sliding dot producxt", |b| b.iter(|| ts.znormalized_sliding_dot_product(&v, &mut output)));
+}
+
 pub fn bench_hash_ts(c: &mut Criterion) {
     let mut group = c.benchmark_group("hash-time-series");
     // Configure Criterion.rs to detect smaller differences and increase sample size to improve
@@ -32,5 +49,5 @@ pub fn bench_hash_ts(c: &mut Criterion) {
     group.finish()
 }
 
-criterion_group!(benches, bench_construct_ts, bench_hash_ts);
+criterion_group!(benches, bench_sliding_dot_product, bench_construct_ts, bench_hash_ts);
 criterion_main!(benches);
