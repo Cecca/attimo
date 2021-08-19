@@ -6,21 +6,22 @@ import sys
 import sqlite3
 import datetime
 import socket
+from subprocess import PIPE
 
 hostname = socket.gethostname()
 
 bench_date = datetime.datetime.now().isoformat()
 
-rust_version = subprocess.run(["rustc", "--version"], capture_output=True).stdout.decode("ascii").strip()
+rust_version = subprocess.run(["rustc", "--version"], stdout=PIPE).stdout.decode("ascii").strip()
 
-git_sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True).stdout.decode('ascii').strip()
+git_sha = subprocess.run(["git", "rev-parse", "HEAD"], stdout=PIPE).stdout.decode('ascii').strip()
 assert len(git_sha) > 0
-git_commitdate = subprocess.run(["git", "log", "-1", "--format=%ci", "HEAD"], capture_output=True).stdout.decode('ascii').strip()
+git_commitdate = subprocess.run(["git", "log", "-1", "--format=%ci", "HEAD"], stdout=PIPE).stdout.decode('ascii').strip()
 assert len(git_commitdate) > 0
-git_branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True).stdout.decode('ascii').strip() 
+git_branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], stdout=PIPE).stdout.decode('ascii').strip() 
 assert len(git_branch) > 0
-git_diff = subprocess.run(["git", "diff"], capture_output=True).stdout.decode('utf-8')
-git_msg = subprocess.run(["git", "log", "-1", "--pretty=%B"], capture_output=True).stdout.decode("utf-8").strip()
+git_diff = subprocess.run(["git", "diff"], stdout=PIPE).stdout.decode('utf-8')
+git_msg = subprocess.run(["git", "log", "-1", "--pretty=%B"], stdout=PIPE).stdout.decode("utf-8").strip()
 
 res = subprocess.run(
     ["cargo", "criterion", "--message-format=json"],
