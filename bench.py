@@ -5,6 +5,9 @@ import json
 import sys
 import sqlite3
 import datetime
+import socket
+
+hostname = socket.gethostname()
 
 bench_date = datetime.datetime.now().isoformat()
 
@@ -31,6 +34,7 @@ with sqlite3.connect("bench.sqlite") as db:
     db.execute("""
     CREATE TABLE IF NOT EXISTS bench_results (
         date    TIMESTAMP,
+        hostname    TEXT,
         git_sha   TEXT,
         git_commit_date TIMESTAMP,
         git_branch  TEXT,
@@ -45,9 +49,9 @@ with sqlite3.connect("bench.sqlite") as db:
         if obj['reason'] == 'benchmark-complete':
             db.execute("""
                 INSERT INTO bench_results (
-                    date, git_sha, git_commit_date, git_branch, git_diff, git_msg, stats
+                    date, hostname, git_sha, git_commit_date, git_branch, git_diff, git_msg, stats
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?
                 )
-            """, (bench_date, git_sha, git_commitdate, git_branch, git_diff, git_msg, json.dumps(obj)))
+            """, (bench_date, hostname, git_sha, git_commitdate, git_branch, git_diff, git_msg, json.dumps(obj)))
 
