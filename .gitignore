@@ -3,3 +3,4 @@
 flamegraph.svg
 /docs
 bench.sqlite
+.trace.log
