@@ -186,12 +186,6 @@ impl WindowedTimeseries {
 
 thread_local! { static FFT_BUFFER: RefCell<Vec<Complex<f64>>> = RefCell::new(Vec::new()); }
 
-fn meansd(v: &[f64]) -> (f64, f64) {
-    let mean: f64 = v.iter().sum::<f64>() / v.len() as f64;
-    let sd = ((v.iter().map(|x| x * x).sum::<f64>() - mean * mean) / v.len() as f64).sqrt();
-    (mean, sd)
-}
-
 pub struct PrettyBytes(pub usize);
 
 impl Display for PrettyBytes {
