@@ -59,12 +59,13 @@ use slog_scope::info;
 use std::{cell::RefCell, cmp::Ordering, fmt::Debug, ops::Range};
 
 //// ## Hash values
-//// We consider hash values of at most 64 bits, so to be able to pack them into 64 bits words.
+//// We consider hash values made of 8-bit words. So we have to make sure, setting the 
+//// `width` parameter, that the values are in the range `[-128, 127]`.
 
-/// Wrapper structx for 64-bits words, which sort lexicographically from the lowest significant bit
+/// Wrapper structx for vectors of 8-bits words, which sort lexicographically from the lowest significant bit.
 #[derive(Clone, Eq, PartialEq)]
 pub struct HashValue<'arena> {
-    hashes: Vec<i64, &'arena Bump>,
+    hashes: Vec<i8, &'arena Bump>,
 }
 
 impl<'arena> Debug for HashValue<'arena> {
@@ -109,7 +110,7 @@ impl<'arena> HashValue<'arena> {
 }
 
 pub struct TensorPool {
-    hashes: Vec<i64>,
+    hashes: Vec<i8>,
 }
 
 impl TensorPool {
@@ -118,7 +119,7 @@ impl TensorPool {
         Self { hashes }
     }
 
-    fn append(&mut self, hash: i64) {
+    fn append(&mut self, hash: i8) {
         self.hashes.push(hash);
     }
 }
@@ -153,13 +154,13 @@ impl<'hasher> HashCollection<'hasher> {
         Self { hasher, pools }
     }
 
-    fn left(&self, i: usize, repetition: usize) -> &[i64] {
+    fn left(&self, i: usize, repetition: usize) -> &[i8] {
         let idx = repetition % self.hasher.tensor_repetitions;
         let idx = idx * self.hasher.k_left;
         &self.pools[i].hashes[idx..idx + self.hasher.k_left]
     }
 
-    fn right(&self, i: usize, repetition: usize) -> &[i64] {
+    fn right(&self, i: usize, repetition: usize) -> &[i8] {
         let idx = repetition / self.hasher.tensor_repetitions;
         let idx = self.hasher.tensor_repetitions * self.hasher.k_left + idx * self.hasher.k_right;
         &self.pools[i].hashes[idx..idx + self.hasher.k_right]
@@ -376,14 +377,14 @@ impl Hasher {
         ts: &WindowedTimeseries,
         k: usize,
         repetition: usize,
-        buffer: &mut [i64],
+        buffer: &mut [i8],
     ) {
         assert!(buffer.len() == ts.num_subsequences());
         let v = self.get_vector(repetition, k);
         DOTP_BUFFER.with(|dotp_buf| {
             ts.znormalized_sliding_dot_product(v, &mut dotp_buf.borrow_mut());
             for (i, dotp) in dotp_buf.borrow().iter().enumerate() {
-                buffer[i] = (dotp / self.width) as i64;
+                buffer[i] = (dotp / self.width) as i8;
             }
         });
     }
