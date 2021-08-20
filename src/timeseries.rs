@@ -1,6 +1,7 @@
 use crate::distance::dot;
+use deepsize::DeepSizeOf;
 use rustfft::{num_complex::Complex, FftPlanner};
-use std::{cell::RefCell, fmt::Display};
+use std::{cell::RefCell, fmt::Display, mem::size_of};
 
 pub struct WindowedTimeseries {
     pub data: Vec<f64>,
@@ -14,6 +15,7 @@ pub struct WindowedTimeseries {
 
 impl WindowedTimeseries {
     pub fn new(ts: Vec<f64>, w: usize) -> Self {
+        assert!(w <= ts.len());
         let n_subs = ts.len() - w;
         let mut rolling_avg = Vec::with_capacity(n_subs);
         let mut rolling_sd = Vec::with_capacity(n_subs);
@@ -123,7 +125,7 @@ impl WindowedTimeseries {
             let ifft = planner.plan_fft_inverse(n);
             ifft.process(&mut vfft);
 
-            //// Copy the values to the output buffer, rescaling on the go (`rustfft` 
+            //// Copy the values to the output buffer, rescaling on the go (`rustfft`
             //// does not perform normalization automatically)
             for i in 0..self.num_subsequences() {
                 output[i] = vfft[(i + v.len() - 1) % n].re / n as f64
@@ -147,11 +149,11 @@ impl WindowedTimeseries {
     //// is not z-normalized by this function.
     pub fn znormalized_sliding_dot_product(&self, v: &[f64], output: &mut Vec<f64>) {
         self.sliding_dot_product(v, output);
-        let sumv: f64= v.iter().sum();
+        let sumv: f64 = v.iter().sum();
         for i in 0..self.num_subsequences() {
             let m = self.mean(i);
             let sd = self.sd(i);
-            output[i] = output[i] / sd - sumv * m/sd;
+            output[i] = output[i] / sd - sumv * m / sd;
         }
     }
 
@@ -206,19 +208,20 @@ pub trait BytesSize {
     fn bytes_size(&self) -> PrettyBytes;
 }
 
-impl BytesSize for WindowedTimeseries {
+impl<T: DeepSizeOf> BytesSize for T {
     fn bytes_size(&self) -> PrettyBytes {
-        PrettyBytes(8 * (self.data.len() + (self.num_subsequences() * 3)))
+        PrettyBytes(self.deep_size_of())
     }
 }
 
-impl<T> BytesSize for Vec<T> {
-    fn bytes_size(&self) -> PrettyBytes {
-        if self.is_empty() {
-            PrettyBytes(0)
-        } else {
-            PrettyBytes(self.len() * std::mem::size_of::<T>())
-        }
+impl DeepSizeOf for WindowedTimeseries {
+    fn deep_size_of_children(&self, context: &mut deepsize::Context) -> usize {
+        self.w.deep_size_of()
+            + self.data.deep_size_of_children(context)
+            + self.rolling_avg.deep_size_of_children(context)
+            + self.rolling_sd.deep_size_of_children(context)
+            + self.squared_norms.deep_size_of_children(context)
+            + size_of::<Complex<f64>>() * self.data_fft.len()
     }
 }
 
@@ -281,7 +284,6 @@ mod test {
             }
         }
     }
-
 
     #[test]
     fn test_meanstd() {

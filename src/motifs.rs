@@ -90,7 +90,6 @@ pub fn motifs(
     let exclusion_zone = ts.w / 4;
     info!("Motifs setup"; "topk" => topk, "k" => k, "repetitions" => repetitions, "delta" => delta, "seed" => seed, "exclusion_zone" => exclusion_zone);
 
-    // FIXME find a good width parameter
     let hasher_width = Hasher::estimate_width(&ts, 20, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
     let hasher = Hasher::new(ts.w, k, repetitions, hasher_width, seed);

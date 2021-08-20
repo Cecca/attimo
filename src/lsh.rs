@@ -50,16 +50,17 @@
 //// This trick is at the base of the fast MASS algorithm for computing the distance profile.
 //// The approach is based on the definition of convolution (see these [lecture notes](http://www.dei.unipd.it/~geppo/DA2/DOCS/FFT.pdf))
 
-use crate::timeseries::{BytesSize, PrettyBytes, WindowedTimeseries};
+use crate::timeseries::WindowedTimeseries;
 use bumpalo::Bump;
+use deepsize::DeepSizeOf;
 use rand::prelude::*;
 use rand_distr::Normal;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use slog_scope::info;
-use std::{cell::RefCell, cmp::Ordering, fmt::Debug, ops::Range};
+use std::{cell::RefCell, cmp::Ordering, fmt::Debug, mem::size_of, ops::Range};
 
 //// ## Hash values
-//// We consider hash values made of 8-bit words. So we have to make sure, setting the 
+//// We consider hash values made of 8-bit words. So we have to make sure, setting the
 //// `width` parameter, that the values are in the range `[-128, 127]`.
 
 /// Wrapper structx for vectors of 8-bits words, which sort lexicographically from the lowest significant bit.
@@ -71,6 +72,12 @@ pub struct HashValue<'arena> {
 impl<'arena> Debug for HashValue<'arena> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.hashes)
+    }
+}
+
+impl<'arena> DeepSizeOf for HashValue<'arena> {
+    fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
+        size_of::<i8>() * self.hashes.len()
     }
 }
 
@@ -109,6 +116,7 @@ impl<'arena> HashValue<'arena> {
     }
 }
 
+#[derive(DeepSizeOf)]
 pub struct TensorPool {
     hashes: Vec<i8>,
 }
@@ -127,13 +135,6 @@ impl TensorPool {
 pub struct HashCollection<'hasher> {
     hasher: &'hasher Hasher,
     pools: Vec<TensorPool>,
-}
-
-impl<'hasher> BytesSize for HashCollection<'hasher> {
-    fn bytes_size(&self) -> PrettyBytes {
-        // PrettyBytes(self.hasher.tensor_repetitions * self.pools.len() * std::mem::size_of::<u64>())
-        PrettyBytes(0)
-    }
 }
 
 impl<'hasher> HashCollection<'hasher> {
@@ -235,6 +236,13 @@ impl<'hasher> HashCollection<'hasher> {
     }
 }
 
+impl<'hasher> DeepSizeOf for HashCollection<'hasher> {
+    fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
+        self.pools.deep_size_of()
+    }
+}
+
+#[derive(DeepSizeOf)]
 pub struct HashMatrix<'arena> {
     /// Outer vector has one entry per repetition, inner vector has one entry per subsequence,
     /// and items are hash values and indices into the timeseries
@@ -293,14 +301,8 @@ impl<'hashes, 'arena> Iterator for BucketIterator<'hashes, 'arena> {
     }
 }
 
-impl<'arena> BytesSize for HashMatrix<'arena> {
-    fn bytes_size(&self) -> PrettyBytes {
-        use std::mem::size_of;
-        PrettyBytes(size_of::<(HashValue, usize)>() * self.hashes.len() * self.hashes[0].len())
-    }
-}
-
 /// Data structure to do LSH of subsequences.
+#[derive(DeepSizeOf)]
 pub struct Hasher {
     pub dimension: usize,
     pub k: usize,
