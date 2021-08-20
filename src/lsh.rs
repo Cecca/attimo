@@ -55,6 +55,7 @@ use bumpalo::Bump;
 use rand::prelude::*;
 use rand_distr::Normal;
 use rand_xoshiro::Xoshiro256PlusPlus;
+use slog_scope::info;
 use std::{cell::RefCell, cmp::Ordering, fmt::Debug, ops::Range};
 
 //// ## Hash values
@@ -333,6 +334,34 @@ impl Hasher {
             vectors,
             width,
         }
+    }
+
+    pub fn estimate_width(ts: &WindowedTimeseries, samples: usize, seed: u64) -> f64 {
+        let mut min_dotp = f64::INFINITY;
+        let mut max_dotp = f64::NEG_INFINITY;
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let normal = Normal::new(0.0, 1.0).expect("problem instantiating normal distribution");
+        let mut v = Vec::with_capacity(ts.w);
+        let mut buf = vec![0.0; ts.num_subsequences()];
+        for _ in 0..samples {
+            v.clear();
+            for x in normal.sample_iter(&mut rng).take(ts.w) {
+                v.push(x);
+            }
+            ts.znormalized_sliding_dot_product(&v, &mut buf);
+            let min = *buf.iter().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
+            let max = *buf.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
+            if min < min_dotp {
+                min_dotp = min;
+            }
+            if max > max_dotp {
+                max_dotp = max;
+            }
+            info!("estimating width"; "min_dotp" => min_dotp, "max_dotp" => max_dotp);
+        }
+
+        //// Pick the width so that the range is divided in 128 buckets
+        (max_dotp - min_dotp) / 64.0
     }
 
     fn get_vector(&self, repetition: usize, concat: usize) -> &'_ [f64] {
