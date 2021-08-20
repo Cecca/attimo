@@ -6,5 +6,5 @@ pub mod distance;
 pub mod embedding;
 pub mod load;
 pub mod lsh;
-pub mod types;
+pub mod timeseries;
 

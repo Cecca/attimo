@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use crate::types::*;
+use crate::timeseries::*;
 
 #[cfg(test)]
 pub fn euclidean(a: &[f64], b: &[f64]) -> f64 {

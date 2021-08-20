@@ -9,7 +9,7 @@
 ////  - [Christiani paper](https://arxiv.org/pdf/1605.02687v1.pdf) on LSH framework, including embeddings
 
 
-use crate::types::WindowedTimeseries;
+use crate::timeseries::WindowedTimeseries;
 use crate::distance::*;
 use rand::prelude::*;
 use rand_distr::{StandardNormal, Uniform};

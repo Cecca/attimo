@@ -6,7 +6,7 @@
 
 use crate::distance::*;
 use crate::lsh::*;
-use crate::types::*;
+use crate::timeseries::*;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use slog_scope::info;

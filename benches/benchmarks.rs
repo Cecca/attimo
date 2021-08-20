@@ -1,4 +1,4 @@
-use attimo::{lsh::*, types::WindowedTimeseries};
+use attimo::{lsh::*, timeseries::WindowedTimeseries};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
 pub fn bench_construct_ts(c: &mut Criterion) {

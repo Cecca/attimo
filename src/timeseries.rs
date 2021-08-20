@@ -224,7 +224,7 @@ impl<T> BytesSize for Vec<T> {
 
 #[cfg(test)]
 mod test {
-    use crate::types::WindowedTimeseries;
+    use crate::timeseries::WindowedTimeseries;
 
     #[test]
     fn test_sliding_dot_product() {

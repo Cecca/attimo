@@ -8,7 +8,7 @@ use plotly::common::Mode;
 use plotly::layout::LayoutGrid;
 use plotly::{Layout, Plot, Scatter};
 use slog_scope::GlobalLoggerGuard;
-use attimo::types::*;
+use attimo::timeseries::*;
 
 #[derive(FromArgs)]
 /// ATTIMO computes ApproximaTe TImeseries MOtifs.

@@ -50,7 +50,7 @@
 //// This trick is at the base of the fast MASS algorithm for computing the distance profile.
 //// The approach is based on the definition of convolution (see these [lecture notes](http://www.dei.unipd.it/~geppo/DA2/DOCS/FFT.pdf))
 
-use crate::types::{BytesSize, PrettyBytes, WindowedTimeseries};
+use crate::timeseries::{BytesSize, PrettyBytes, WindowedTimeseries};
 use bumpalo::Bump;
 use rand::prelude::*;
 use rand_distr::Normal;
@@ -402,7 +402,7 @@ mod test {
     fn test_first_collision() {
         let w = 300;
         let ts = crate::load::loadts("data/ECG.csv", Some(500)).expect("problem loading data");
-        let ts = crate::types::WindowedTimeseries::new(ts, w);
+        let ts = crate::timeseries::WindowedTimeseries::new(ts, w);
 
         let k = 32;
         let repetitions = 200;
