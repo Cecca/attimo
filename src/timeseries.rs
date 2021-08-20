@@ -1,7 +1,7 @@
 use crate::distance::dot;
 use deepsize::DeepSizeOf;
-use rustfft::{num_complex::Complex, FftPlanner};
-use std::{cell::RefCell, fmt::Display, mem::size_of};
+use rustfft::{Fft, FftPlanner, num_complex::Complex};
+use std::{cell::RefCell, fmt::Display, mem::size_of, sync::Arc};
 
 pub struct WindowedTimeseries {
     pub data: Vec<f64>,
@@ -11,6 +11,8 @@ pub struct WindowedTimeseries {
     /// The squared norm of the z-normalized vector, to speed up the computation of the euclidean distance
     squared_norms: Vec<f64>,
     data_fft: Vec<Complex<f64>>,
+    fftfun: Arc<dyn Fft<f64>>,
+    ifftfun: Arc<dyn Fft<f64>>,
 }
 
 impl WindowedTimeseries {
@@ -41,8 +43,10 @@ impl WindowedTimeseries {
         let mut data_fft: Vec<Complex<f64>> =
             ts.iter().map(|x| Complex { re: *x, im: 0.0 }).collect();
         let mut planner = FftPlanner::new();
-        let fft = planner.plan_fft_forward(ts.len());
-        fft.process(&mut data_fft);
+        let fftfun = planner.plan_fft_forward(ts.len());
+        let ifftfun = planner.plan_fft_inverse(ts.len());
+
+        fftfun.process(&mut data_fft);
 
         WindowedTimeseries {
             data: ts,
@@ -51,6 +55,8 @@ impl WindowedTimeseries {
             rolling_sd,
             squared_norms,
             data_fft,
+            fftfun,
+            ifftfun,
         }
     }
 
@@ -112,9 +118,7 @@ impl WindowedTimeseries {
             for (i, &x) in v.iter().enumerate() {
                 vfft[self.w - i - 1] = Complex { re: x, im: 0.0 };
             }
-            let mut planner = FftPlanner::new();
-            let fft = planner.plan_fft_forward(n);
-            fft.process(&mut vfft);
+            self.fftfun.process(&mut vfft);
 
             //// Then compute the element-wise multiplication between the dot products, inplace
             for i in 0..n {
@@ -122,8 +126,7 @@ impl WindowedTimeseries {
             }
 
             //// And go back to the time domain
-            let ifft = planner.plan_fft_inverse(n);
-            ifft.process(&mut vfft);
+            self.ifftfun.process(&mut vfft);
 
             //// Copy the values to the output buffer, rescaling on the go (`rustfft`
             //// does not perform normalization automatically)
