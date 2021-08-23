@@ -1,8 +1,8 @@
-use std::time::Instant;
-
+use attimo::sort::*;
 use attimo::{lsh::*, timeseries::WindowedTimeseries};
 use bumpalo::Bump;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use std::time::Instant;
 
 pub fn bench_construct_ts(c: &mut Criterion) {
     use rand::prelude::*;
@@ -76,6 +76,34 @@ pub fn bench_hash_ts(c: &mut Criterion) {
     group.finish()
 }
 
+pub fn bench_sort_usize(c: &mut Criterion) {
+    use rand::prelude::*;
+    use rand_xoshiro::Xoshiro256PlusPlus;
+    use rand_distr::Uniform;
+
+    let mut group = c.benchmark_group("sorting usize");
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(1234);
+    let vals: Vec<usize> = Uniform::new(0,usize::MAX).sample_iter(rng).take(10000000).collect();
+
+    group.bench_function("rust unstable sort", |b| {
+        b.iter_batched(
+            || vals.clone(),
+            |mut vals| vals.sort_unstable(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.bench_function("radix sort", |b| {
+        b.iter_batched(
+            || vals.clone(),
+            |mut vals| vals.radix_sort(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.finish()
+}
+
 pub fn bench_sort_hashes(c: &mut Criterion) {
     let mut group = c.benchmark_group("sorting hashes");
     let w = 500;
@@ -83,14 +111,22 @@ pub fn bench_sort_hashes(c: &mut Criterion) {
     let h = Hasher::new(w, 64, 200, 10.0, 12345);
     let hasher = HashCollection::from_ts(&ts, &h);
     let arena = Bump::new();
-    let hashes: Vec<(HashValue, usize)> = (0..ts.num_subsequences())
-        .map(|i| (hasher.hash_value(i, 0, &arena), i))
+    let hashes: Vec<HashValue> = (0..ts.num_subsequences())
+        .map(|i| hasher.hash_value(i, 0, &arena))
         .collect();
 
     group.bench_function("rust unstable sort", |b| {
         b.iter_batched(
             || hashes.clone(),
             |mut hashes| hashes.sort_unstable(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.bench_function("radix sort", |b| {
+        b.iter_batched(
+            || hashes.clone(),
+            |mut hashes| hashes.radix_sort(),
             criterion::BatchSize::LargeInput,
         )
     });
@@ -103,6 +139,7 @@ criterion_group!(
     bench_sliding_dot_product,
     bench_construct_ts,
     bench_hash_ts,
-    bench_sort_hashes
+    bench_sort_hashes,
+    bench_sort_usize
 );
 criterion_main!(benches);

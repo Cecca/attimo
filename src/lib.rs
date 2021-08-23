@@ -8,4 +8,5 @@ pub mod load;
 pub mod motifs;
 pub mod lsh;
 pub mod timeseries;
+pub mod sort;
 

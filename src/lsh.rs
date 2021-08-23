@@ -51,6 +51,7 @@
 //// The approach is based on the definition of convolution (see these [lecture notes](http://www.dei.unipd.it/~geppo/DA2/DOCS/FFT.pdf))
 
 use crate::timeseries::WindowedTimeseries;
+use crate::sort::*;
 use bumpalo::Bump;
 use deepsize::DeepSizeOf;
 use rand::prelude::*;
@@ -67,6 +68,15 @@ use std::{cell::RefCell, cmp::Ordering, fmt::Debug, mem::size_of, ops::Range};
 #[derive(Clone, Eq, PartialEq)]
 pub struct HashValue<'arena> {
     hashes: Vec<i8, &'arena Bump>,
+}
+
+impl<'arena> GetByte for HashValue<'arena> {
+    fn num_bytes(&self) -> usize {
+        self.hashes.len()
+    }
+    fn get_byte(&self, i: usize) -> u8 {
+        self.hashes[i] as u8
+    }
 }
 
 impl<'arena> Debug for HashValue<'arena> {
