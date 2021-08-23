@@ -167,7 +167,7 @@ impl<'hasher> HashCollection<'hasher> {
         &self.pools[i].hashes[idx..idx + self.hasher.k_right]
     }
 
-    fn hash_value<'arena>(
+    pub fn hash_value<'arena>(
         &self,
         i: usize,
         repetition: usize,

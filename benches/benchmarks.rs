@@ -1,4 +1,7 @@
+use std::time::Instant;
+
 use attimo::{lsh::*, timeseries::WindowedTimeseries};
+use bumpalo::Bump;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
 pub fn bench_construct_ts(c: &mut Criterion) {
@@ -31,7 +34,7 @@ pub fn bench_sliding_dot_product(c: &mut Criterion) {
     let w = 400;
 
     for n in [1, 2, 3, 4, 5, 6] {
-        let n = n*10000;
+        let n = n * 10000;
         group.bench_with_input(
             BenchmarkId::new("sliding dot product slow", n),
             &n,
@@ -73,10 +76,33 @@ pub fn bench_hash_ts(c: &mut Criterion) {
     group.finish()
 }
 
+pub fn bench_sort_hashes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sorting hashes");
+    let w = 500;
+    let ts = WindowedTimeseries::gen_randomwalk(1000000, w, 12345);
+    let h = Hasher::new(w, 64, 200, 10.0, 12345);
+    let hasher = HashCollection::from_ts(&ts, &h);
+    let arena = Bump::new();
+    let hashes: Vec<(HashValue, usize)> = (0..ts.num_subsequences())
+        .map(|i| (hasher.hash_value(i, 0, &arena), i))
+        .collect();
+
+    group.bench_function("rust unstable sort", |b| {
+        b.iter_batched(
+            || hashes.clone(),
+            |mut hashes| hashes.sort_unstable(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.finish()
+}
+
 criterion_group!(
     benches,
     bench_sliding_dot_product,
     bench_construct_ts,
-    bench_hash_ts
+    bench_hash_ts,
+    bench_sort_hashes
 );
 criterion_main!(benches);
