@@ -63,6 +63,10 @@ use std::{cell::RefCell, cmp::Ordering, fmt::Debug, mem::size_of, ops::Range};
 //// We consider hash values made of 8-bit words. So we have to make sure, setting the
 //// `width` parameter, that the values are in the range `[-128, 127]`.
 
+//// We only consider concatenations of hash values of a fixed length, defined in this
+//// constant `K`. The reason is that this way we can inline the hash values when allocated into a
+//// vector, rather than falling back to vector of vectors. Removing this dereference allows for
+//// a rather large speed up.
 pub const K: usize = 32;
 pub const K_HALF: usize = K / 2;
 
