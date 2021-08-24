@@ -387,7 +387,7 @@ impl Hasher {
         buffer: &mut [i8],
     ) {
         assert!(buffer.len() == ts.num_subsequences());
-        let v = self.get_vector(repetition, K);
+        let v = self.get_vector(repetition, k);
         DOTP_BUFFER.with(|dotp_buf| {
             ts.znormalized_sliding_dot_product(v, &mut dotp_buf.borrow_mut());
             for (i, dotp) in dotp_buf.borrow().iter().enumerate() {
