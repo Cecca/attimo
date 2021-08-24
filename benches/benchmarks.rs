@@ -1,8 +1,6 @@
 use attimo::sort::*;
 use attimo::{lsh::*, timeseries::WindowedTimeseries};
-use bumpalo::Bump;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use std::time::Instant;
 
 pub fn bench_construct_ts(c: &mut Criterion) {
     use rand::prelude::*;
@@ -69,7 +67,7 @@ pub fn bench_hash_ts(c: &mut Criterion) {
     group.sample_size(10);
     let w = 500;
     let ts = WindowedTimeseries::gen_randomwalk(10000, w, 12345);
-    let hasher = Hasher::new(w, 32, 200, 10.0, 12345);
+    let hasher = Hasher::new(w, 200, 10.0, 12345);
     group.bench_function("hash time series", |b| {
         b.iter(|| HashCollection::from_ts(&ts, &hasher))
     });
@@ -82,7 +80,7 @@ pub fn bench_sort_usize(c: &mut Criterion) {
     use rand_distr::Uniform;
 
     let mut group = c.benchmark_group("sorting usize");
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(1234);
+    let rng = Xoshiro256PlusPlus::seed_from_u64(1234);
     let vals: Vec<usize> = Uniform::new(0,usize::MAX).sample_iter(rng).take(10000000).collect();
 
     group.bench_function("rust unstable sort", |b| {
@@ -108,11 +106,10 @@ pub fn bench_sort_hashes(c: &mut Criterion) {
     let mut group = c.benchmark_group("sorting hashes");
     let w = 500;
     let ts = WindowedTimeseries::gen_randomwalk(1000000, w, 12345);
-    let h = Hasher::new(w, 64, 200, 10.0, 12345);
+    let h = Hasher::new(w, 200, 10.0, 12345);
     let hasher = HashCollection::from_ts(&ts, &h);
-    let arena = Bump::new();
     let hashes: Vec<HashValue> = (0..ts.num_subsequences())
-        .map(|i| hasher.hash_value(i, 0, &arena))
+        .map(|i| hasher.hash_value(i, 0))
         .collect();
 
     group.bench_function("rust unstable sort", |b| {
