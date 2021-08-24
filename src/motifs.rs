@@ -98,11 +98,6 @@ pub fn motifs(
         pools.bytes_size()
     );
     let mut hashes = pools.get_hash_matrix();
-    println!(
-        "[{:?}] Computed hash matrix, taking {}",
-        start.elapsed(),
-        hashes.bytes_size()
-    );
 
     //// Define upper and lower bounds, to avoid repeating already-done comparisons
     //// We have a range of already examined hash indices for each element and repetition
@@ -240,6 +235,11 @@ pub fn motifs(
             "avg_threshold" => thresholds.iter().sum::<usize>() as f64 / thresholds.len() as f64
         );
     }
+    println!(
+        "[{:?}] hash matrix matrix used {}",
+        start.elapsed(),
+        hashes.bytes_size()
+    );
     let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
     println!(
         "[{:?}] done! Computed {}/{} distances ({:.2}%)",
