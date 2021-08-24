@@ -1,13 +1,11 @@
 use anyhow::Result;
 use argh::FromArgs;
-use attimo::approx_mp::*;
 use attimo::distance::zeucl;
 use attimo::load::*;
 use attimo::motifs::{motifs, Motif};
 use attimo::timeseries::*;
 use plotly::common::{Line, Mode};
-use plotly::layout::LayoutGrid;
-use plotly::{Layout, Plot, Scatter};
+use plotly::{Plot, Scatter};
 use slog::*;
 use slog_scope::GlobalLoggerGuard;
 use std::fs::OpenOptions;
@@ -23,10 +21,6 @@ struct Config {
     #[argh(option)]
     /// the number of motifs to look for
     pub motifs: usize,
-
-    #[argh(option, default = "default_k()")]
-    /// number of hash functions
-    pub k: usize,
 
     #[argh(option, default = "default_delta()")]
     /// failure probability of the LSH scheme
@@ -57,10 +51,6 @@ fn default_seed() -> u64 {
     12453
 }
 
-fn default_k() -> usize {
-    64
-}
-
 fn default_delta() -> f64 {
     0.001
 }
@@ -78,7 +68,6 @@ fn main() -> Result<()> {
     let motifs = motifs(
         &ts,
         config.motifs,
-        config.k,
         config.repetitions,
         config.delta,
         config.seed,
@@ -133,8 +122,8 @@ fn find_occurences(ts: &WindowedTimeseries, motif: &Motif) -> Vec<(Range<usize>,
         }
     }
 
-
-    output_idxs.into_iter()
+    output_idxs
+        .into_iter()
         .map(|i| {
             let r = i..i + w;
             (r.clone(), ts.data[r].to_vec())

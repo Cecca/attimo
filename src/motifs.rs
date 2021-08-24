@@ -80,7 +80,6 @@ impl TopK {
 pub fn motifs(
     ts: &WindowedTimeseries,
     topk: usize,
-    k: usize,
     repetitions: usize,
     delta: f64,
     seed: u64,
@@ -88,11 +87,11 @@ pub fn motifs(
     let start = Instant::now();
 
     let exclusion_zone = ts.w / 4;
-    info!("Motifs setup"; "topk" => topk, "k" => k, "repetitions" => repetitions, "delta" => delta, "seed" => seed, "exclusion_zone" => exclusion_zone);
+    info!("Motifs setup"; "topk" => topk, "repetitions" => repetitions, "delta" => delta, "seed" => seed, "exclusion_zone" => exclusion_zone);
 
     let hasher_width = Hasher::estimate_width(&ts, 20, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
-    let hasher = Hasher::new(ts.w, k, repetitions, hasher_width, seed);
+    let hasher = Hasher::new(ts.w, repetitions, hasher_width, seed);
     let pools = HashCollection::from_ts(&ts, &hasher);
     println!(
         "[{:?}] Computed hash pools, taking {}",
@@ -128,7 +127,7 @@ pub fn motifs(
     let mut top = TopK::new(topk);
 
     //// for decreasing depths
-    for depth in (0..=k).rev() {
+    for depth in (0..=crate::lsh::K).rev() {
         if top.is_complete() {
             break;
         }

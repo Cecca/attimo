@@ -16,7 +16,6 @@ use bumpalo::Bump;
 
 pub fn approx_mp(
     ts: &WindowedTimeseries,
-    k: usize,
     repetitions: usize,
     delta: f64,
     seed: u64,
@@ -24,12 +23,12 @@ pub fn approx_mp(
     let start = Instant::now();
 
     let exclusion_zone = ts.w / 4;
-    info!("Approximate Matrix Profile setup"; "k" => k, "repetitions" => repetitions, "delta" => delta, "seed" => seed, "exclusion_zone" => exclusion_zone);
+    info!("Approximate Matrix Profile setup"; "repetitions" => repetitions, "delta" => delta, "seed" => seed, "exclusion_zone" => exclusion_zone);
 
     // FIXME find a good width parameter
     let hasher_width = Hasher::estimate_width(&ts, 20, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
-    let hasher = Hasher::new(ts.w, k, repetitions, hasher_width, seed);
+    let hasher = Hasher::new(ts.w, repetitions, hasher_width, seed);
     let pools = HashCollection::from_ts(&ts, &hasher);
     println!(
         "[{:?}] Computed hash pools, taking {}",
@@ -63,7 +62,7 @@ pub fn approx_mp(
     let mut cnt_dist = 0;
 
     //// for decreasing depths
-    for depth in (0..=k).rev() {
+    for depth in (0..=crate::lsh::K).rev() {
         let n_active = active.iter().filter(|a| **a).count();
         info!(""; "depth" => depth, "active" => n_active);
         if n_active == 0 {

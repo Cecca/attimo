@@ -64,13 +64,16 @@ use std::{cell::RefCell, cmp::Ordering, fmt::Debug, mem::size_of, ops::Range};
 //// We consider hash values made of 8-bit words. So we have to make sure, setting the
 //// `width` parameter, that the values are in the range `[-128, 127]`.
 
+pub const K: usize = 32;
+pub const K_HALF: usize = K / 2;
+
 /// Wrapper structx for vectors of 8-bits words, which sort lexicographically from the lowest significant bit.
 #[derive(Clone, Eq, PartialEq)]
-pub struct HashValue<'arena> {
-    hashes: Vec<i8, &'arena Bump>,
+pub struct HashValue {
+    hashes: [i8; K]
 }
 
-impl<'arena> GetByte for HashValue<'arena> {
+impl GetByte for HashValue {
     fn num_bytes(&self) -> usize {
         self.hashes.len()
     }
@@ -79,13 +82,13 @@ impl<'arena> GetByte for HashValue<'arena> {
     }
 }
 
-impl<'arena> Debug for HashValue<'arena> {
+impl Debug for HashValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.hashes)
     }
 }
 
-impl<'arena> DeepSizeOf for HashValue<'arena> {
+impl DeepSizeOf for HashValue {
     fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
         size_of::<i8>() * self.hashes.len()
     }
@@ -94,7 +97,7 @@ impl<'arena> DeepSizeOf for HashValue<'arena> {
 //// We also use a custom implementation of the ordering, that sorts lexicographically the
 //// hash values from the first value, so that hashes _with the same prefix_ are all
 //// grouped together.
-impl<'arena> Ord for HashValue<'arena> {
+impl Ord for HashValue {
     fn cmp(&self, other: &Self) -> Ordering {
         debug_assert!(self.hashes.len() == other.hashes.len());
         for (x, y) in self.hashes.iter().zip(other.hashes.iter()) {
@@ -108,13 +111,13 @@ impl<'arena> Ord for HashValue<'arena> {
     }
 }
 
-impl<'arena> PartialOrd for HashValue<'arena> {
+impl PartialOrd for HashValue {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'arena> HashValue<'arena> {
+impl HashValue {
     //// Furthermore, we need a way to compare for equality on prefixes
     //// with this method, which checks if two hash values have the same
     //// prefix of a given length.
@@ -132,7 +135,7 @@ pub struct TensorPool {
 }
 
 impl TensorPool {
-    fn new(_k: usize, tensor_repetitions: usize) -> Self {
+    fn new(tensor_repetitions: usize) -> Self {
         let hashes = Vec::with_capacity(tensor_repetitions);
         Self { hashes }
     }
@@ -151,11 +154,11 @@ impl<'hasher> HashCollection<'hasher> {
     pub fn from_ts(ts: &WindowedTimeseries, hasher: &'hasher Hasher) -> Self {
         let mut pools = Vec::with_capacity(ts.num_subsequences());
         for _ in 0..ts.num_subsequences() {
-            pools.push(TensorPool::new(hasher.k, hasher.tensor_repetitions));
+            pools.push(TensorPool::new(hasher.tensor_repetitions));
         }
         let mut buffer = vec![0; ts.num_subsequences()];
         for repetition in 0..hasher.tensor_repetitions {
-            for k in 0..hasher.k {
+            for k in 0..K {
                 hasher.hash_all(ts, k, repetition, &mut buffer);
                 for (i, h) in buffer.iter().enumerate() {
                     pools[i].append(*h);
@@ -167,25 +170,25 @@ impl<'hasher> HashCollection<'hasher> {
 
     fn left(&self, i: usize, repetition: usize) -> &[i8] {
         let idx = repetition % self.hasher.tensor_repetitions;
-        let idx = idx * self.hasher.k_left;
-        &self.pools[i].hashes[idx..idx + self.hasher.k_left]
+        let idx = idx * K_HALF;
+        &self.pools[i].hashes[idx..idx + K_HALF]
     }
 
     fn right(&self, i: usize, repetition: usize) -> &[i8] {
         let idx = repetition / self.hasher.tensor_repetitions;
-        let idx = self.hasher.tensor_repetitions * self.hasher.k_left + idx * self.hasher.k_right;
-        &self.pools[i].hashes[idx..idx + self.hasher.k_right]
+        let idx = self.hasher.tensor_repetitions * K_HALF + idx * K_HALF;
+        &self.pools[i].hashes[idx..idx + K_HALF]
     }
 
-    pub fn hash_value<'arena>(
+    pub fn hash_value(
         &self,
         i: usize,
         repetition: usize,
-        arena: &'arena Bump,
-    ) -> HashValue<'arena> {
-        let mut output = Vec::with_capacity_in(self.hasher.k, arena);
-        output.extend_from_slice(self.left(i, repetition));
-        output.extend_from_slice(self.right(i, repetition));
+        arena: &Bump,
+    ) -> HashValue {
+        let mut output = [0; K];
+        output[0..K_HALF].copy_from_slice(self.left(i, repetition));
+        output[K_HALF..K].copy_from_slice(self.right(i, repetition));
         HashValue { hashes: output }
     }
 
@@ -201,22 +204,22 @@ impl<'hasher> HashCollection<'hasher> {
     }
 
     pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
-        let depth_l = std::cmp::min(depth, self.hasher.k_left);
+        let depth_l = std::cmp::min(depth, K_HALF);
         let lindex = (0..self.hasher.tensor_repetitions).find(|&rep| {
-            let idx = rep * self.hasher.k_left;
+            let idx = rep * K_HALF;
             let hi = &self.pools[i].hashes[idx..idx + depth_l];
             let hj = &self.pools[j].hashes[idx..idx + depth_l];
             hi == hj
         })?;
 
-        if depth < self.hasher.k_left {
+        if depth < K_HALF {
             return Some(lindex);
         }
 
-        let depth_r = depth - self.hasher.k_left;
+        let depth_r = depth - K_HALF;
         let rindex = (0..self.hasher.tensor_repetitions).find(|&rep| {
             let idx =
-                self.hasher.tensor_repetitions * self.hasher.k_left + rep * self.hasher.k_right;
+                self.hasher.tensor_repetitions * K_HALF + rep * K_HALF;
             let hi = &self.pools[i].hashes[idx..idx + depth_r];
             let hj = &self.pools[j].hashes[idx..idx + depth_r];
             hi == hj
@@ -241,7 +244,7 @@ impl<'hasher> HashCollection<'hasher> {
         n_collisions as f64 / self.pools[i].hashes.len() as f64
     }
 
-    pub fn get_hash_matrix<'arena>(&self, arena: &'arena Bump) -> HashMatrix<'arena> {
+    pub fn get_hash_matrix(&self, arena: &Bump) -> HashMatrix {
         HashMatrix::new(self, arena)
     }
 }
@@ -253,14 +256,14 @@ impl<'hasher> DeepSizeOf for HashCollection<'hasher> {
 }
 
 #[derive(DeepSizeOf)]
-pub struct HashMatrix<'arena> {
+pub struct HashMatrix {
     /// Outer vector has one entry per repetition, inner vector has one entry per subsequence,
     /// and items are hash values and indices into the timeseries
-    hashes: Vec<Vec<(HashValue<'arena>, usize)>>,
+    hashes: Vec<Vec<(HashValue, usize)>>,
 }
 
-impl<'arena> HashMatrix<'arena> {
-    fn new(coll: &HashCollection, arena: &'arena Bump) -> Self {
+impl HashMatrix {
+    fn new(coll: &HashCollection, arena: &Bump) -> Self {
         let mut hashes = Vec::with_capacity(coll.hasher.repetitions);
         for repetition in 0..coll.hasher.repetitions {
             let mut rephashes = Vec::with_capacity(coll.pools.len());
@@ -278,7 +281,7 @@ impl<'arena> HashMatrix<'arena> {
         &'hashes self,
         depth: usize,
         repetition: usize,
-    ) -> BucketIterator<'hashes, 'arena> {
+    ) -> BucketIterator<'hashes> {
         debug_assert!(self.hashes[repetition].is_sorted_by_key(|pair| pair.0.clone()));
         BucketIterator {
             hashes: &self.hashes[repetition],
@@ -288,14 +291,14 @@ impl<'arena> HashMatrix<'arena> {
     }
 }
 
-pub struct BucketIterator<'hashes, 'arena> {
-    hashes: &'hashes Vec<(HashValue<'arena>, usize)>,
+pub struct BucketIterator<'hashes> {
+    hashes: &'hashes Vec<(HashValue, usize)>,
     depth: usize,
     idx: usize,
 }
 
-impl<'hashes, 'arena> Iterator for BucketIterator<'hashes, 'arena> {
-    type Item = (Range<usize>, &'hashes [(HashValue<'arena>, usize)]);
+impl<'hashes> Iterator for BucketIterator<'hashes> {
+    type Item = (Range<usize>, &'hashes [(HashValue, usize)]);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.idx >= self.hashes.len() {
@@ -315,9 +318,6 @@ impl<'hashes, 'arena> Iterator for BucketIterator<'hashes, 'arena> {
 #[derive(DeepSizeOf)]
 pub struct Hasher {
     pub dimension: usize,
-    pub k: usize,
-    pub k_left: usize,
-    pub k_right: usize,
     pub tensor_repetitions: usize,
     pub repetitions: usize,
     // this is organized like a three dimensional matrix
@@ -326,22 +326,17 @@ pub struct Hasher {
 }
 
 impl Hasher {
-    pub fn new(dimension: usize, k: usize, repetitions: usize, width: f64, seed: u64) -> Self {
-        let k_left = k / 2;
-        let k_right = (k as f64 / 2.0).ceil() as usize;
+    pub fn new(dimension: usize, repetitions: usize, width: f64, seed: u64) -> Self {
         let tensor_repetitions = (repetitions as f64).sqrt().ceil() as usize;
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        let mut vectors = Vec::with_capacity(dimension * k * tensor_repetitions);
+        let mut vectors = Vec::with_capacity(dimension * K * tensor_repetitions);
         let normal = Normal::new(0.0, 1.0).expect("problem instantiating normal distribution");
-        for _ in 0..(repetitions * k * dimension) {
+        for _ in 0..(repetitions * K * dimension) {
             vectors.push(normal.sample(&mut rng));
         }
 
         Self {
             dimension,
-            k,
-            k_left,
-            k_right,
             tensor_repetitions,
             repetitions,
             vectors,
@@ -378,7 +373,7 @@ impl Hasher {
     }
 
     fn get_vector(&self, repetition: usize, concat: usize) -> &'_ [f64] {
-        let idx = repetition * self.k * self.dimension + concat * self.dimension;
+        let idx = repetition * K * self.dimension + concat * self.dimension;
         &self.vectors[idx..idx + self.dimension]
     }
 
@@ -392,7 +387,7 @@ impl Hasher {
         buffer: &mut [i8],
     ) {
         assert!(buffer.len() == ts.num_subsequences());
-        let v = self.get_vector(repetition, k);
+        let v = self.get_vector(repetition, K);
         DOTP_BUFFER.with(|dotp_buf| {
             ts.znormalized_sliding_dot_product(v, &mut dotp_buf.borrow_mut());
             for (i, dotp) in dotp_buf.borrow().iter().enumerate() {
