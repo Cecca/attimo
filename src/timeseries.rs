@@ -70,6 +70,7 @@ impl WindowedTimeseries {
             //// since we need to compute all dot products
             begin += fft_length - w;
         }
+        println!("FFT chunk length {}, for a total of {} chunks", fft_length, fft_chunks.len());
 
         WindowedTimeseries {
             data: ts,
