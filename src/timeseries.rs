@@ -1,7 +1,7 @@
 use crate::distance::dot;
 use deepsize::DeepSizeOf;
 use rand_distr::num_traits::Zero;
-use rustfft::{Fft, FftPlanner, num_complex::Complex};
+use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::{cell::RefCell, fmt::Display, mem::size_of, sync::Arc};
 
 pub struct WindowedTimeseries {
@@ -11,7 +11,11 @@ pub struct WindowedTimeseries {
     rolling_sd: Vec<f64>,
     /// The squared norm of the z-normalized vector, to speed up the computation of the euclidean distance
     squared_norms: Vec<f64>,
-    data_fft: Vec<Complex<f64>>,
+    fft_length: usize,
+    /// We maintain the fft transform for computing dot products in chunks
+    /// of size `fft_length` (or the smallest power of 2 after w, whichever largest), in order to
+    /// be able to tile the computation of the dot products.
+    fft_chunks: Vec<Vec<Complex<f64>>>,
     fftfun: Arc<dyn Fft<f64>>,
     ifftfun: Arc<dyn Fft<f64>>,
 }
@@ -41,14 +45,31 @@ impl WindowedTimeseries {
 
         //// Now we pre-compute the FFT of the time series, which will be needed to compute
         //// dot products for the hash values faster.
-        let mut data_fft: Vec<Complex<f64>> =
-            ts.iter().map(|x| Complex { re: *x, im: 0.0 }).collect();
-        data_fft.resize(data_fft.len().next_power_of_two(), Complex::zero());
-        let mut planner = FftPlanner::new();
-        let fftfun = planner.plan_fft_forward(data_fft.len());
-        let ifftfun = planner.plan_fft_inverse(data_fft.len());
+        let fft_length = std::cmp::min(
+            std::cmp::max(1 << 14, w.next_power_of_two()),
+            ts.len().next_power_of_two(),
+        );
+        let mut fft_chunks = Vec::new();
 
-        fftfun.process(&mut data_fft);
+        let mut planner = FftPlanner::new();
+        let fftfun = planner.plan_fft_forward(fft_length);
+        let ifftfun = planner.plan_fft_inverse(fft_length);
+
+        let mut begin = 0;
+        while begin < ts.len() {
+            let end = std::cmp::min(begin + fft_length, ts.len());
+            let mut chunk: Vec<Complex<f64>> = ts[begin..end]
+                .iter()
+                .map(|x| Complex { re: *x, im: 0.0 })
+                .collect();
+            chunk.resize(fft_length, Complex::zero());
+            fftfun.process(&mut chunk);
+            fft_chunks.push(chunk);
+
+            //// We shift the window taking into account the width of the window `w`,
+            //// since we need to compute all dot products
+            begin += fft_length - w;
+        }
 
         WindowedTimeseries {
             data: ts,
@@ -56,7 +77,8 @@ impl WindowedTimeseries {
             rolling_avg,
             rolling_sd,
             squared_norms,
-            data_fft,
+            fft_length,
+            fft_chunks,
             fftfun,
             ifftfun,
         }
@@ -106,8 +128,11 @@ impl WindowedTimeseries {
     }
 
     pub fn sliding_dot_product(&self, v: &[f64], output: &mut Vec<f64>) {
-        let n = self.data_fft.len();
+        // let n = self.data_fft.len();
         assert!(v.len() == self.w);
+
+        let stride = self.fft_length - self.w;
+
         //// Pre-allocate the output
         output.clear();
         output.resize(self.num_subsequences(), 0.0);
@@ -116,24 +141,31 @@ impl WindowedTimeseries {
             //// Then compute the FFT of the reversed input vector, padded with zeros
             let mut vfft = vfft.borrow_mut();
             vfft.clear();
-            vfft.resize(n, Complex { re: 0.0, im: 0.0 });
+            vfft.resize(self.fft_length, Complex::zero());
             for (i, &x) in v.iter().enumerate() {
                 vfft[self.w - i - 1] = Complex { re: x, im: 0.0 };
             }
             self.fftfun.process(&mut vfft);
 
-            //// Then compute the element-wise multiplication between the dot products, inplace
-            for i in 0..n {
-                vfft[i] = vfft[i] * self.data_fft[i];
-            }
+            //// Iterate over the chunks
+            for (chunk_idx, chunk) in self.fft_chunks.iter().enumerate() {
+                //// Then compute the element-wise multiplication between the dot products, inplace
+                for i in 0..self.fft_length {
+                    vfft[i] = vfft[i] * chunk[i];
+                }
 
-            //// And go back to the time domain
-            self.ifftfun.process(&mut vfft);
+                //// And go back to the time domain
+                self.ifftfun.process(&mut vfft);
 
-            //// Copy the values to the output buffer, rescaling on the go (`rustfft`
-            //// does not perform normalization automatically)
-            for i in 0..self.num_subsequences() {
-                output[i] = vfft[(i + v.len() - 1) % n].re / n as f64
+                //// Copy the values to the output buffer, rescaling on the go (`rustfft`
+                //// does not perform normalization automatically)
+                let offset = chunk_idx * stride;
+                for i in 0..(self.fft_length - self.w) {
+                    if i + offset < self.num_subsequences() {
+                        output[i + offset] =
+                            vfft[(i + v.len() - 1) % self.fft_length].re / self.fft_length as f64
+                    }
+                }
             }
         })
     }
@@ -226,7 +258,7 @@ impl DeepSizeOf for WindowedTimeseries {
             + self.rolling_avg.deep_size_of_children(context)
             + self.rolling_sd.deep_size_of_children(context)
             + self.squared_norms.deep_size_of_children(context)
-            + size_of::<Complex<f64>>() * self.data_fft.len()
+            + size_of::<Complex<f64>>() * self.fft_length * self.fft_chunks.len()
     }
 }
 
