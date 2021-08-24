@@ -1,5 +1,6 @@
 use crate::distance::dot;
 use deepsize::DeepSizeOf;
+use rand_distr::num_traits::Zero;
 use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::{cell::RefCell, fmt::Display, mem::size_of, sync::Arc};
 
@@ -42,9 +43,10 @@ impl WindowedTimeseries {
         //// dot products for the hash values faster.
         let mut data_fft: Vec<Complex<f64>> =
             ts.iter().map(|x| Complex { re: *x, im: 0.0 }).collect();
+        data_fft.resize(data_fft.len().next_power_of_two(), Complex::zero());
         let mut planner = FftPlanner::new();
-        let fftfun = planner.plan_fft_forward(ts.len());
-        let ifftfun = planner.plan_fft_inverse(ts.len());
+        let fftfun = planner.plan_fft_forward(data_fft.len());
+        let ifftfun = planner.plan_fft_inverse(data_fft.len());
 
         fftfun.process(&mut data_fft);
 
@@ -104,7 +106,7 @@ impl WindowedTimeseries {
     }
 
     pub fn sliding_dot_product(&self, v: &[f64], output: &mut Vec<f64>) {
-        let n = self.data.len();
+        let n = self.data_fft.len();
         assert!(v.len() == self.w);
         //// Pre-allocate the output
         output.clear();
