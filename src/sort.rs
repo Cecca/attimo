@@ -1,4 +1,4 @@
-use std::{fmt::Debug, mem::MaybeUninit};
+use std::fmt::Debug;
 
 pub trait GetByte {
     fn num_bytes(&self) -> usize;
@@ -104,7 +104,7 @@ impl<T: GetByte + Debug> RadixSort for Vec<T> {
                 counts[i] += counts[i - 1];
             }
 
-            unsafe {self.set_len(n)};
+            unsafe { self.set_len(n) };
             for x in tmp.drain(..).rev() {
                 let byte = x.get_byte(byte_idx) as usize;
                 self[counts[byte] - 1] = x;

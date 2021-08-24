@@ -12,7 +12,6 @@ use indicatif::ProgressStyle;
 use slog_scope::info;
 use std::ops::Range;
 use std::time::Instant;
-use bumpalo::Bump;
 
 pub fn approx_mp(
     ts: &WindowedTimeseries,
@@ -35,8 +34,7 @@ pub fn approx_mp(
         start.elapsed(),
         pools.bytes_size()
     );
-    let hashes_arena = Bump::new();
-    let hashes = pools.get_hash_matrix(&hashes_arena);
+    let hashes = pools.get_hash_matrix();
     println!(
         "[{:?}] Computed hash matrix, taking {}",
         start.elapsed(),

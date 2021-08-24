@@ -52,7 +52,6 @@
 
 use crate::timeseries::WindowedTimeseries;
 use crate::sort::*;
-use bumpalo::Bump;
 use deepsize::DeepSizeOf;
 use rand::prelude::*;
 use rand_distr::Normal;
@@ -184,7 +183,6 @@ impl<'hasher> HashCollection<'hasher> {
         &self,
         i: usize,
         repetition: usize,
-        arena: &Bump,
     ) -> HashValue {
         let mut output = [0; K];
         output[0..K_HALF].copy_from_slice(self.left(i, repetition));
@@ -244,8 +242,8 @@ impl<'hasher> HashCollection<'hasher> {
         n_collisions as f64 / self.pools[i].hashes.len() as f64
     }
 
-    pub fn get_hash_matrix(&self, arena: &Bump) -> HashMatrix {
-        HashMatrix::new(self, arena)
+    pub fn get_hash_matrix(&self) -> HashMatrix {
+        HashMatrix::new(self)
     }
 }
 
@@ -263,12 +261,12 @@ pub struct HashMatrix {
 }
 
 impl HashMatrix {
-    fn new(coll: &HashCollection, arena: &Bump) -> Self {
+    fn new(coll: &HashCollection) -> Self {
         let mut hashes = Vec::with_capacity(coll.hasher.repetitions);
         for repetition in 0..coll.hasher.repetitions {
             let mut rephashes = Vec::with_capacity(coll.pools.len());
             for i in 0..coll.pools.len() {
-                rephashes.push((coll.hash_value(i, repetition, arena), i));
+                rephashes.push((coll.hash_value(i, repetition), i));
             }
             rephashes.sort_unstable();
             debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));

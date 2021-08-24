@@ -6,7 +6,6 @@
 use crate::distance::*;
 use crate::lsh::*;
 use crate::timeseries::*;
-use bumpalo::Bump;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use slog_scope::info;
@@ -98,8 +97,7 @@ pub fn motifs(
         start.elapsed(),
         pools.bytes_size()
     );
-    let hashes_arena = Bump::new();
-    let hashes = pools.get_hash_matrix(&hashes_arena);
+    let hashes = pools.get_hash_matrix();
     println!(
         "[{:?}] Computed hash matrix, taking {}",
         start.elapsed(),
