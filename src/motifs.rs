@@ -242,7 +242,7 @@ pub fn motifs(
     );
     let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
     println!(
-        "[{:?}] done! Computed {}/{} distances ({:.2}%)",
+        "[{:?}] done! Computed {}/{} distances ({}%)",
         start.elapsed(),
         cnt_dist,
         total_distances,
