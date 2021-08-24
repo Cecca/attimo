@@ -34,7 +34,7 @@ pub fn approx_mp(
         start.elapsed(),
         pools.bytes_size()
     );
-    let hashes = pools.get_hash_matrix();
+    let mut hashes = pools.get_hash_matrix();
     println!(
         "[{:?}] Computed hash matrix, taking {}",
         start.elapsed(),

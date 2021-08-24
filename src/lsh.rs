@@ -50,8 +50,8 @@
 //// This trick is at the base of the fast MASS algorithm for computing the distance profile.
 //// The approach is based on the definition of convolution (see these [lecture notes](http://www.dei.unipd.it/~geppo/DA2/DOCS/FFT.pdf))
 
-use crate::timeseries::WindowedTimeseries;
 use crate::sort::*;
+use crate::timeseries::WindowedTimeseries;
 use deepsize::DeepSizeOf;
 use rand::prelude::*;
 use rand_distr::Normal;
@@ -73,7 +73,7 @@ pub const K_HALF: usize = K / 2;
 /// Wrapper structx for vectors of 8-bits words, which sort lexicographically from the lowest significant bit.
 #[derive(Clone, Eq, PartialEq)]
 pub struct HashValue {
-    hashes: [i8; K]
+    hashes: [i8; K],
 }
 
 impl GetByte for HashValue {
@@ -183,11 +183,7 @@ impl<'hasher> HashCollection<'hasher> {
         &self.pools[i].hashes[idx..idx + K_HALF]
     }
 
-    pub fn hash_value(
-        &self,
-        i: usize,
-        repetition: usize,
-    ) -> HashValue {
+    pub fn hash_value(&self, i: usize, repetition: usize) -> HashValue {
         let mut output = [0; K];
         output[0..K_HALF].copy_from_slice(self.left(i, repetition));
         output[K_HALF..K].copy_from_slice(self.right(i, repetition));
@@ -219,8 +215,7 @@ impl<'hasher> HashCollection<'hasher> {
 
         let depth_r = depth - K_HALF;
         let rindex = (0..self.hasher.tensor_repetitions).find(|&rep| {
-            let idx =
-                self.hasher.tensor_repetitions * K_HALF + rep * K_HALF;
+            let idx = self.hasher.tensor_repetitions * K_HALF + rep * K_HALF;
             let hi = &self.pools[i].hashes[idx..idx + depth_r];
             let hj = &self.pools[j].hashes[idx..idx + depth_r];
             hi == hj
@@ -257,33 +252,44 @@ impl<'hasher> DeepSizeOf for HashCollection<'hasher> {
 }
 
 #[derive(DeepSizeOf)]
-pub struct HashMatrix {
+pub struct HashMatrix<'hasher> {
     /// Outer vector has one entry per repetition, inner vector has one entry per subsequence,
     /// and items are hash values and indices into the timeseries
     hashes: Vec<Vec<(HashValue, usize)>>,
+    coll: &'hasher HashCollection<'hasher>,
 }
 
-impl HashMatrix {
-    fn new(coll: &HashCollection) -> Self {
-        let mut hashes = Vec::with_capacity(coll.hasher.repetitions);
-        for repetition in 0..coll.hasher.repetitions {
-            let mut rephashes = Vec::with_capacity(coll.pools.len());
-            for i in 0..coll.pools.len() {
-                rephashes.push((coll.hash_value(i, repetition), i));
-            }
-            rephashes.sort_unstable();
-            debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));
-            hashes.push(rephashes);
-        }
-        Self { hashes }
+impl<'hasher> HashMatrix<'hasher> {
+    fn new(coll: &'hasher HashCollection) -> Self {
+        //// We just initialize the vector, which we keep empty at this point. It will
+        //// be lazily populated if/when needed.
+        let hashes = Vec::with_capacity(coll.hasher.repetitions);
+        Self { hashes, coll }
     }
 
     pub fn buckets<'hashes>(
-        &'hashes self,
+        &'hashes mut self,
         depth: usize,
         repetition: usize,
     ) -> BucketIterator<'hashes> {
-        debug_assert!(self.hashes[repetition].is_sorted_by_key(|pair| pair.0.clone()));
+        use std::time::Instant;
+        //// If we didn't build the repetition yet, compute all missing repetitions
+        while self.hashes.len() <= repetition {
+            let rep = self.hashes.len();
+            let mut rephashes = Vec::with_capacity(self.coll.pools.len());
+            let start = Instant::now();
+            for i in 0..self.coll.pools.len() {
+                rephashes.push((self.coll.hash_value(i, rep), i));
+            }
+            let elapsed_hashes = start.elapsed();
+            let start = Instant::now();
+            rephashes.sort_unstable();
+            let elapsed_sort = start.elapsed();
+            debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));
+            info!("completed lazy hash column building"; "repetition" => rep, "time_hashes_s" => elapsed_hashes.as_secs_f64(), "time_sort_s" => elapsed_sort.as_secs_f64());
+            self.hashes.push(rephashes);
+        }
+
         BucketIterator {
             hashes: &self.hashes[repetition],
             depth,
