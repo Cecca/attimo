@@ -209,11 +209,6 @@ pub fn motifs(
                             let threshold =
                                 ((1.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize;
                             thresholds[a_idx] = threshold;
-                            info!("nearest neighbor";
-                                "probability" => p,
-                                "distance" => d,
-                                "threshold" => threshold
-                            );
                             active[a_idx] = rep < threshold;
                             if !active[a_idx] {
                                 let motif = Motif {
