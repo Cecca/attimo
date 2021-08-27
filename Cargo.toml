@@ -16,6 +16,7 @@ packed_simd = { version = "0.3.4", package = "packed_simd_2" }
 deepsize = "0.2"
 rustfft = "6.0"
 indicatif = "0.16"
+statrs = "0.15"
 argh = "0.1"
 log = "0.4"
 slog = "2.7"

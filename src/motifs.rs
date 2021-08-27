@@ -204,10 +204,16 @@ pub fn motifs(
                         bounds[rep][a_idx] = hash_range.clone();
                         //// Check the stopping condition, and if possible deactivate the subsequence
                         if let Some((d, nn_idx)) = nearest_neighbor[a_idx] {
-                            let p = pools.collision_probability(a_idx, nn_idx);
+                            let p = hasher.collision_probability_at(d);
+                            assert!(p <= 1.0);
                             let threshold =
                                 ((1.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize;
                             thresholds[a_idx] = threshold;
+                            info!("nearest neighbor";
+                                "probability" => p,
+                                "distance" => d,
+                                "threshold" => threshold
+                            );
                             active[a_idx] = rep < threshold;
                             if !active[a_idx] {
                                 let motif = Motif {

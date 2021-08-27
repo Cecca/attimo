@@ -57,6 +57,7 @@ use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use slog_scope::info;
+use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
 use std::{
     cell::{Cell, RefCell},
     cmp::Ordering,
@@ -421,6 +422,14 @@ impl Hasher {
             width,
         }
     }
+
+    pub fn collision_probability_at(&self, d: f64) -> f64 {
+        let r = self.width;
+        let normal = NormalDistr::new(0.0, 1.0).unwrap();
+        1.0 - 2.0 * normal.cdf(-r / d)
+            - (2.0 / ((std::f64::consts::PI * 2.0).sqrt() * (r/d))) * (1.0 - (-r * r / (2.0*d*d)).exp())
+    }
+
 
     pub fn estimate_width(ts: &WindowedTimeseries, samples: usize, seed: u64) -> f64 {
         let mut min_dotp = f64::INFINITY;
