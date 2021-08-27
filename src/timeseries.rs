@@ -18,6 +18,8 @@ pub struct WindowedTimeseries {
     fft_chunks: Vec<Vec<Complex<f64>>>,
     fftfun: Arc<dyn Fft<f64>>,
     ifftfun: Arc<dyn Fft<f64>>,
+    buf_vfft: RefCell<Vec<Complex<f64>>>,
+    buf_ivfft: RefCell<Vec<Complex<f64>>>,
 }
 
 impl WindowedTimeseries {
@@ -70,7 +72,11 @@ impl WindowedTimeseries {
             //// since we need to compute all dot products
             begin += fft_length - w;
         }
-        println!("FFT chunk length {}, for a total of {} chunks", fft_length, fft_chunks.len());
+        println!(
+            "FFT chunk length {}, for a total of {} chunks",
+            fft_length,
+            fft_chunks.len()
+        );
 
         WindowedTimeseries {
             data: ts,
@@ -82,6 +88,8 @@ impl WindowedTimeseries {
             fft_chunks,
             fftfun,
             ifftfun,
+            buf_vfft: RefCell::new(vec![Complex::zero(); fft_length]),
+            buf_ivfft: RefCell::new(vec![Complex::zero(); fft_length]),
         }
     }
 
@@ -138,38 +146,38 @@ impl WindowedTimeseries {
         output.clear();
         output.resize(self.num_subsequences(), 0.0);
 
-        FFT_BUFFER.with(|vfft| {
-            //// Then compute the FFT of the reversed input vector, padded with zeros
-            let mut vfft = vfft.borrow_mut();
-            vfft.clear();
-            vfft.resize(self.fft_length, Complex::zero());
-            for (i, &x) in v.iter().enumerate() {
-                vfft[self.w - i - 1] = Complex { re: x, im: 0.0 };
+        //// Get local scratch vectors, to avoid allocations
+        let mut vfft = self.buf_vfft.borrow_mut();
+        let mut ivfft = self.buf_ivfft.borrow_mut();
+
+        //// Then compute the FFT of the reversed input vector, padded with zeros
+        vfft.fill(Complex::zero());
+        for (i, &x) in v.iter().enumerate() {
+            vfft[self.w - i - 1] = Complex { re: x, im: 0.0 };
+        }
+        self.fftfun.process(&mut vfft);
+
+        //// Iterate over the chunks
+        for (chunk_idx, chunk) in self.fft_chunks.iter().enumerate() {
+            ivfft.fill(Complex::zero());
+            //// Then compute the element-wise multiplication between the dot products, inplace
+            for i in 0..self.fft_length {
+                ivfft[i] = vfft[i] * chunk[i];
             }
-            self.fftfun.process(&mut vfft);
 
-            //// Iterate over the chunks
-            for (chunk_idx, chunk) in self.fft_chunks.iter().enumerate() {
-                let mut ivfft = vec![Complex::zero(); vfft.len()];
-                //// Then compute the element-wise multiplication between the dot products, inplace
-                for i in 0..self.fft_length {
-                    ivfft[i] = vfft[i] * chunk[i];
-                }
+            //// And go back to the time domain
+            self.ifftfun.process(&mut ivfft);
 
-                //// And go back to the time domain
-                self.ifftfun.process(&mut ivfft);
-
-                //// Copy the values to the output buffer, rescaling on the go (`rustfft`
-                //// does not perform normalization automatically)
-                let offset = chunk_idx * stride;
-                for i in 0..(self.fft_length - self.w) {
-                    if i + offset < self.num_subsequences() {
-                        output[i + offset] =
-                            ivfft[(i + v.len() - 1) % self.fft_length].re / self.fft_length as f64
-                    }
+            //// Copy the values to the output buffer, rescaling on the go (`rustfft`
+            //// does not perform normalization automatically)
+            let offset = chunk_idx * stride;
+            for i in 0..(self.fft_length - self.w) {
+                if i + offset < self.num_subsequences() {
+                    output[i + offset] =
+                        ivfft[(i + v.len() - 1) % self.fft_length].re / self.fft_length as f64
                 }
             }
-        })
+        }
     }
 
     pub fn sliding_dot_product_slow(&self, v: &[f64], output: &mut Vec<f64>) {
@@ -224,8 +232,6 @@ impl WindowedTimeseries {
         dp
     }
 }
-
-thread_local! { static FFT_BUFFER: RefCell<Vec<Complex<f64>>> = RefCell::new(Vec::new()); }
 
 pub struct PrettyBytes(pub usize);
 
@@ -287,8 +293,8 @@ mod test {
 
                     ts.sliding_dot_product_slow(&v, &mut expected);
                     ts.sliding_dot_product(&v, &mut actual);
-                    dump_vec(format!("/tmp/sliding-expected-{}-{}.txt", n, w), &expected);
-                    dump_vec(format!("/tmp/sliding-actual-{}-{}.txt", n, w), &actual);
+                    // dump_vec(format!("/tmp/sliding-expected-{}-{}.txt", n, w), &expected);
+                    // dump_vec(format!("/tmp/sliding-actual-{}-{}.txt", n, w), &actual);
 
                     assert!(expected
                         .into_iter()
@@ -299,6 +305,7 @@ mod test {
         }
     }
 
+    #[allow(dead_code)]
     fn dump_vec<D: std::fmt::Display>(fname: String, v: &[D]) {
         use std::io::prelude::*;
         let mut f = std::fs::File::create(fname).unwrap();
@@ -313,7 +320,7 @@ mod test {
         use rand_distr::StandardNormal;
         use rand_xoshiro::Xoroshiro128Plus;
 
-        for n in [10, 100, 1234, 4000] {
+        for n in [10, 100, 1234, 4000, 50000] {
             for w in [3, 100, 200, 500] {
                 if w < n {
                     println!("n={}, w={}", n, w);
@@ -326,8 +333,8 @@ mod test {
 
                     ts.znormalized_sliding_dot_product_slow(&v, &mut expected);
                     ts.znormalized_sliding_dot_product(&v, &mut actual);
-                    dump_vec(format!("/tmp/expected-{}-{}.txt", n, w), &expected);
-                    dump_vec(format!("/tmp/actual-{}-{}.txt", n, w), &actual);
+                    // dump_vec(format!("/tmp/expected-{}-{}.txt", n, w), &expected);
+                    // dump_vec(format!("/tmp/actual-{}-{}.txt", n, w), &actual);
 
                     assert!(expected
                         .into_iter()
