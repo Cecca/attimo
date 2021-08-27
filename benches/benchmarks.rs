@@ -1,6 +1,6 @@
 use attimo::sort::*;
 use attimo::{lsh::*, timeseries::WindowedTimeseries};
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 pub fn bench_construct_ts(c: &mut Criterion) {
     use rand::prelude::*;
@@ -31,8 +31,9 @@ pub fn bench_sliding_dot_product(c: &mut Criterion) {
 
     let w = 400;
 
-    for n in [1, 10, 100, 1000] {
+    for n in [1, 10, 100] {
         let n = n * 10000;
+        group.throughput(Throughput::Elements((n - w) as u64));
         // group.bench_with_input(
         //     BenchmarkId::new("sliding dot product slow", n),
         //     &n,
