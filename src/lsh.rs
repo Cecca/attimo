@@ -57,7 +57,14 @@ use rand::prelude::*;
 use rand_distr::Normal;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use slog_scope::info;
-use std::{cell::RefCell, cmp::Ordering, fmt::Debug, mem::size_of, ops::Range};
+use std::{
+    cell::{Cell, RefCell},
+    cmp::Ordering,
+    fmt::Debug,
+    mem::size_of,
+    ops::Range,
+    rc::Rc,
+};
 
 //// ## Hash values
 //// We consider hash values made of 8-bit words. So we have to make sure, setting the
@@ -132,55 +139,100 @@ impl HashValue {
     }
 }
 
-#[derive(DeepSizeOf)]
-pub struct TensorPool {
-    hashes: Vec<i8>,
-}
-
-impl TensorPool {
-    fn new(tensor_repetitions: usize) -> Self {
-        let hashes = Vec::with_capacity(tensor_repetitions);
-        Self { hashes }
-    }
-
-    fn append(&mut self, hash: i8) {
-        self.hashes.push(hash);
-    }
-}
-
 pub struct HashCollection<'hasher> {
+    ts: Rc<WindowedTimeseries>,
     hasher: &'hasher Hasher,
-    pools: Vec<TensorPool>,
+    n_subsequences: usize,
+    //// Both pools are organized as three dimensional matrices, in C order.
+    //// The stride in the first dimenson is `K_HALF*n_subsequences`, and the stride in the second
+    //// dimension is `K_HALF`.
+    left_pools: Vec<i8>,
+    right_pools: Vec<i8>,
+    init_mark_left: Cell<usize>,
+    init_mark_right: Cell<usize>,
 }
 
 impl<'hasher> HashCollection<'hasher> {
-    pub fn from_ts(ts: &WindowedTimeseries, hasher: &'hasher Hasher) -> Self {
-        let mut pools = Vec::with_capacity(ts.num_subsequences());
-        for _ in 0..ts.num_subsequences() {
-            pools.push(TensorPool::new(hasher.tensor_repetitions));
-        }
-        let mut buffer = vec![0; ts.num_subsequences()];
+    pub fn from_ts(ts: Rc<WindowedTimeseries>, hasher: &'hasher Hasher) -> Self {
+        let ns = ts.num_subsequences();
+        let mut left_pools = vec![0; hasher.tensor_repetitions * K_HALF * ns];
+        let mut right_pools = vec![0; hasher.tensor_repetitions * K_HALF * ns];
+
+        #[cfg(debug)]
+        let mut init_left = vec![false; hasher.tensor_repetitions * K_HALF * ns];
+        #[cfg(debug)]
+        let mut init_right = vec![false; hasher.tensor_repetitions * K_HALF * ns];
+
+        let mut buffer = vec![0; ns];
         for repetition in 0..hasher.tensor_repetitions {
-            for k in 0..K {
-                hasher.hash_all(ts, k, repetition, &mut buffer);
+            for k in 0..K_HALF {
+                hasher.hash_all(&ts, k, repetition, &mut buffer);
                 for (i, h) in buffer.iter().enumerate() {
-                    pools[i].append(*h);
+                    let idx = K_HALF * ns * repetition + i * K_HALF + k;
+                    #[cfg(debug)]
+                    assert!(!init_left[idx]);
+                    left_pools[idx] = *h;
+                    #[cfg(debug)]
+                    {
+                        init_left[idx] = true;
+                    }
+                }
+            }
+            for k in K_HALF..K {
+                hasher.hash_all(&ts, k, repetition, &mut buffer);
+                for (i, h) in buffer.iter().enumerate() {
+                    let idx = K_HALF * ns * repetition + i * K_HALF + (k - K_HALF);
+                    #[cfg(debug)]
+                    assert!(!init_right[idx]);
+                    right_pools[idx] = *h;
+                    #[cfg(debug)]
+                    {
+                        init_right[idx] = true;
+                    }
                 }
             }
         }
-        Self { hasher, pools }
+        #[cfg(debug)]
+        {
+            assert!(init_left.iter().all());
+            assert!(init_right.iter().all());
+            let mut hist = [0; 256];
+            for h in &left_pools {
+                hist[(*h as u8) as usize] += 1;
+            }
+            for h in &right_pools {
+                hist[(*h as u8) as usize] += 1;
+            }
+            dbg!(hist);
+        }
+        Self {
+            ts,
+            hasher,
+            n_subsequences: ns,
+            left_pools,
+            right_pools,
+            init_mark_left: Cell::new(0),
+            init_mark_right: Cell::new(0),
+        }
     }
 
+    // fn init_repetition(&self, repetition: usize) {
+    //     let rep_left = repetition % self.hasher.tensor_repetitions;
+    //     let rep_right = repetition / self.hasher.tensor_repetitions;
+    // }
+
     fn left(&self, i: usize, repetition: usize) -> &[i8] {
-        let idx = repetition % self.hasher.tensor_repetitions;
-        let idx = idx * K_HALF;
-        &self.pools[i].hashes[idx..idx + K_HALF]
+        // let idx = self.idx_left(i, repetition);
+        let trep = repetition % self.hasher.tensor_repetitions;
+        let idx = K_HALF * self.n_subsequences * trep + i * K_HALF;
+        &self.left_pools[idx..idx + K_HALF]
     }
 
     fn right(&self, i: usize, repetition: usize) -> &[i8] {
-        let idx = repetition / self.hasher.tensor_repetitions;
-        let idx = self.hasher.tensor_repetitions * K_HALF + idx * K_HALF;
-        &self.pools[i].hashes[idx..idx + K_HALF]
+        // let idx = self.idx_right(i, repetition);
+        let trep = repetition / self.hasher.tensor_repetitions;
+        let idx = K_HALF * self.n_subsequences * trep + i * K_HALF;
+        &self.right_pools[idx..idx + K_HALF]
     }
 
     pub fn hash_value(&self, i: usize, repetition: usize) -> HashValue {
@@ -203,9 +255,10 @@ impl<'hasher> HashCollection<'hasher> {
     pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
         let depth_l = std::cmp::min(depth, K_HALF);
         let lindex = (0..self.hasher.tensor_repetitions).find(|&rep| {
-            let idx = rep * K_HALF;
-            let hi = &self.pools[i].hashes[idx..idx + depth_l];
-            let hj = &self.pools[j].hashes[idx..idx + depth_l];
+            let iidx = K_HALF * self.n_subsequences * rep + i * K_HALF;
+            let jidx = K_HALF * self.n_subsequences * rep + j * K_HALF;
+            let hi = &self.left_pools[iidx..iidx + depth_l];
+            let hj = &self.left_pools[jidx..jidx + depth_l];
             hi == hj
         })?;
 
@@ -215,9 +268,10 @@ impl<'hasher> HashCollection<'hasher> {
 
         let depth_r = depth - K_HALF;
         let rindex = (0..self.hasher.tensor_repetitions).find(|&rep| {
-            let idx = self.hasher.tensor_repetitions * K_HALF + rep * K_HALF;
-            let hi = &self.pools[i].hashes[idx..idx + depth_r];
-            let hj = &self.pools[j].hashes[idx..idx + depth_r];
+            let iidx = K_HALF * self.n_subsequences * rep + i * K_HALF;
+            let jidx = K_HALF * self.n_subsequences * rep + j * K_HALF;
+            let hi = &self.right_pools[iidx..iidx + depth_r];
+            let hj = &self.right_pools[jidx..jidx + depth_r];
             hi == hj
         })?;
 
@@ -230,14 +284,23 @@ impl<'hasher> HashCollection<'hasher> {
     }
 
     pub fn collision_probability(&self, i: usize, j: usize) -> f64 {
-        let n_collisions = self.pools[i]
-            .hashes
-            .iter()
-            .zip(self.pools[j].hashes.iter())
-            .filter(|(hi, hj)| hi == hj)
-            .count();
+        let mut n_collisions = 0;
+        for rep in 0..self.hasher.tensor_repetitions {
+            let idx_i = rep / self.n_subsequences + i * K_HALF;
+            let idx_j = rep / self.n_subsequences + j * K_HALF;
+            n_collisions += self.left_pools[idx_i..idx_i + K_HALF]
+                .iter()
+                .zip(&self.left_pools[idx_j..idx_j + K_HALF])
+                .filter(|(hi, hj)| hi == hj)
+                .count();
+            n_collisions += self.right_pools[idx_i..idx_i + K_HALF]
+                .iter()
+                .zip(&self.right_pools[idx_j..idx_j + K_HALF])
+                .filter(|(hi, hj)| hi == hj)
+                .count();
+        }
 
-        n_collisions as f64 / self.pools[i].hashes.len() as f64
+        n_collisions as f64 / (2 * K_HALF * self.hasher.tensor_repetitions) as f64
     }
 
     pub fn get_hash_matrix(&self) -> HashMatrix {
@@ -247,7 +310,7 @@ impl<'hasher> HashCollection<'hasher> {
 
 impl<'hasher> DeepSizeOf for HashCollection<'hasher> {
     fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
-        self.pools.deep_size_of()
+        self.left_pools.deep_size_of() + self.right_pools.deep_size_of()
     }
 }
 
@@ -276,9 +339,9 @@ impl<'hasher> HashMatrix<'hasher> {
         //// If we didn't build the repetition yet, compute all missing repetitions
         while self.hashes.len() <= repetition {
             let rep = self.hashes.len();
-            let mut rephashes = Vec::with_capacity(self.coll.pools.len());
+            let mut rephashes = Vec::with_capacity(self.coll.n_subsequences);
             let start = Instant::now();
-            for i in 0..self.coll.pools.len() {
+            for i in 0..self.coll.n_subsequences {
                 rephashes.push((self.coll.hash_value(i, rep), i));
             }
             let elapsed_hashes = start.elapsed();

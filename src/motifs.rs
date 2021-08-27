@@ -11,6 +11,7 @@ use indicatif::ProgressStyle;
 use slog_scope::info;
 use std::collections::BTreeSet;
 use std::ops::Range;
+use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -77,7 +78,7 @@ impl TopK {
 }
 
 pub fn motifs(
-    ts: &WindowedTimeseries,
+    ts: Rc<WindowedTimeseries>,
     topk: usize,
     repetitions: usize,
     delta: f64,
@@ -91,7 +92,7 @@ pub fn motifs(
     let hasher_width = Hasher::estimate_width(&ts, 20, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
     let hasher = Hasher::new(ts.w, repetitions, hasher_width, seed);
-    let pools = HashCollection::from_ts(&ts, &hasher);
+    let pools = HashCollection::from_ts(Rc::clone(&ts), &hasher);
     println!(
         "[{:?}] Computed hash pools, taking {}",
         start.elapsed(),
@@ -176,7 +177,7 @@ pub fn motifs(
                                         //// After computing the distance between the two subsequences,
                                         //// we set `b` as the nearest neigbor of `a`, if it is closer
                                         //// than the previous candidate.
-                                        let d = zeucl(ts, a_idx, b_idx);
+                                        let d = zeucl(&ts, a_idx, b_idx);
                                         cnt_dist += 1;
                                         rep_cnt_dists += 1;
                                         count_evaluations[a_idx] += 1;
@@ -229,11 +230,6 @@ pub fn motifs(
             }
         }
         pbar.finish();
-        info!("completed depth";
-            "min_threshold" => thresholds.iter().min().unwrap(),
-            "max_threshold" => thresholds.iter().max().unwrap(),
-            "avg_threshold" => thresholds.iter().sum::<usize>() as f64 / thresholds.len() as f64
-        );
     }
     println!(
         "[{:?}] hash matrix matrix used {}",
@@ -247,18 +243,6 @@ pub fn motifs(
         cnt_dist,
         total_distances,
         (cnt_dist as f64 / total_distances as f64) * 100.0
-    );
-    println!(
-        "distance evaluations min {} mean {} max {}",
-        count_evaluations.iter().min().unwrap(),
-        count_evaluations.iter().sum::<usize>() as f64 / count_evaluations.len() as f64,
-        count_evaluations.iter().max().unwrap()
-    );
-    println!(
-        "thresholds min {} mean {} max {}",
-        thresholds.iter().min().unwrap(),
-        thresholds.iter().sum::<usize>() as f64 / count_evaluations.len() as f64,
-        thresholds.iter().max().unwrap()
     );
     top.to_vec()
 }

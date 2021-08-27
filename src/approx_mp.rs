@@ -11,10 +11,11 @@ use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use slog_scope::info;
 use std::ops::Range;
+use std::rc::Rc;
 use std::time::Instant;
 
 pub fn approx_mp(
-    ts: &WindowedTimeseries,
+    ts: Rc<WindowedTimeseries>,
     repetitions: usize,
     delta: f64,
     seed: u64,
@@ -28,7 +29,7 @@ pub fn approx_mp(
     let hasher_width = Hasher::estimate_width(&ts, 20, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
     let hasher = Hasher::new(ts.w, repetitions, hasher_width, seed);
-    let pools = HashCollection::from_ts(&ts, &hasher);
+    let pools = HashCollection::from_ts(Rc::clone(&ts), &hasher);
     println!(
         "[{:?}] Computed hash pools, taking {}",
         start.elapsed(),
@@ -104,7 +105,7 @@ pub fn approx_mp(
                                         //// After computing the distance between the two subsequences,
                                         //// we set `b` as the nearest neigbor of `a`, if it is closer
                                         //// than the previous candidate.
-                                        let d = zeucl(ts, a_idx, b_idx);
+                                        let d = zeucl(&ts, a_idx, b_idx);
                                         cnt_dist += 1;
                                         rep_cnt_dists += 1;
                                         count_evaluations[a_idx] += 1;
