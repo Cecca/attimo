@@ -66,7 +66,7 @@ pub fn bench_hash_ts(c: &mut Criterion) {
     group.sampling_mode(criterion::SamplingMode::Flat);
     group.sample_size(10);
     let w = 500;
-    let ts = WindowedTimeseries::gen_randomwalk(10000, w, 12345);
+    let ts = WindowedTimeseries::gen_randomwalk(1000000, w, 12345);
     let hasher = Hasher::new(w, 200, 10.0, 12345);
     group.bench_function("hash time series", |b| {
         b.iter(|| HashCollection::from_ts(&ts, &hasher))
