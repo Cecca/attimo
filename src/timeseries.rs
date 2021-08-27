@@ -150,13 +150,14 @@ impl WindowedTimeseries {
 
             //// Iterate over the chunks
             for (chunk_idx, chunk) in self.fft_chunks.iter().enumerate() {
+                let mut ivfft = vec![Complex::zero(); vfft.len()];
                 //// Then compute the element-wise multiplication between the dot products, inplace
                 for i in 0..self.fft_length {
-                    vfft[i] = vfft[i] * chunk[i];
+                    ivfft[i] = vfft[i] * chunk[i];
                 }
 
                 //// And go back to the time domain
-                self.ifftfun.process(&mut vfft);
+                self.ifftfun.process(&mut ivfft);
 
                 //// Copy the values to the output buffer, rescaling on the go (`rustfft`
                 //// does not perform normalization automatically)
@@ -164,7 +165,7 @@ impl WindowedTimeseries {
                 for i in 0..(self.fft_length - self.w) {
                     if i + offset < self.num_subsequences() {
                         output[i + offset] =
-                            vfft[(i + v.len() - 1) % self.fft_length].re / self.fft_length as f64
+                            ivfft[(i + v.len() - 1) % self.fft_length].re / self.fft_length as f64
                     }
                 }
             }
@@ -273,9 +274,10 @@ mod test {
         use rand_distr::StandardNormal;
         use rand_xoshiro::Xoroshiro128Plus;
 
-        for n in [10, 100, 1234, 4000] {
+        for n in [10, 100, 1234, 4000, 50000] {
             for w in [3, 100, 200, 500] {
                 if w < n {
+                    println!("n={}, w={}", n, w);
                     let ts = WindowedTimeseries::gen_randomwalk(n, w, 12345);
 
                     let rng = Xoroshiro128Plus::seed_from_u64(12344);
@@ -285,13 +287,23 @@ mod test {
 
                     ts.sliding_dot_product_slow(&v, &mut expected);
                     ts.sliding_dot_product(&v, &mut actual);
+                    dump_vec(format!("/tmp/sliding-expected-{}-{}.txt", n, w), &expected);
+                    dump_vec(format!("/tmp/sliding-actual-{}-{}.txt", n, w), &actual);
 
                     assert!(expected
                         .into_iter()
                         .zip(actual.into_iter())
-                        .all(|(e, a)| (e - a).abs() <= 0.00001));
+                        .all(|(e, a)| (e - a).abs() <= 0.0000001));
                 }
             }
+        }
+    }
+
+    fn dump_vec<D: std::fmt::Display>(fname: String, v: &[D]) {
+        use std::io::prelude::*;
+        let mut f = std::fs::File::create(fname).unwrap();
+        for x in v.iter() {
+            writeln!(f, "{}", x).unwrap();
         }
     }
 
@@ -304,6 +316,7 @@ mod test {
         for n in [10, 100, 1234, 4000] {
             for w in [3, 100, 200, 500] {
                 if w < n {
+                    println!("n={}, w={}", n, w);
                     let ts = WindowedTimeseries::gen_randomwalk(n, w, 12345);
 
                     let rng = Xoroshiro128Plus::seed_from_u64(12344);
@@ -313,6 +326,8 @@ mod test {
 
                     ts.znormalized_sliding_dot_product_slow(&v, &mut expected);
                     ts.znormalized_sliding_dot_product(&v, &mut actual);
+                    dump_vec(format!("/tmp/expected-{}-{}.txt", n, w), &expected);
+                    dump_vec(format!("/tmp/actual-{}-{}.txt", n, w), &actual);
 
                     assert!(expected
                         .into_iter()
