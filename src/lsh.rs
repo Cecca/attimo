@@ -54,7 +54,7 @@ use crate::sort::*;
 use crate::timeseries::WindowedTimeseries;
 use deepsize::DeepSizeOf;
 use rand::prelude::*;
-use rand_distr::Normal;
+use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use slog_scope::info;
 use std::{
@@ -392,6 +392,8 @@ pub struct Hasher {
     pub repetitions: usize,
     // this is organized like a three dimensional matrix
     vectors: Vec<f64>,
+    // And this is organized as a two dimensional matrix
+    shifts: Vec<f64>,
     width: f64,
 }
 
@@ -400,9 +402,14 @@ impl Hasher {
         let tensor_repetitions = (repetitions as f64).sqrt().ceil() as usize;
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         let mut vectors = Vec::with_capacity(dimension * K * tensor_repetitions);
+        let mut shifts = Vec::with_capacity(K * tensor_repetitions);
         let normal = Normal::new(0.0, 1.0).expect("problem instantiating normal distribution");
+        let uniform = Uniform::new(0.0, width);
         for _ in 0..(repetitions * K * dimension) {
             vectors.push(normal.sample(&mut rng));
+        }
+        for _ in 0..(repetitions * K) {
+            shifts.push(uniform.sample(&mut rng));
         }
 
         Self {
@@ -410,6 +417,7 @@ impl Hasher {
             tensor_repetitions,
             repetitions,
             vectors,
+            shifts,
             width,
         }
     }
@@ -458,10 +466,11 @@ impl Hasher {
     ) {
         assert!(buffer.len() == ts.num_subsequences());
         let v = self.get_vector(repetition, k);
+        let shift = self.shifts[repetition * K + k];
         DOTP_BUFFER.with(|dotp_buf| {
             ts.znormalized_sliding_dot_product(v, &mut dotp_buf.borrow_mut());
             for (i, dotp) in dotp_buf.borrow().iter().enumerate() {
-                buffer[i] = (dotp / self.width) as i8;
+                buffer[i] = ((dotp + shift) / self.width) as i8;
             }
         });
     }
