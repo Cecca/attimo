@@ -31,20 +31,20 @@ pub fn bench_sliding_dot_product(c: &mut Criterion) {
 
     let w = 400;
 
-    for n in [1, 2, 3, 4, 5, 6] {
+    for n in [1, 10, 100, 1000] {
         let n = n * 10000;
-        group.bench_with_input(
-            BenchmarkId::new("sliding dot product slow", n),
-            &n,
-            |b, n| {
-                let ts = WindowedTimeseries::gen_randomwalk(*n, w, 12345);
+        // group.bench_with_input(
+        //     BenchmarkId::new("sliding dot product slow", n),
+        //     &n,
+        //     |b, n| {
+        //         let ts = WindowedTimeseries::gen_randomwalk(*n, w, 12345);
 
-                let rng = Xoroshiro128Plus::seed_from_u64(12344);
-                let v: Vec<f64> = rng.sample_iter(StandardNormal).take(w).collect();
-                let mut output = vec![0.0; ts.num_subsequences()];
-                b.iter(|| ts.sliding_dot_product_slow(&v, &mut output))
-            },
-        );
+        //         let rng = Xoroshiro128Plus::seed_from_u64(12344);
+        //         let v: Vec<f64> = rng.sample_iter(StandardNormal).take(w).collect();
+        //         let mut output = vec![0.0; ts.num_subsequences()];
+        //         b.iter(|| ts.sliding_dot_product_slow(&v, &mut output))
+        //     },
+        // );
         group.bench_with_input(
             BenchmarkId::new("sliding dot product fast", n),
             &n,
