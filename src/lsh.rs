@@ -497,12 +497,12 @@ mod test {
     fn test_first_collision() {
         let w = 300;
         let ts = crate::load::loadts("data/ECG.csv", Some(500)).expect("problem loading data");
-        let ts = crate::timeseries::WindowedTimeseries::new(ts, w);
+        let ts = Rc::new(crate::timeseries::WindowedTimeseries::new(ts, w));
 
         let repetitions = 200;
 
         let hasher = Hasher::new(w, repetitions, 5.0, 1245);
-        let pools = HashCollection::from_ts(&ts, &hasher);
+        let pools = HashCollection::from_ts(Rc::clone(&ts), &hasher);
 
         for &depth in &[32usize, 20, 10] {
             println!("depth {}", depth);

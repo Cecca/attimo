@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::Range};
 
 pub trait GetByte {
     fn num_bytes(&self) -> usize;
@@ -22,7 +22,7 @@ impl GetByte for usize {
     }
 
     fn get_byte(&self, i: usize) -> u8 {
-        self.to_le_bytes()[i]
+        self.to_le_bytes()[std::mem::size_of::<usize>() - i - 1]
     }
 }
 
@@ -85,33 +85,97 @@ impl<T: GetByte + Debug> RadixSort for Vec<T> {
     //     }
     // }
 
+    // fn radix_sort(&mut self) {
+    //     let n = self.len();
+    //     let nbytes = self[0].num_bytes();
+    //     let mut counts = [0usize; 256];
+    //     let mut tmp = Vec::with_capacity(n);
+
+    //     for byte_idx in 0..nbytes {
+    //         counts.fill(0);
+    //         assert!(tmp.is_empty());
+    //         // Count the occurrences of the byte, and move data to the temporary vector
+    //         for x in self.drain(..) {
+    //             counts[x.get_byte(byte_idx) as usize] += 1;
+    //             tmp.push(x);
+    //         }
+    //         // Do the cumulative sum
+    //         for i in 1..counts.len() {
+    //             counts[i] += counts[i - 1];
+    //         }
+
+    //         unsafe { self.set_len(n) };
+    //         for x in tmp.drain(..).rev() {
+    //             let byte = x.get_byte(byte_idx) as usize;
+    //             self[counts[byte] - 1] = x;
+    //             counts[byte] -= 1;
+    //         }
+    //     }
+    // }
+
     fn radix_sort(&mut self) {
-        let n = self.len();
-        let nbytes = self[0].num_bytes();
-        let mut counts = [0usize; 256];
-        let mut tmp = Vec::with_capacity(n);
-
-        for byte_idx in 0..nbytes {
-            counts.fill(0);
-            assert!(tmp.is_empty());
-            // Count the occurrences of the byte, and move data to the temporary vector
-            for x in self.drain(..) {
-                counts[x.get_byte(byte_idx) as usize] += 1;
-                tmp.push(x);
-            }
-            // Do the cumulative sum
-            for i in 1..counts.len() {
-                counts[i] += counts[i - 1];
-            }
-
-            unsafe { self.set_len(n) };
-            for x in tmp.drain(..).rev() {
-                let byte = x.get_byte(byte_idx) as usize;
-                self[counts[byte] - 1] = x;
-                counts[byte] -= 1;
-            }
-        }
+        // let n = self.len();
+        // let nbytes = self[0].num_bytes();
+        // let mut counts = [0usize; 256];
+        // let mut tmp = Vec::with_capacity(n);
+        radix_sort_impl(self, 0);
     }
+}
+
+fn radix_sort_impl<T: GetByte + Debug>(v: &mut [T], byte_index: usize) {
+    if v.is_empty() {
+        return;
+    }
+    let nbytes = v[0].num_bytes();
+    if byte_index == nbytes {
+        return;
+    }
+
+    //// First, compute the histogram of byte values and build the offsets of the bucket starts
+    let mut counts = [0usize; 256];
+    for x in v.iter() {
+        counts[x.get_byte(byte_index) as usize] += 1;
+    }
+    let mut offsets = [0usize; 256];
+    let mut sum = 0;
+    for i in 0..256 {
+        offsets[i] = sum;
+        sum += counts[i];
+    }
+    let mut write_heads = offsets.clone();
+
+    //// Then, start swapping values to the right position
+    let mut current_bucket = 0;
+    let mut i = 0;
+    //// We loop on the first 255 blocks. The last one will be sorted, by construction, when all
+    //// the previous ones are settled
+    while current_bucket < 255 {
+        //// If we move to the next bucket, we settled the previous one, and we increment the
+        //// `current_bucket` index.
+        if i >= offsets[current_bucket + 1] {
+            current_bucket += 1;
+            continue;
+        }
+        let byte = v[i].get_byte(byte_index) as usize;
+        //// If the current byte is in already in its place in the current bucket, then
+        //// we can move on without moving it.
+        if byte == current_bucket {
+            i += 1;
+            continue;
+        }
+        //// Once we get here, the byte it's not in the correct bucket, hence we swap
+        //// with an element at the correct byte, and move the corresponding write head.
+        v.swap(i, write_heads[byte]);
+        write_heads[byte] += 1;
+    }
+
+    //// Finally, we recur into each bucket to sort it independently from the others
+    for i in 0..255 {
+        let r = offsets[i]..offsets[i+1];
+        radix_sort_impl(&mut v[r] , byte_index + 1);
+    }
+    let r = offsets[255]..v.len();
+    radix_sort_impl(&mut v[r] , byte_index + 1);
 }
 
 #[test]
@@ -122,11 +186,12 @@ fn test_radix_sort_u8() {
 
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(12435);
     let unif = Uniform::new_inclusive(usize::MIN, usize::MAX);
-    let v: Vec<usize> = unif.sample_iter(&mut rng).take(100000).collect();
+    // let unif = Uniform::new_inclusive(0, 1000);
+    let v: Vec<usize> = unif.sample_iter(&mut rng).take(10000).collect();
     let mut expected = v.clone();
     let mut actual = v.clone();
 
     expected.sort_unstable();
     actual.radix_sort();
-    assert_eq!(expected, actual);
+    assert_eq!(expected, actual, "expected: {:#x?}\nactual: {:#x?}", expected, actual);
 }
