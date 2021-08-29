@@ -184,11 +184,15 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
 
     //// Finally, we recur into each bucket to sort it independently from the others
     for i in 0..255 {
-        let r = offsets[i]..offsets[i + 1];
+        if counts[i] > 0 {
+            let r = offsets[i]..offsets[i + 1];
+            radix_sort_impl(&mut v[r], byte_index + 1);
+        }
+    }
+    if counts[255] > 0 {
+        let r = offsets[255]..v.len();
         radix_sort_impl(&mut v[r], byte_index + 1);
     }
-    let r = offsets[255]..v.len();
-    radix_sort_impl(&mut v[r], byte_index + 1);
 }
 
 #[test]
