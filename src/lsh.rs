@@ -88,6 +88,7 @@ impl GetByte for HashValue {
     fn num_bytes(&self) -> usize {
         self.hashes.len()
     }
+    #[inline(always)]
     fn get_byte(&self, i: usize) -> u8 {
         self.hashes[i] as u8
     }

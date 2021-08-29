@@ -21,6 +21,7 @@ impl GetByte for usize {
         std::mem::size_of::<usize>()
     }
 
+    #[inline(always)]
     fn get_byte(&self, i: usize) -> u8 {
         self.to_le_bytes()[std::mem::size_of::<usize>() - i - 1]
     }
@@ -30,7 +31,7 @@ pub trait RadixSort {
     fn radix_sort(&mut self);
 }
 
-impl<T: GetByte + Debug> RadixSort for Vec<T> {
+impl<T: GetByte + Debug + Ord> RadixSort for Vec<T> {
     // fn radix_sort(&mut self) {
     //     let nbytes = self[0].num_bytes();
     //     let mut stash: Vec<Vec<T>> = Vec::new();
@@ -122,8 +123,9 @@ impl<T: GetByte + Debug> RadixSort for Vec<T> {
     }
 }
 
-fn radix_sort_impl<T: GetByte + Debug>(v: &mut [T], byte_index: usize) {
-    if v.is_empty() {
+fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
+    if v.len() <= 128 {
+        v.sort_unstable();
         return;
     }
     let nbytes = v[0].num_bytes();
@@ -154,6 +156,9 @@ fn radix_sort_impl<T: GetByte + Debug>(v: &mut [T], byte_index: usize) {
         //// `current_bucket` index.
         if i >= offsets[current_bucket + 1] {
             current_bucket += 1;
+            //// Furthermore, we avoid iterating over all the elements which have already 
+            //// been sorted in the current bucket.
+            i = write_heads[current_bucket];
             continue;
         }
         let byte = v[i].get_byte(byte_index) as usize;
@@ -171,11 +176,11 @@ fn radix_sort_impl<T: GetByte + Debug>(v: &mut [T], byte_index: usize) {
 
     //// Finally, we recur into each bucket to sort it independently from the others
     for i in 0..255 {
-        let r = offsets[i]..offsets[i+1];
-        radix_sort_impl(&mut v[r] , byte_index + 1);
+        let r = offsets[i]..offsets[i + 1];
+        radix_sort_impl(&mut v[r], byte_index + 1);
     }
     let r = offsets[255]..v.len();
-    radix_sort_impl(&mut v[r] , byte_index + 1);
+    radix_sort_impl(&mut v[r], byte_index + 1);
 }
 
 #[test]
@@ -193,5 +198,9 @@ fn test_radix_sort_u8() {
 
     expected.sort_unstable();
     actual.radix_sort();
-    assert_eq!(expected, actual, "expected: {:#x?}\nactual: {:#x?}", expected, actual);
+    assert_eq!(
+        expected, actual,
+        "expected: {:#x?}\nactual: {:#x?}",
+        expected, actual
+    );
 }
