@@ -123,9 +123,19 @@ impl<T: GetByte + Debug + Ord> RadixSort for Vec<T> {
     }
 }
 
+pub fn insertion_sort<T: Ord>(arr: &mut [T]) {
+    for i in 1..arr.len() {
+        let mut j = i;
+        while j > 0 && arr[j - 1] > arr[j] {
+            arr.swap(j - 1, j);
+            j -= 1;
+        }
+    }
+}
+
 fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
-    if v.len() <= 128 {
-        v.sort_unstable();
+    if v.len() <= 32 {
+        insertion_sort(v);
         return;
     }
     let nbytes = v[0].num_bytes();
@@ -141,14 +151,15 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
         }
     }
     let mut offsets = [0usize; 256];
+    let mut write_heads = [0usize; 256];
     let mut sum = 0;
     for i in 0..256 {
         unsafe {
             *offsets.get_unchecked_mut(i) = sum;
+            *write_heads.get_unchecked_mut(i) = sum;
             sum += *counts.get_unchecked(i);
         }
     }
-    let mut write_heads = offsets.clone();
 
     //// Then, start swapping values to the right position
     let mut current_bucket = 0;
