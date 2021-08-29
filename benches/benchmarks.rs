@@ -77,6 +77,34 @@ pub fn bench_hash_ts(c: &mut Criterion) {
     group.finish()
 }
 
+pub fn bench_sort_u8(c: &mut Criterion) {
+    use rand::prelude::*;
+    use rand_xoshiro::Xoshiro256PlusPlus;
+    use rand_distr::Uniform;
+
+    let mut group = c.benchmark_group("sorting u8");
+    let rng = Xoshiro256PlusPlus::seed_from_u64(1234);
+    let vals: Vec<u8> = Uniform::new(0,u8::MAX).sample_iter(rng).take(10000000).collect();
+
+    group.bench_function("rust unstable sort", |b| {
+        b.iter_batched(
+            || vals.clone(),
+            |mut vals| vals.sort_unstable(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.bench_function("radix sort", |b| {
+        b.iter_batched(
+            || vals.clone(),
+            |mut vals| vals.radix_sort(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.finish()
+}
+
 pub fn bench_sort_usize(c: &mut Criterion) {
     use rand::prelude::*;
     use rand_xoshiro::Xoshiro256PlusPlus;
@@ -140,6 +168,7 @@ criterion_group!(
     bench_construct_ts,
     bench_hash_ts,
     bench_sort_hashes,
-    bench_sort_usize
+    bench_sort_usize,
+    bench_sort_u8
 );
 criterion_main!(benches);
