@@ -136,13 +136,17 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
     //// First, compute the histogram of byte values and build the offsets of the bucket starts
     let mut counts = [0usize; 256];
     for x in v.iter() {
-        counts[x.get_byte(byte_index) as usize] += 1;
+        unsafe {
+            *counts.get_unchecked_mut(x.get_byte(byte_index) as usize) += 1;
+        }
     }
     let mut offsets = [0usize; 256];
     let mut sum = 0;
     for i in 0..256 {
-        offsets[i] = sum;
-        sum += counts[i];
+        unsafe {
+            *offsets.get_unchecked_mut(i) = sum;
+            sum += *counts.get_unchecked(i);
+        }
     }
     let mut write_heads = offsets.clone();
 
@@ -154,14 +158,16 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
     while current_bucket < 255 {
         //// If we move to the next bucket, we settled the previous one, and we increment the
         //// `current_bucket` index.
-        if i >= offsets[current_bucket + 1] {
-            current_bucket += 1;
-            //// Furthermore, we avoid iterating over all the elements which have already 
-            //// been sorted in the current bucket.
-            i = write_heads[current_bucket];
-            continue;
+        unsafe {
+            if i >= *offsets.get_unchecked(current_bucket + 1) {
+                current_bucket += 1;
+                //// Furthermore, we avoid iterating over all the elements which have already
+                //// been sorted in the current bucket.
+                i = *write_heads.get_unchecked(current_bucket);
+                continue;
+            }
         }
-        let byte = v[i].get_byte(byte_index) as usize;
+        let byte = unsafe { v.get_unchecked(i).get_byte(byte_index) as usize };
         //// If the current byte is in already in its place in the current bucket, then
         //// we can move on without moving it.
         if byte == current_bucket {
@@ -170,8 +176,10 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
         }
         //// Once we get here, the byte it's not in the correct bucket, hence we swap
         //// with an element at the correct byte, and move the corresponding write head.
-        v.swap(i, write_heads[byte]);
-        write_heads[byte] += 1;
+        unsafe {
+            v.swap(i, *write_heads.get_unchecked(byte));
+            *write_heads.get_unchecked_mut(byte) += 1;
+        }
     }
 
     //// Finally, we recur into each bucket to sort it independently from the others

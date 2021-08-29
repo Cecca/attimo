@@ -90,7 +90,7 @@ impl GetByte for HashValue {
     }
     #[inline(always)]
     fn get_byte(&self, i: usize) -> u8 {
-        self.hashes[i] as u8
+        unsafe { *self.hashes.get_unchecked(i) as u8 }
     }
 }
 
@@ -428,9 +428,9 @@ impl Hasher {
         let r = self.width;
         let normal = NormalDistr::new(0.0, 1.0).unwrap();
         1.0 - 2.0 * normal.cdf(-r / d)
-            - (2.0 / ((std::f64::consts::PI * 2.0).sqrt() * (r/d))) * (1.0 - (-r * r / (2.0*d*d)).exp())
+            - (2.0 / ((std::f64::consts::PI * 2.0).sqrt() * (r / d)))
+                * (1.0 - (-r * r / (2.0 * d * d)).exp())
     }
-
 
     pub fn estimate_width(ts: &WindowedTimeseries, samples: usize, seed: u64) -> f64 {
         let mut min_dotp = f64::INFINITY;
