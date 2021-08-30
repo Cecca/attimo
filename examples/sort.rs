@@ -35,15 +35,15 @@ fn main() {
         v.len() as f64 / elapsed.as_secs_f64()
     );
 
-    println!("Rust unstable sort");
-    let mut v2 = v.clone();
-    let start = Instant::now();
-    v2.sort_unstable();
-    let elapsed = start.elapsed();
-    println!(
-        "Sorted {} values in {:?} ({} elems/s)",
-        v.len(),
-        elapsed,
-        v.len() as f64 / elapsed.as_secs_f64()
-    );
+    // println!("Rust unstable sort");
+    // let mut v2 = v.clone();
+    // let start = Instant::now();
+    // v2.sort_unstable();
+    // let elapsed = start.elapsed();
+    // println!(
+    //     "Sorted {} values in {:?} ({} elems/s)",
+    //     v.len(),
+    //     elapsed,
+    //     v.len() as f64 / elapsed.as_secs_f64()
+    // );
 }
