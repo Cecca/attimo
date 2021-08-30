@@ -23,7 +23,7 @@ impl GetByte for usize {
 
     #[inline(always)]
     fn get_byte(&self, i: usize) -> u8 {
-        self.to_le_bytes()[std::mem::size_of::<usize>() - i - 1]
+        (self >> (8*(std::mem::size_of::<usize>() - i - 1)) & 0xFF) as u8
     }
 }
 
@@ -133,8 +133,10 @@ pub fn insertion_sort<T: Ord>(arr: &mut [T]) {
     }
 }
 
+const THRESHOLD: usize = 128;
+
 fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
-    if v.len() <= 32 {
+    if v.len() <= THRESHOLD {
         insertion_sort(v);
         return;
     }
@@ -150,6 +152,7 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
             *counts.get_unchecked_mut(x.get_byte(byte_index) as usize) += 1;
         }
     }
+
     let mut offsets = [0usize; 256];
     let mut write_heads = [0usize; 256];
     let mut sum = 0;
@@ -195,14 +198,18 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
 
     //// Finally, we recur into each bucket to sort it independently from the others
     for i in 0..255 {
-        if counts[i] > 0 {
-            let r = offsets[i]..offsets[i + 1];
+        let r = offsets[i]..offsets[i + 1];
+        if counts[i] > THRESHOLD {
             radix_sort_impl(&mut v[r], byte_index + 1);
+        } else if counts[i] > 1 {
+            insertion_sort(&mut v[r]);
         }
     }
-    if counts[255] > 0 {
-        let r = offsets[255]..v.len();
+    let r = offsets[255]..v.len();
+    if counts[255] > THRESHOLD {
         radix_sort_impl(&mut v[r], byte_index + 1);
+    } else if counts[255] > 1 {
+        insertion_sort(&mut v[r]);
     }
 }
 

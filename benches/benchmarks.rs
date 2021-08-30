@@ -3,6 +3,9 @@ use std::rc::Rc;
 use attimo::sort::*;
 use attimo::{lsh::*, timeseries::WindowedTimeseries};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use rand::SeedableRng;
+use rand_distr::{Distribution, Uniform};
+use rand_xoshiro::Xoroshiro128PlusPlus;
 
 pub fn bench_construct_ts(c: &mut Criterion) {
     use rand::prelude::*;
@@ -162,12 +165,47 @@ pub fn bench_sort_hashes(c: &mut Criterion) {
     group.finish()
 }
 
+
+pub fn bench_sort_uniform_hashes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sorting hashes uniform");
+    let n = 1000000;
+    let mut rng = Xoroshiro128PlusPlus::seed_from_u64(1234);
+    let uniform = Uniform::new(i8::MIN, i8::MAX);
+    let hashes: Vec<HashValue> = (0..n).map(|_| {
+        let mut hashes: [i8; 32] = [0; 32]; 
+        for (i, x) in uniform.sample_iter(&mut rng).take(32).enumerate() {
+            hashes[i] = x;
+        }
+        HashValue{hashes}
+    }).collect(); // uniform.sample_iter(&mut rng).take(n).collect();
+
+    group.bench_function("rust unstable sort", |b| {
+        b.iter_batched(
+            || hashes.clone(),
+            |mut hashes| hashes.sort_unstable(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.bench_function("radix sort", |b| {
+        b.iter_batched(
+            || hashes.clone(),
+            |mut hashes| hashes.radix_sort(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.finish()
+}
+
+
 criterion_group!(
     benches,
     bench_sliding_dot_product,
     bench_construct_ts,
     bench_hash_ts,
     bench_sort_hashes,
+    bench_sort_uniform_hashes,
     bench_sort_usize,
     bench_sort_u8
 );

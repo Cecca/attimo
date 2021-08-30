@@ -81,7 +81,7 @@ pub const K_HALF: usize = K / 2;
 /// Wrapper structx for vectors of 8-bits words, which sort lexicographically from the lowest significant bit.
 #[derive(Clone, Eq, PartialEq)]
 pub struct HashValue {
-    hashes: [i8; K],
+    pub hashes: [i8; K],
 }
 
 impl GetByte for HashValue {
