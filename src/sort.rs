@@ -70,12 +70,14 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
     let mut buckets_by_size = Vec::with_capacity(256);
     let mut offsets = [0usize; 256];
     let mut write_heads = [0usize; 256];
+    let mut ends = [0usize; 256];
     let mut sum = 0;
     for i in 0..256 {
         unsafe {
             *offsets.get_unchecked_mut(i) = sum;
             *write_heads.get_unchecked_mut(i) = sum;
             sum += *counts.get_unchecked(i);
+            ends[i] = sum;
             let span = sum - offsets.get_unchecked(i);
             if span > 0 {
                 buckets_by_size.push((i, span));
@@ -91,22 +93,48 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
     //// This optimization should help a great deal for very unbalanced byte distributions.
     buckets_by_size.pop();
 
-    for &(current_bucket, current_bucket_span) in buckets_by_size.iter() {
-        unsafe {
-            let mut i = *write_heads.get_unchecked(current_bucket);
-            let end = current_bucket_span + *offsets.get_unchecked(current_bucket);
-            while i < end {
-                let byte = v.get_unchecked(i).get_byte(byte_index) as usize;
-                let target = *write_heads.get_unchecked(byte);
-                //// Do the swapping. Note that we are swapping even in the case where the key is already in the
-                //// correct bucket (so we are copying it in place). While this might seem wasteful, this allows
-                //// us to avoid doing a branching on `byte == current_bucket`.
-                v.swap(i, target);
-                *write_heads.get_unchecked_mut(byte) += 1;
-                //// The current read position is also the current write position in the current bucket
-                i = *write_heads.get_unchecked(current_bucket);
+    while !buckets_by_size.is_empty() {
+        for &(current_bucket, _) in buckets_by_size.iter() {
+            unsafe {
+                let offset = *write_heads.get_unchecked(current_bucket);
+                if offset < ends[current_bucket] {
+                    let span = ends[current_bucket] - offset;
+                    let quotient = span / 4;
+                    let remainder = span % 4;
+                    for q in 0..quotient {
+                        let q = offset + q * 4;
+                        let b1 = v.get_unchecked(q).get_byte(byte_index) as usize;
+                        let b2 = v.get_unchecked(q + 1).get_byte(byte_index) as usize;
+                        let b3 = v.get_unchecked(q + 2).get_byte(byte_index) as usize;
+                        let b4 = v.get_unchecked(q + 3).get_byte(byte_index) as usize;
+
+                        let t1 = *write_heads.get_unchecked(b1);
+                        *write_heads.get_unchecked_mut(b1) += 1;
+                        let t2 = *write_heads.get_unchecked(b2);
+                        *write_heads.get_unchecked_mut(b2) += 1;
+                        let t3 = *write_heads.get_unchecked(b3);
+                        *write_heads.get_unchecked_mut(b3) += 1;
+                        let t4 = *write_heads.get_unchecked(b4);
+                        *write_heads.get_unchecked_mut(b4) += 1;
+
+                        v.swap(q, t1);
+                        v.swap(q+1, t2);
+                        v.swap(q+2, t3);
+                        v.swap(q+3, t4);
+                    }
+
+                    let rem_offset = offset + quotient * 4;
+                    for r in 0..remainder {
+                        let r = rem_offset + r;
+                        let b = v.get_unchecked(r).get_byte(byte_index) as usize;
+                        let t = *write_heads.get_unchecked(b);
+                        v.swap(r, t);
+                        *write_heads.get_unchecked_mut(b) += 1;
+                    }
+                }
             }
         }
+        buckets_by_size.retain(|&(b, _)| write_heads[b] < ends[b]);
     }
 
     //// Finally, we recur into each bucket to sort it independently from the others
