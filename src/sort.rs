@@ -47,7 +47,7 @@ pub fn insertion_sort<T: Ord>(arr: &mut [T]) {
     }
 }
 
-const THRESHOLD: usize = 128;
+const THRESHOLD: usize = 64;
 
 fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
     if v.len() <= THRESHOLD {

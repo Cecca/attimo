@@ -2,17 +2,18 @@ use std::{rc::Rc, time::Instant};
 
 use attimo::{lsh::{HashCollection, HashValue, Hasher}, sort::RadixSort, timeseries::WindowedTimeseries};
 use rand::SeedableRng;
-use rand_distr::{Distribution, Uniform};
+use rand_distr::{Distribution, Uniform, Geometric};
 use rand_xoshiro::Xoroshiro128PlusPlus;
 
 fn main() {
     let n = std::env::args().nth(1).unwrap().parse::<usize>().unwrap();
     let mut rng = Xoroshiro128PlusPlus::seed_from_u64(1234);
     let uniform = Uniform::new(i8::MIN, i8::MAX);
+    let geom = Geometric::new(0.25).unwrap();
     let v: Vec<HashValue> = (0..n).map(|_| {
         let mut hashes: [i8; 32] = [0; 32]; 
         for (i, x) in uniform.sample_iter(&mut rng).take(32).enumerate() {
-            hashes[i] = x;
+            hashes[i] = x as i8;
         }
         HashValue{hashes}
     }).collect(); // uniform.sample_iter(&mut rng).take(n).collect();
