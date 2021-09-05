@@ -1,5 +1,5 @@
 use anyhow::Context;
-use anyhow::{Result};
+use anyhow::Result;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;

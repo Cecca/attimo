@@ -23,7 +23,22 @@ impl GetByte for usize {
 
     #[inline(always)]
     fn get_byte(&self, i: usize) -> u8 {
-        (self >> (8*(std::mem::size_of::<usize>() - i - 1)) & 0xFF) as u8
+        (self >> (8 * (std::mem::size_of::<usize>() - i - 1)) & 0xFF) as u8
+    }
+}
+
+impl<T1: GetByte, T2: GetByte> GetByte for (T1, T2) {
+    fn num_bytes(&self) -> usize {
+        self.0.num_bytes() + self.1.num_bytes()
+    }
+
+    #[inline(always)]
+    fn get_byte(&self, i: usize) -> u8 {
+        if i < self.0.num_bytes() {
+            self.0.get_byte(i)
+        } else {
+            self.1.get_byte(i)
+        }
     }
 }
 
@@ -50,7 +65,14 @@ pub fn insertion_sort<T: Ord>(arr: &mut [T]) {
 const THRESHOLD: usize = 64;
 
 fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
+    // use std::time::Instant;
+    // let start = Instant::now();
     if v.len() <= THRESHOLD {
+        // println!(
+        //     "{}sorting {} elements with insertion sort",
+        //     "  ".repeat(byte_index),
+        //     v.len()
+        // );
         insertion_sort(v);
         return;
     }
@@ -58,6 +80,13 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
     if byte_index == nbytes {
         return;
     }
+
+    // if byte_index >= 4 {
+    //     // println!("{}sorting {} elements with PDQ", "  ".repeat(byte_index), v.len());
+    //     v.sort_unstable();
+    //     return;
+    // }
+    // println!("{}sorting {} elements", "  ".repeat(byte_index), v.len());
 
     //// First, compute the histogram of byte values and build the offsets of the bucket starts
     let mut counts = [0usize; 256];
@@ -87,12 +116,12 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
 
     //// Sort the buckets by decreasing size, to be able to pop from this stack in increasing order
     //// of bucket size. This sort is cheap to do, since it's always at most 256 elements.
-    buckets_by_size.sort_unstable_by_key(|p| p.1);
+    buckets_by_size.sort_unstable_by(|p1, p2| p1.1.cmp(&p2.1).reverse());
     //// Remove the largest bucket. By construction, when all the other buckets are sorted, it
     //// must also be sorted, so we can avoid iterating over it.
-    //// This optimization should help a great deal for very unbalanced byte distributions.
-    buckets_by_size.pop();
+    buckets_by_size.remove(0);
 
+    // let mut cnt_swaps = 0;
     while !buckets_by_size.is_empty() {
         for &(current_bucket, _) in buckets_by_size.iter() {
             unsafe {
@@ -118,9 +147,10 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
                         *write_heads.get_unchecked_mut(b4) += 1;
 
                         v.swap(q, t1);
-                        v.swap(q+1, t2);
-                        v.swap(q+2, t3);
-                        v.swap(q+3, t4);
+                        v.swap(q + 1, t2);
+                        v.swap(q + 2, t3);
+                        v.swap(q + 3, t4);
+                        // cnt_swaps += 4;
                     }
 
                     let rem_offset = offset + quotient * 4;
@@ -130,6 +160,7 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
                         let t = *write_heads.get_unchecked(b);
                         v.swap(r, t);
                         *write_heads.get_unchecked_mut(b) += 1;
+                        // cnt_swaps += 1;
                     }
                 }
             }
@@ -138,14 +169,39 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
     }
 
     //// Finally, we recur into each bucket to sort it independently from the others
+    // let mut rec = 0;
+    // let mut insert_cnt = 0;
+    // let mut dur_rec = std::time::Duration::from_secs(0);
+    // let mut dur_insert = std::time::Duration::from_secs(0);
     for i in 0..256 {
         let r = offsets[i]..ends[i];
         if counts[i] > THRESHOLD {
+            // let s = Instant::now();
             radix_sort_impl(&mut v[r], byte_index + 1);
+            // dur_rec += s.elapsed();
         } else if counts[i] > 1 {
+            // println!(
+            //     "{}sorting {} elements with insertion sort",
+            //     "  ".repeat(byte_index),
+            //     v.len()
+            // );
+            // let s = Instant::now();
             insertion_sort(&mut v[r]);
+            // dur_insert += s.elapsed();
         }
     }
+    // println!("{}completed in {:?}, byte {}, {} recursive calls ({:?}), {} insertion sorts ({:?}), {} elements, {} swaps, {} swaps/elem", 
+    //     "  ".repeat(byte_index), 
+    //     start.elapsed(), 
+    //     byte_index, 
+    //     rec, 
+    //     dur_rec, 
+    //     insert_cnt, 
+    //     dur_insert, 
+    //     v.len(), 
+    //     cnt_swaps,
+    //     cnt_swaps as f32 / v.len() as f32
+    // );
 }
 
 #[test]

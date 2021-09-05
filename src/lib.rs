@@ -4,8 +4,7 @@
 
 pub mod distance;
 pub mod load;
-pub mod motifs;
 pub mod lsh;
-pub mod timeseries;
+pub mod motifs;
 pub mod sort;
-
+pub mod timeseries;
