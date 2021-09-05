@@ -62,12 +62,14 @@ pub fn insertion_sort<T: Ord>(arr: &mut [T]) {
     }
 }
 
-const THRESHOLD: usize = 64;
+const TINY_THRESHOLD: usize = 64;
+const SMALL_THRESHOLD: usize = 1024;
+const RECURSION_THRESHOLD: usize = 16;
 
 fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
     // use std::time::Instant;
     // let start = Instant::now();
-    if v.len() <= THRESHOLD {
+    if v.len() <= TINY_THRESHOLD {
         // println!(
         //     "{}sorting {} elements with insertion sort",
         //     "  ".repeat(byte_index),
@@ -76,16 +78,20 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
         insertion_sort(v);
         return;
     }
+    if v.len() <= SMALL_THRESHOLD {
+        v.sort_unstable();
+        return;
+    }
     let nbytes = v[0].num_bytes();
     if byte_index == nbytes {
         return;
     }
 
-    // if byte_index >= 4 {
-    //     // println!("{}sorting {} elements with PDQ", "  ".repeat(byte_index), v.len());
-    //     v.sort_unstable();
-    //     return;
-    // }
+    if byte_index >= RECURSION_THRESHOLD {
+        // println!("{}sorting {} elements with PDQ", "  ".repeat(byte_index), v.len());
+        v.sort_unstable();
+        return;
+    }
     // println!("{}sorting {} elements", "  ".repeat(byte_index), v.len());
 
     //// First, compute the histogram of byte values and build the offsets of the bucket starts
@@ -114,8 +120,10 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
         }
     }
 
-    //// Sort the buckets by decreasing size, to be able to pop from this stack in increasing order
-    //// of bucket size. This sort is cheap to do, since it's always at most 256 elements.
+    //// Sort the buckets by decreasing size.
+    //// This sort is cheap to do, since it's always at most 256 elements.
+    //// Benchmarks revealed that it's cheaper to first fix the second largest bucket,
+    //// and the move to smaller buckets.
     buckets_by_size.sort_unstable_by(|p1, p2| p1.1.cmp(&p2.1).reverse());
     //// Remove the largest bucket. By construction, when all the other buckets are sorted, it
     //// must also be sorted, so we can avoid iterating over it.
@@ -125,13 +133,10 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
     while !buckets_by_size.is_empty() {
         for &(current_bucket, _) in buckets_by_size.iter() {
             unsafe {
-                let offset = *write_heads.get_unchecked(current_bucket);
-                if offset < ends[current_bucket] {
-                    let span = ends[current_bucket] - offset;
-                    let quotient = span / 4;
-                    let remainder = span % 4;
-                    for q in 0..quotient {
-                        let q = offset + q * 4;
+                loop {
+                    let mut offset = *write_heads.get_unchecked(current_bucket);
+                    if offset + 4 < ends[current_bucket] {
+                        let q = offset;
                         let b1 = v.get_unchecked(q).get_byte(byte_index) as usize;
                         let b2 = v.get_unchecked(q + 1).get_byte(byte_index) as usize;
                         let b3 = v.get_unchecked(q + 2).get_byte(byte_index) as usize;
@@ -150,17 +155,14 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
                         v.swap(q + 1, t2);
                         v.swap(q + 2, t3);
                         v.swap(q + 3, t4);
-                        // cnt_swaps += 4;
-                    }
-
-                    let rem_offset = offset + quotient * 4;
-                    for r in 0..remainder {
-                        let r = rem_offset + r;
+                    } else if offset < ends[current_bucket] {
+                        let r = offset;
                         let b = v.get_unchecked(r).get_byte(byte_index) as usize;
                         let t = *write_heads.get_unchecked(b);
                         v.swap(r, t);
                         *write_heads.get_unchecked_mut(b) += 1;
-                        // cnt_swaps += 1;
+                    } else {
+                        break;
                     }
                 }
             }
@@ -175,10 +177,12 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
     // let mut dur_insert = std::time::Duration::from_secs(0);
     for i in 0..256 {
         let r = offsets[i]..ends[i];
-        if counts[i] > THRESHOLD {
+        if counts[i] > SMALL_THRESHOLD {
             // let s = Instant::now();
             radix_sort_impl(&mut v[r], byte_index + 1);
             // dur_rec += s.elapsed();
+        } else if counts[i] > TINY_THRESHOLD {
+            v[r].sort_unstable();
         } else if counts[i] > 1 {
             // println!(
             //     "{}sorting {} elements with insertion sort",
