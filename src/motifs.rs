@@ -47,23 +47,67 @@ impl PartialOrd for Motif {
     }
 }
 
+impl Motif {
+    /// Tells whether the two motifs overlap, in order to avoid storing trivial matches
+    fn overlaps(&self, other: &Self, exclusion_zone: usize) -> bool {
+        //// To check, we just sort the four indices defining the two m
+        let mut idxs = [
+            self.idx_a,
+            self.idx_b,
+            other.idx_a,
+            self.idx_b
+        ];
+        idxs.sort_unstable();
+
+        idxs[0] + exclusion_zone > idxs[1] ||
+            idxs[1] + exclusion_zone > idxs[2] ||
+            idxs[2] + exclusion_zone > idxs[3]
+    }
+}
+
 struct TopK {
     k: usize,
-    top: BTreeSet<Motif>,
+    exclusion_zone: usize,
+    top: Vec<Motif>,
 }
 
 impl TopK {
-    fn new(k: usize) -> Self {
+    fn new(k: usize, exclusion_zone: usize) -> Self {
         Self {
             k,
-            top: BTreeSet::new(),
+            exclusion_zone,
+            top: Vec::new(),
         }
     }
 
+    fn len(&self) -> usize {
+        self.top.len()
+    }
+
     fn insert(&mut self, motif: Motif) {
-        self.top.insert(motif);
+        //// First try to insert in order, escaping early if there is a pair closer which is overlapping
+        //// with the motif we are trying to insert.
+        let mut i = 0;
+        while i < self.top.len() && self.top[i].distance < motif.distance {
+            if motif.overlaps(&self.top[i], self.exclusion_zone) {
+                return;
+            }
+            i += 1;
+        }
+        //// Insert at position `i`
+        self.top.insert(i, motif);
+
+        //// Remove the trivial matches from the tail of the array
+        i += 1;
+        while i < self.top.len() {
+            if self.top[i].overlaps(&motif, self.exclusion_zone) {
+                self.top.remove(i);
+            }
+        }
+
+        //// Retain only `k` elements
         if self.top.len() > self.k {
-            self.top.pop_last();
+            self.top.pop();
         }
     }
 
@@ -118,7 +162,7 @@ pub fn motifs(
 
     let mut cnt_dist = 0;
 
-    let mut top = TopK::new(topk);
+    let mut top = TopK::new(topk, exclusion_zone);
 
     //// Keep track of the evolution of the minimum required number of repetitions
     let mut min_threshold = std::usize::MAX;
@@ -143,7 +187,7 @@ pub fn motifs(
                 break;
             }
             let mut rep_cnt_dists = 0;
-            pbar.set_message(format!("depth {}", depth));
+            pbar.set_message(format!("depth {} pq={}", depth, top.len()));
             for (hash_range, bucket) in hashes.buckets(depth, rep) {
                 if stop {
                     break;
