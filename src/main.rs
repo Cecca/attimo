@@ -73,6 +73,7 @@ fn main() -> Result<()> {
         config.delta,
         config.seed,
     );
+    println!("{:#?}", motifs);
 
     // TODO: output all motifs to CSV
     println!("Top motif: {:?}", motifs[0]);

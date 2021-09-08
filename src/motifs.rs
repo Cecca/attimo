@@ -72,6 +72,14 @@ impl TopK {
         self.top.len() == self.k
     }
 
+    fn k_th(&self) -> Option<Motif> {
+        if self.top.len() == self.k {
+            self.top.last().map(|mot| *mot)
+        } else {
+            None
+        }
+    }
+
     fn to_vec(self) -> Vec<Motif> {
         self.top.into_iter().collect()
     }
@@ -106,9 +114,9 @@ pub fn motifs(
 
     //// keep track of active subsequences
     let mut active: Vec<bool> = vec![true; ts.num_subsequences()];
-    //// These two array of counters is just for inspection
-    let mut count_evaluations = vec![0usize; ts.num_subsequences()];
-    let mut thresholds = vec![usize::MAX; ts.num_subsequences()];
+
+    //// and keep track whether a subsequence has already bee inserted in the `top` data structure
+    let mut inserted: Vec<bool> = vec![false; ts.num_subsequences()];
 
     //// In this vector we will hold the solution: we have an entry for each subsequence, initialized
     //// to the empty value, and eventually replaced with a pair whose first element is the
@@ -123,9 +131,12 @@ pub fn motifs(
     //// Keep track of the evolution of the minimum required number of repetitions
     let mut min_threshold = std::usize::MAX;
 
+    //// Flag to signal if we have to continue the computation
+    let mut stop = false;
+
     //// for decreasing depths
     for depth in (0..=crate::lsh::K).rev() {
-        if top.is_complete() {
+        if stop {
             break;
         }
         let n_active = active.iter().filter(|a| **a).count();
@@ -141,7 +152,7 @@ pub fn motifs(
         );
 
         for rep in 0..repetitions {
-            if top.is_complete() {
+            if stop {
                 break;
             }
             let mut rep_cnt_dists = 0;
@@ -151,11 +162,11 @@ pub fn motifs(
                 active.iter().filter(|a| **a).count()
             ));
             for (hash_range, bucket) in hashes.buckets(depth, rep) {
-                if top.is_complete() {
+                if stop {
                     break;
                 }
                 for (a_offset, &(_, a_idx)) in bucket.iter().enumerate() {
-                    if top.is_complete() {
+                    if stop {
                         break;
                     }
                     if active[a_idx] {
@@ -183,8 +194,6 @@ pub fn motifs(
                                         let d = zeucl(&ts, a_idx, b_idx);
                                         cnt_dist += 1;
                                         rep_cnt_dists += 1;
-                                        count_evaluations[a_idx] += 1;
-                                        count_evaluations[b_idx] += 1;
                                         if nearest_neighbor[a_idx].is_none()
                                             || d < nearest_neighbor[a_idx].unwrap().0
                                         {
@@ -205,16 +214,18 @@ pub fn motifs(
                         //// bucket go through here, irrespective of how they were processed in
                         //// the loop above.
                         bounds[rep][a_idx] = hash_range.clone();
-                        //// Check the stopping condition, and if possible deactivate the subsequence
                         if let Some((d, nn_idx)) = nearest_neighbor[a_idx] {
                             let p = hasher.collision_probability_at(d);
-                            assert!(p <= 1.0);
-                            let threshold =
-                                ((1.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize;
-                            thresholds[a_idx] = threshold;
-                            min_threshold = std::cmp::min(threshold, min_threshold);
-                            active[a_idx] = rep < threshold;
-                            if !active[a_idx] {
+
+                            let should_insert = if let Some(kth) = top.k_th() {
+                                !inserted[a_idx] && d < kth.distance
+                            } else {
+                                //// If we have still fewer than k items in `top`, 
+                                //// then just insert this directly.
+                                !inserted[a_idx]
+                            };
+
+                            if should_insert {
                                 let motif = Motif {
                                     idx_a: a_idx,
                                     idx_b: nn_idx,
@@ -223,8 +234,36 @@ pub fn motifs(
                                     collision_probability: p,
                                 };
                                 top.insert(motif);
+                                inserted[a_idx] = true;
+                            }
+
+                            //// Check the stopping condition
+                            if let Some(kth) = top.k_th() {
+                                let threshold =
+                                    ((1.0 / delta).ln() / kth.collision_probability.powi(depth as i32)).ceil() as usize;
+                                min_threshold = threshold;
+                                stop = rep >= threshold;
                             }
                         }
+
+                        // if let Some((d, nn_idx)) = nearest_neighbor[a_idx] {
+                        //     let p = hasher.collision_probability_at(d);
+                        //     assert!(p <= 1.0);
+                        //     let threshold =
+                        //         ((1.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize;
+                        //     min_threshold = std::cmp::min(threshold, min_threshold);
+                        //     active[a_idx] = rep < threshold;
+                        //     if !active[a_idx] {
+                        //         let motif = Motif {
+                        //             idx_a: a_idx,
+                        //             idx_b: nn_idx,
+                        //             distance: d,
+                        //             elapsed: start.elapsed(),
+                        //             collision_probability: p,
+                        //         };
+                        //         top.insert(motif);
+                        //     }
+                        // }
                     }
                 }
             }
