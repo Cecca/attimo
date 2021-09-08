@@ -120,6 +120,9 @@ pub fn motifs(
 
     let mut top = TopK::new(topk);
 
+    //// Keep track of the evolution of the minimum required number of repetitions
+    let mut min_threshold = std::usize::MAX;
+
     //// for decreasing depths
     for depth in (0..=crate::lsh::K).rev() {
         if top.is_complete() {
@@ -209,6 +212,7 @@ pub fn motifs(
                             let threshold =
                                 ((1.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize;
                             thresholds[a_idx] = threshold;
+                            min_threshold = std::cmp::min(threshold, min_threshold);
                             active[a_idx] = rep < threshold;
                             if !active[a_idx] {
                                 let motif = Motif {
@@ -224,7 +228,7 @@ pub fn motifs(
                     }
                 }
             }
-            info!("completed repetition"; "computed_distances" => rep_cnt_dists, "depth" => depth, "repetition" => rep);
+            info!("completed repetition"; "computed_distances" => rep_cnt_dists, "depth" => depth, "repetition" => rep, "min_threshold" => min_threshold);
             pbar.inc(1);
             if depth == 0 {
                 break;
