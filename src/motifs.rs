@@ -55,7 +55,7 @@ impl Motif {
             self.idx_a,
             self.idx_b,
             other.idx_a,
-            self.idx_b
+            other.idx_b
         ];
         idxs.sort_unstable();
 
@@ -88,26 +88,18 @@ impl TopK {
         //// First try to insert in order, escaping early if there is a pair closer which is overlapping
         //// with the motif we are trying to insert.
         let mut i = 0;
-        while i < self.top.len() && self.top[i].distance < motif.distance {
+        while i < self.top.len() {//&& self.top[i].distance < motif.distance {
             if motif.overlaps(&self.top[i], self.exclusion_zone) {
                 return;
             }
             i += 1;
         }
-        //// Insert at position `i`
-        self.top.insert(i, motif);
-
-        //// Remove the trivial matches from the tail of the array
-        i += 1;
-        while i < self.top.len() {
-            if self.top[i].overlaps(&motif, self.exclusion_zone) {
-                self.top.remove(i);
-            }
-        }
+        self.top.push(motif);
+        self.top.sort();
 
         //// Retain only `k` elements
         if self.top.len() > self.k {
-            self.top.pop();
+            self.top.truncate(self.k);
         }
     }
 
@@ -241,35 +233,37 @@ pub fn motifs(
                     //// the loop above.
                     bounds[rep][a_idx] = hash_range.clone();
                     if let Some((d, nn_idx)) = nearest_neighbor[a_idx] {
-                        let p = hasher.collision_probability_at(d);
+                        if a_idx < nn_idx {
+                            let p = hasher.collision_probability_at(d);
 
-                        let should_insert = if let Some(kth) = top.k_th() {
-                            !inserted[a_idx] && d < kth.distance
-                        } else {
-                            //// If we have still fewer than k items in `top`,
-                            //// then just insert this directly.
-                            !inserted[a_idx]
-                        };
-
-                        if should_insert {
-                            let motif = Motif {
-                                idx_a: a_idx,
-                                idx_b: nn_idx,
-                                distance: d,
-                                elapsed: start.elapsed(),
-                                collision_probability: p,
+                            let should_insert = if let Some(kth) = top.k_th() {
+                                !inserted[a_idx] && d < kth.distance
+                            } else {
+                                //// If we have still fewer than k items in `top`,
+                                //// then just insert this directly.
+                                !inserted[a_idx]
                             };
-                            top.insert(motif);
-                            inserted[a_idx] = true;
-                        }
 
-                        //// Check the stopping condition
-                        if let Some(kth) = top.k_th() {
-                            let threshold = ((1.0 / delta).ln()
-                                / kth.collision_probability.powi(depth as i32))
-                            .ceil() as usize;
-                            min_threshold = threshold;
-                            stop = rep >= threshold;
+                            if should_insert {
+                                let motif = Motif {
+                                    idx_a: a_idx,
+                                    idx_b: nn_idx,
+                                    distance: d,
+                                    elapsed: start.elapsed(),
+                                    collision_probability: p,
+                                };
+                                top.insert(motif);
+                                inserted[a_idx] = true;
+                            }
+
+                            //// Check the stopping condition
+                            if let Some(kth) = top.k_th() {
+                                let threshold = ((1.0 / delta).ln()
+                                    / kth.collision_probability.powi(depth as i32))
+                                .ceil() as usize;
+                                min_threshold = threshold;
+                                stop = rep >= threshold;
+                            }
                         }
                     }
                 }
