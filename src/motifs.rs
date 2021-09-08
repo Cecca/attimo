@@ -89,7 +89,7 @@ pub fn motifs(
 ) -> Vec<Motif> {
     let start = Instant::now();
 
-    let exclusion_zone = ts.w / 4;
+    let exclusion_zone = ts.w;
     info!("Motifs setup"; "topk" => topk, "repetitions" => repetitions, "delta" => delta, "seed" => seed, "exclusion_zone" => exclusion_zone);
 
     let hasher_width = Hasher::estimate_width(&ts, 20, seed);
