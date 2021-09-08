@@ -62,7 +62,7 @@ pub fn insertion_sort<T: Ord>(arr: &mut [T]) {
     }
 }
 
-const TINY_THRESHOLD: usize = 64;
+const TINY_THRESHOLD: usize = 16;
 const SMALL_THRESHOLD: usize = 1024;
 const RECURSION_THRESHOLD: usize = 16;
 
@@ -194,15 +194,15 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
             // dur_insert += s.elapsed();
         }
     }
-    // println!("{}completed in {:?}, byte {}, {} recursive calls ({:?}), {} insertion sorts ({:?}), {} elements, {} swaps, {} swaps/elem", 
-    //     "  ".repeat(byte_index), 
-    //     start.elapsed(), 
-    //     byte_index, 
-    //     rec, 
-    //     dur_rec, 
-    //     insert_cnt, 
-    //     dur_insert, 
-    //     v.len(), 
+    // println!("{}completed in {:?}, byte {}, {} recursive calls ({:?}), {} insertion sorts ({:?}), {} elements, {} swaps, {} swaps/elem",
+    //     "  ".repeat(byte_index),
+    //     start.elapsed(),
+    //     byte_index,
+    //     rec,
+    //     dur_rec,
+    //     insert_cnt,
+    //     dur_insert,
+    //     v.len(),
     //     cnt_swaps,
     //     cnt_swaps as f32 / v.len() as f32
     // );

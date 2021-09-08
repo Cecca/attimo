@@ -348,7 +348,6 @@ impl<'hasher> HashMatrix<'hasher> {
             }
             let elapsed_hashes = start.elapsed();
             let start = Instant::now();
-            rephashes.sort_unstable();
             let elapsed_sort = start.elapsed();
             debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));
             info!("completed lazy hash column building"; "repetition" => rep, "time_hashes_s" => elapsed_hashes.as_secs_f64(), "time_sort_s" => elapsed_sort.as_secs_f64());

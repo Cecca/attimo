@@ -1,5 +1,3 @@
-use std::{rc::Rc, time::Instant};
-
 use attimo::{
     lsh::{HashCollection, HashValue, Hasher},
     sort::RadixSort,
@@ -8,6 +6,8 @@ use attimo::{
 use rand::SeedableRng;
 use rand_distr::{Distribution, Geometric, Uniform};
 use rand_xoshiro::Xoroshiro128PlusPlus;
+use std::time::Duration;
+use std::{rc::Rc, time::Instant};
 
 fn main() {
     let n = std::env::args().nth(1).unwrap().parse::<usize>().unwrap();
@@ -24,12 +24,18 @@ fn main() {
     // }).collect();
 
     println!("Generating time series");
-    let ts = Rc::new(WindowedTimeseries::gen_randomwalk(n, 300, 1243));
+    let start = Instant::now();
+    let ts: Vec<f64> = attimo::load::loadts("data/ECG.csv", Some(n)).unwrap();
+    let ts = Rc::new(WindowedTimeseries::new(ts, 300));
+    println!("...{:?}", start.elapsed());
+    // let ts = Rc::new(WindowedTimeseries::gen_randomwalk(n, 300, 1243));
     println!("Computing hashes");
+    let start = Instant::now();
     let hasher = Hasher::new(300, 200, 2.0, 123);
     let hc = HashCollection::from_ts(ts, &hasher);
-    // let v: Vec<(HashValue, usize)> = (0..n).map(|i| (hc.hash_value(i, 0), i)).collect();
-    let v: Vec<HashValue> = (0..n).map(|i| hc.hash_value(i, 0)).collect();
+    let v: Vec<(HashValue, usize)> = (0..n).map(|i| (hc.hash_value(i, 0), i)).collect();
+    // let v: Vec<HashValue> = (0..n).map(|i| hc.hash_value(i, 0)).collect();
+    println!("...{:?}", start.elapsed());
 
     println!("Radix sort");
     let mut v1 = v.clone();
@@ -43,15 +49,15 @@ fn main() {
         v.len() as f64 / elapsed.as_secs_f64()
     );
 
-    // println!("Rust unstable sort");
-    // let mut v2 = v.clone();
-    // let start = Instant::now();
-    // v2.sort_unstable();
-    // let elapsed = start.elapsed();
-    // println!(
-    //     "Sorted {} values in {:?} ({} elems/s)",
-    //     v.len(),
-    //     elapsed,
-    //     v.len() as f64 / elapsed.as_secs_f64()
-    // );
+    println!("Rust unstable sort");
+    let mut v2 = v.clone();
+    let start = Instant::now();
+    v2.sort_unstable();
+    let elapsed = start.elapsed();
+    println!(
+        "Sorted {} values in {:?} ({} elems/s)",
+        v.len(),
+        elapsed,
+        v.len() as f64 / elapsed.as_secs_f64()
+    );
 }
