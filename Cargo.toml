@@ -24,7 +24,6 @@ slog-json = "2.4"
 slog-scope = "4.4"
 slog-async = "2.7"
 
-
 [profile.release]
 debug = true
 

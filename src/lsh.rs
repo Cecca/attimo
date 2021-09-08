@@ -81,15 +81,16 @@ pub const K_HALF: usize = K / 2;
 /// Wrapper structx for vectors of 8-bits words, which sort lexicographically from the lowest significant bit.
 #[derive(Clone, Eq, PartialEq)]
 pub struct HashValue {
-    hashes: [i8; K],
+    pub hashes: [i8; K],
 }
 
 impl GetByte for HashValue {
     fn num_bytes(&self) -> usize {
         self.hashes.len()
     }
+    #[inline(always)]
     fn get_byte(&self, i: usize) -> u8 {
-        self.hashes[i] as u8
+        unsafe { *self.hashes.get_unchecked(i) as u8 }
     }
 }
 
@@ -347,7 +348,6 @@ impl<'hasher> HashMatrix<'hasher> {
             }
             let elapsed_hashes = start.elapsed();
             let start = Instant::now();
-            rephashes.sort_unstable();
             let elapsed_sort = start.elapsed();
             debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));
             info!("completed lazy hash column building"; "repetition" => rep, "time_hashes_s" => elapsed_hashes.as_secs_f64(), "time_sort_s" => elapsed_sort.as_secs_f64());
@@ -427,9 +427,9 @@ impl Hasher {
         let r = self.width;
         let normal = NormalDistr::new(0.0, 1.0).unwrap();
         1.0 - 2.0 * normal.cdf(-r / d)
-            - (2.0 / ((std::f64::consts::PI * 2.0).sqrt() * (r/d))) * (1.0 - (-r * r / (2.0*d*d)).exp())
+            - (2.0 / ((std::f64::consts::PI * 2.0).sqrt() * (r / d)))
+                * (1.0 - (-r * r / (2.0 * d * d)).exp())
     }
-
 
     pub fn estimate_width(ts: &WindowedTimeseries, samples: usize, seed: u64) -> f64 {
         let mut min_dotp = f64::INFINITY;
@@ -497,12 +497,12 @@ mod test {
     fn test_first_collision() {
         let w = 300;
         let ts = crate::load::loadts("data/ECG.csv", Some(500)).expect("problem loading data");
-        let ts = crate::timeseries::WindowedTimeseries::new(ts, w);
+        let ts = Rc::new(crate::timeseries::WindowedTimeseries::new(ts, w));
 
         let repetitions = 200;
 
         let hasher = Hasher::new(w, repetitions, 5.0, 1245);
-        let pools = HashCollection::from_ts(&ts, &hasher);
+        let pools = HashCollection::from_ts(Rc::clone(&ts), &hasher);
 
         for &depth in &[32usize, 20, 10] {
             println!("depth {}", depth);

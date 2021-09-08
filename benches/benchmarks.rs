@@ -1,6 +1,11 @@
+use std::rc::Rc;
+
 use attimo::sort::*;
 use attimo::{lsh::*, timeseries::WindowedTimeseries};
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use rand::SeedableRng;
+use rand_distr::{Distribution, Uniform};
+use rand_xoshiro::Xoroshiro128PlusPlus;
 
 pub fn bench_construct_ts(c: &mut Criterion) {
     use rand::prelude::*;
@@ -67,22 +72,56 @@ pub fn bench_hash_ts(c: &mut Criterion) {
     group.sampling_mode(criterion::SamplingMode::Flat);
     group.sample_size(10);
     let w = 500;
-    let ts = WindowedTimeseries::gen_randomwalk(1000000, w, 12345);
+    let ts = Rc::new(WindowedTimeseries::gen_randomwalk(1000000, w, 12345));
     let hasher = Hasher::new(w, 200, 10.0, 12345);
     group.bench_function("hash time series", |b| {
-        b.iter(|| HashCollection::from_ts(&ts, &hasher))
+        b.iter(|| HashCollection::from_ts(Rc::clone(&ts), &hasher))
     });
+    group.finish()
+}
+
+pub fn bench_sort_u8(c: &mut Criterion) {
+    use rand::prelude::*;
+    use rand_distr::Uniform;
+    use rand_xoshiro::Xoshiro256PlusPlus;
+
+    let mut group = c.benchmark_group("sorting u8");
+    let rng = Xoshiro256PlusPlus::seed_from_u64(1234);
+    let vals: Vec<u8> = Uniform::new(0, u8::MAX)
+        .sample_iter(rng)
+        .take(10000000)
+        .collect();
+
+    group.bench_function("rust unstable sort", |b| {
+        b.iter_batched(
+            || vals.clone(),
+            |mut vals| vals.sort_unstable(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.bench_function("radix sort", |b| {
+        b.iter_batched(
+            || vals.clone(),
+            |mut vals| vals.radix_sort(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
     group.finish()
 }
 
 pub fn bench_sort_usize(c: &mut Criterion) {
     use rand::prelude::*;
-    use rand_xoshiro::Xoshiro256PlusPlus;
     use rand_distr::Uniform;
+    use rand_xoshiro::Xoshiro256PlusPlus;
 
     let mut group = c.benchmark_group("sorting usize");
     let rng = Xoshiro256PlusPlus::seed_from_u64(1234);
-    let vals: Vec<usize> = Uniform::new(0,usize::MAX).sample_iter(rng).take(10000000).collect();
+    let vals: Vec<usize> = Uniform::new(0, usize::MAX)
+        .sample_iter(rng)
+        .take(10000000)
+        .collect();
 
     group.bench_function("rust unstable sort", |b| {
         b.iter_batched(
@@ -106,12 +145,46 @@ pub fn bench_sort_usize(c: &mut Criterion) {
 pub fn bench_sort_hashes(c: &mut Criterion) {
     let mut group = c.benchmark_group("sorting hashes");
     let w = 500;
-    let ts = WindowedTimeseries::gen_randomwalk(1000000, w, 12345);
+    let ts = Rc::new(WindowedTimeseries::gen_randomwalk(1000000, w, 12345));
     let h = Hasher::new(w, 200, 10.0, 12345);
-    let hasher = HashCollection::from_ts(&ts, &h);
+    let hasher = HashCollection::from_ts(Rc::clone(&ts), &h);
     let hashes: Vec<HashValue> = (0..ts.num_subsequences())
         .map(|i| hasher.hash_value(i, 0))
         .collect();
+
+    group.bench_function("rust unstable sort", |b| {
+        b.iter_batched(
+            || hashes.clone(),
+            |mut hashes| hashes.sort_unstable(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.bench_function("radix sort", |b| {
+        b.iter_batched(
+            || hashes.clone(),
+            |mut hashes| hashes.radix_sort(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.finish()
+}
+
+pub fn bench_sort_uniform_hashes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sorting hashes uniform");
+    let n = 1000000;
+    let mut rng = Xoroshiro128PlusPlus::seed_from_u64(1234);
+    let uniform = Uniform::new(i8::MIN, i8::MAX);
+    let hashes: Vec<HashValue> = (0..n)
+        .map(|_| {
+            let mut hashes: [i8; 32] = [0; 32];
+            for (i, x) in uniform.sample_iter(&mut rng).take(32).enumerate() {
+                hashes[i] = x;
+            }
+            HashValue { hashes }
+        })
+        .collect(); // uniform.sample_iter(&mut rng).take(n).collect();
 
     group.bench_function("rust unstable sort", |b| {
         b.iter_batched(
@@ -138,6 +211,8 @@ criterion_group!(
     bench_construct_ts,
     bench_hash_ts,
     bench_sort_hashes,
-    bench_sort_usize
+    bench_sort_uniform_hashes,
+    bench_sort_usize,
+    bench_sort_u8
 );
 criterion_main!(benches);
