@@ -1,5 +1,5 @@
-                ATTIMO: ApproximaTe TImeseries MOtifs
-                =====================================
+ATTIMO: ApproximaTe TImeseries MOtifs
+=====================================
 
 This is the implementation of the ATTIMO algorithm for fast approximate mining
 of timeseries motifs, with probabilistic guarantees.
