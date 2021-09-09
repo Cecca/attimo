@@ -127,7 +127,7 @@ impl TopK {
         //// To this end we remove from the tail of the vector all motifs
         //// that overlap with the one just inserted.
         ////
-        //// One consequence of this is that among several trivial matches of 
+        //// One consequence of this is that among several trivial matches of
         //// the same motif, the one with the smallest distance is selected.
         //// In fact, this should be equivalent to just sorting all pairs of subsequences
         //// based on their distance, and then proceed from the one with smallest distance
@@ -344,23 +344,25 @@ pub fn motifs(
                                 top.insert(motif);
                             }
 
-                            //// Now we check the stopping condition. If we have seen enough
-                            //// repetitions to make it unlikely (where _unlikely_ is quantified
-                            //// by the parameter `delta`) that we have missed a pair
-                            //// closer than the k-th in the `top` data structure, then
-                            //// we stop the computation.
-                            if let Some(kth) = top.k_th() {
-                                let threshold = ((1.0 / delta).ln()
-                                    / kth.collision_probability.powi(depth as i32))
-                                .ceil() as usize;
-                                min_threshold = threshold;
-                                stop = rep >= threshold;
-                            }
-
                             //// Flip the `updated` flag so that we don't try to insert it again (unless
                             //// it is updated in a future iteration)
                             *updated = false;
                         }
+                    }
+
+                    //// Now we check the stopping condition. If we have seen enough
+                    //// repetitions to make it unlikely (where _unlikely_ is quantified
+                    //// by the parameter `delta`) that we have missed a pair
+                    //// closer than the k-th in the `top` data structure, then
+                    //// we stop the computation.
+                    //// We check the condition even if no update happened, because there is
+                    //// one more repetition that could have made us pass the threshold.
+                    if let Some(kth) = top.k_th() {
+                        let threshold = ((1.0 / delta).ln()
+                            / kth.collision_probability.powi(depth as i32))
+                        .ceil() as usize;
+                        min_threshold = threshold;
+                        stop = rep >= threshold;
                     }
                 }
             }
