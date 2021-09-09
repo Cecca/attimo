@@ -1,4 +1,4 @@
-use std::{fmt::Debug, ops::Range};
+use std::{fmt::Debug };
 
 pub trait GetByte {
     fn num_bytes(&self) -> usize;
@@ -134,7 +134,7 @@ fn radix_sort_impl<T: GetByte + Debug + Ord>(v: &mut [T], byte_index: usize) {
         for &(current_bucket, _) in buckets_by_size.iter() {
             unsafe {
                 loop {
-                    let mut offset = *write_heads.get_unchecked(current_bucket);
+                    let offset = *write_heads.get_unchecked(current_bucket);
                     if offset + 4 < ends[current_bucket] {
                         let q = offset;
                         let b1 = v.get_unchecked(q).get_byte(byte_index) as usize;

@@ -5,7 +5,6 @@ use attimo::load::*;
 use attimo::motifs::{motifs, Motif};
 use attimo::timeseries::*;
 use plotly::common::{Line, Mode};
-use plotly::layout::LayoutGrid;
 use plotly::{Layout, Plot, Scatter};
 use slog::*;
 use slog_scope::GlobalLoggerGuard;

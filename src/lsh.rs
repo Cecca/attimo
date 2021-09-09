@@ -59,9 +59,8 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
 use std::{
-    cell::{Cell, RefCell},
+    cell::{RefCell},
     cmp::Ordering,
-    collections::{BTreeMap, HashMap},
     fmt::Debug,
     mem::size_of,
     ops::Range,
@@ -143,7 +142,6 @@ impl HashValue {
 }
 
 pub struct HashCollection<'hasher> {
-    ts: Rc<WindowedTimeseries>,
     hasher: &'hasher Hasher,
     n_subsequences: usize,
     //// Both pools are organized as three dimensional matrices, in C order.
@@ -151,8 +149,6 @@ pub struct HashCollection<'hasher> {
     //// dimension is `K_HALF`.
     left_pools: Vec<i8>,
     right_pools: Vec<i8>,
-    init_mark_left: Cell<usize>,
-    init_mark_right: Cell<usize>,
 }
 
 impl<'hasher> HashCollection<'hasher> {
@@ -221,13 +217,10 @@ impl<'hasher> HashCollection<'hasher> {
             dbg!(hist);
         }
         Self {
-            ts,
             hasher,
             n_subsequences: ns,
             left_pools,
             right_pools,
-            init_mark_left: Cell::new(0),
-            init_mark_right: Cell::new(0),
         }
     }
 
