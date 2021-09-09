@@ -1,7 +1,9 @@
 //// # Motifs
-////
+
 //// Finding motifs in time series. Instead of computing the full matrix profile,
 //// leverage [LSH](src/lsh.html) to check only pairs that are probably near.
+//// The data structure used for the task is adaptive to the data, and is configured
+//// to respect the limits of the system in terms of memory.
 
 use crate::distance::*;
 use crate::lsh::*;
@@ -14,6 +16,18 @@ use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 
+//// ## Support data structures
+//// ### Motifs
+
+//// This data structure stores information about a motif:
+////
+////  - The index of the two subsequences defining the motif
+////  - The distance between the two subsequences
+////  - The LSH collision probability two subsequences
+////  - The elapsed time since the start of the algorithm until
+////    when the motif was found
+////
+//// Some utility functions follow.
 #[derive(Clone, Copy, Debug)]
 pub struct Motif {
     pub idx_a: usize,
@@ -46,10 +60,15 @@ impl PartialOrd for Motif {
     }
 }
 
+//// An important part of working with motifs is defining and removing
+//// _trivial matches_. With the function `Motif::overlaps` we can detect
+//// whether two motifs overlap according to the given `exclusion_zone`:
+//// if any two indices in the two motifs are at distance less than
+//// `exclusion_zone` from each other, then the motifs overlap and one of them
+//// shall be discarded.
 impl Motif {
     /// Tells whether the two motifs overlap, in order to avoid storing trivial matches
     fn overlaps(&self, other: &Self, exclusion_zone: usize) -> bool {
-        //// To check, we just sort the four indices defining the two m
         let mut idxs = [self.idx_a, self.idx_b, other.idx_a, other.idx_b];
         idxs.sort_unstable();
 
@@ -59,6 +78,13 @@ impl Motif {
     }
 }
 
+//// ### Top-k data structure
+
+//// With our algorithm we look for the top motifs, that is a configurable
+//// number of non-overlapping motifs in increasing order of distance.
+//// This data structure implements a buffer, holding up to `k` sorted motifs,
+//// such that no two motifs in the data structure are overlapping,
+//// according to the parameter `exclusion_zone`.
 struct TopK {
     k: usize,
     exclusion_zone: usize,
@@ -78,24 +104,34 @@ impl TopK {
         self.top.len()
     }
 
+    //// When inserting into the data structure, we first check, in order of distance,
+    //// if there is a pair whose defining motif is closer than the one being inserted,
+    //// and which is also overlapping.
     fn insert(&mut self, motif: Motif) {
-        //// First try to insert in order, escaping early if there is a pair closer which is overlapping
-        //// with the motif we are trying to insert.
         let mut i = 0;
         while i < self.top.len() && self.top[i].distance < motif.distance {
+            //// If this is the case, we don't insert the motif, and return.
             if motif.overlaps(&self.top[i], self.exclusion_zone) {
                 return;
             }
             i += 1;
         }
 
-        //// Insert in the correct position.
+        //// Otherwise, we insert the motif in the correct position.
         //// Because of this the `top` array is always in sorted
         //// order of increasing distance
         self.top.insert(i, motif);
 
-        //// Remove from the tail of the vector all motifs
+        //// After the insertion we make sure that there are no other
+        //// motifs overlapping with the one just inserted.
+        //// To this end we remove from the tail of the vector all motifs
         //// that overlap with the one just inserted.
+        ////
+        //// One consequence of this is that among several trivial matches of 
+        //// the same motif, the one with the smallest distance is selected.
+        //// In fact, this should be equivalent to just sorting all pairs of subsequences
+        //// based on their distance, and then proceed from the one with smallest distance
+        //// removing trivial matches along the way.
         i += 1;
         while i < self.top.len() {
             if self.top[i].overlaps(&motif, self.exclusion_zone) {
@@ -107,12 +143,13 @@ impl TopK {
 
         debug_assert!(self.top.is_sorted());
 
-        //// Retain only `k` elements
+        //// Finally, we ratain only `k` elements
         if self.top.len() > self.k {
             self.top.truncate(self.k);
         }
     }
 
+    //// This function is used to access the k-th motif, if we already found it.
     fn k_th(&self) -> Option<Motif> {
         if self.top.len() == self.k {
             self.top.last().map(|mot| *mot)
@@ -126,6 +163,30 @@ impl TopK {
     }
 }
 
+//// ## Motif finding algorithm
+
+//// At last, this is the algorithm to find the motifs.
+//// It takes, as parameters:
+////
+////  - the time series windowed with windows of length `w`
+////  - the number of top motifs we want to find
+////  - the memory we allow the algorithm to use
+////  - the probability `delta`  of making an error
+////  - the seed of the random number generator
+////
+//// These are the general steps of the algorithm, which are then detailed below:
+////
+////  1. Compute the tensored hash pools for all the subsequences, taking into account
+////     the allowed memory when setting the number of repetitions
+////  2. Initialize the hash matrix, with one column per repetition
+////  3. Then, starting from depth `K`, iterate through all repetitions, updating the
+////     estimated nearest neighbor of each subsequence
+////     - Whenever a nearest neighbor is updated, we try to insert it in the top-k set
+////     - If the k-th motif in the top-k data structure is at distance such that the
+////       probability of not having seen a closer pair is small enough, we stop.
+////     - Otherwise, if we exhaust all available repetitions, it means that hash values
+////       of the current length are too selective. Therefore, we relax them by considering
+////       hash values one value shorter, repeating from the beginning of point 3.
 pub fn motifs(
     ts: Rc<WindowedTimeseries>,
     topk: usize,
@@ -135,6 +196,7 @@ pub fn motifs(
 ) -> Vec<Motif> {
     let start = Instant::now();
 
+    //// We set the exclusion zone to the motif length, so that motifs cannot overlap at all.
     let exclusion_zone = ts.w;
     info!("Motifs setup"; "topk" => topk, "memory" => format!("{}", memory), "delta" => delta, "seed" => seed, "exclusion_zone" => exclusion_zone);
 
