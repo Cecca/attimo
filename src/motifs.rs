@@ -88,14 +88,31 @@ impl TopK {
         //// First try to insert in order, escaping early if there is a pair closer which is overlapping
         //// with the motif we are trying to insert.
         let mut i = 0;
-        while i < self.top.len() {//&& self.top[i].distance < motif.distance {
+        while i < self.top.len() && self.top[i].distance < motif.distance {
             if motif.overlaps(&self.top[i], self.exclusion_zone) {
                 return;
             }
             i += 1;
         }
-        self.top.push(motif);
-        self.top.sort();
+
+
+        //// Insert in the correct position.
+        //// Because of this the `top` array is always in sorted
+        //// order of increasing distance
+        self.top.insert(i, motif);
+
+        //// Remove from the tail of the vector all motifs
+        //// that overlap with the one just inserted.
+        i += 1;
+        while i < self.top.len() {
+            if self.top[i].overlaps(&motif, self.exclusion_zone) {
+                self.top.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+
+        debug_assert!(self.top.is_sorted());
 
         //// Retain only `k` elements
         if self.top.len() > self.k {
