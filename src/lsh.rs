@@ -61,6 +61,7 @@ use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
 use std::{
     cell::{Cell, RefCell},
     cmp::Ordering,
+    collections::{BTreeMap, HashMap},
     fmt::Debug,
     mem::size_of,
     ops::Range,
@@ -432,6 +433,27 @@ impl Hasher {
                 * (1.0 - (-r * r / (2.0 * d * d)).exp())
     }
 
+    //// ## Estimating the width parameter
+    ////
+    //// With this function we estimate the `width` parameter for bucketing the projections in
+    //// the LSH function. While the precise value of this parameter is not so important (since
+    //// the effects on the collision probability of a misconfiguration can be counterbalanced by
+    //// using a larger or smaller `k`), setting a sensible value can help a great deal.
+    ////
+    //// To this end, we use the following heuristic. We compute dot products between a number
+    //// `sample` of random normal vectors and all the subsequences of the time series. This is basically
+    //// simulating what happens during the LSH computation prior to the bucketing.
+    //// Then, we compute a histogram of the values of the dot products, to approximate their 
+    //// probability distribution. The idea is that since there are dot product values which are more 
+    //// likely than others, we want to split the highest density probability range (such that 3/4 of the mass
+    //// falls within it) into a
+    //// sensible number of buckets, say 8, so that the collision probability is moderate.
+    //// If we adopted a similar approach using the maximum and minimum sampled dot product values,
+    //// we would be tricked by long-tailed distributions. The consequence would be that a large number
+    //// of subsequences would collide on the same few values, either leading to a large number of distance
+    //// computations or requiring a large value of K, larger than the one hardcoded for simplicity in this module.
+    ////
+    //// By instead relying on the distribution, we select the width in a data-adaptive way.
     pub fn estimate_width(ts: &WindowedTimeseries, samples: usize, seed: u64) -> f64 {
         let mut min_dotp = f64::INFINITY;
         let mut max_dotp = f64::NEG_INFINITY;
@@ -439,12 +461,30 @@ impl Hasher {
         let normal = Normal::new(0.0, 1.0).expect("problem instantiating normal distribution");
         let mut v = Vec::with_capacity(ts.w);
         let mut buf = vec![0.0; ts.num_subsequences()];
+        let mut histogram_pos: Vec<usize> = Vec::new();
+        let mut histogram_neg: Vec<usize> = Vec::new();
+        let bin_width = 1.0;
         for _ in 0..samples {
             v.clear();
             for x in normal.sample_iter(&mut rng).take(ts.w) {
                 v.push(x);
             }
             ts.znormalized_sliding_dot_product(&v, &mut buf);
+            for &x in buf.iter() {
+                if x >= 0.0 {
+                    let bin = ((x / bin_width).floor()) as usize;
+                    if bin >= histogram_pos.len() {
+                        histogram_pos.resize(bin + 1, 0);
+                    }
+                    histogram_pos[bin] += 1;
+                } else {
+                    let bin = ((-x / bin_width).floor()) as usize;
+                    if bin >= histogram_neg.len() {
+                        histogram_neg.resize(bin + 1, 0);
+                    }
+                    histogram_neg[bin] += 1;
+                }
+            }
             let min = *buf.iter().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
             let max = *buf.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
             if min < min_dotp {
@@ -456,8 +496,35 @@ impl Hasher {
             info!("estimating width"; "min_dotp" => min_dotp, "max_dotp" => max_dotp);
         }
 
-        //// Pick the width so that the range is divided in controlled number of buckets
-        (max_dotp - min_dotp) / 64.0
+        #[cfg(debug)]
+        {
+            println!(
+                "minimum and maximum inner products: {} {}",
+                min_dotp, max_dotp
+            );
+            println!("Histogram of inner products");
+            for (i, c) in histogram_neg.iter().enumerate().rev() {
+                println!("{:.3} {}", -(i as f64) * bin_width, c);
+            }
+            for (i, c) in histogram_pos.iter().enumerate() {
+                println!("{:.3} {}", (i as f64) * bin_width, c);
+            }
+        }
+
+        let total = histogram_neg.iter().sum::<usize>() + histogram_pos.iter().sum::<usize>();
+        let target = 3 * total / 4;
+        let mut count = 0;
+        let mut i = 0;
+        while count < target {
+            count += histogram_neg[i] + histogram_pos[i];
+            i += 1;
+        }
+
+        let lower = -((i - 1) as f64) * bin_width;
+        let upper = (i - 1) as f64 * bin_width;
+        println!("lower and upper {} {}", lower, upper);
+
+        (upper - lower) / 8.0
     }
 
     fn get_vector(&self, repetition: usize, concat: usize) -> &'_ [f64] {
@@ -480,7 +547,10 @@ impl Hasher {
         DOTP_BUFFER.with(|dotp_buf| {
             ts.znormalized_sliding_dot_product(v, &mut dotp_buf.borrow_mut());
             for (i, dotp) in dotp_buf.borrow().iter().enumerate() {
-                buffer[i] = ((dotp + shift) / self.width) as i8;
+                let h = (dotp + shift) / self.width;
+                assert!(h <= 128.0);
+                assert!(h >= -127.0);
+                buffer[i] = h as i8;
             }
         });
     }
