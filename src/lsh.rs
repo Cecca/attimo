@@ -10,45 +10,21 @@
 //// For a given subsequence of our time series, each of the sampled functions will output a
 //// _hash value_, whose domain depends on the family of hash functions.
 ////
-//// ## Simhash, a popular LSH family
-////
-//// A very popular family of hash functions is [Simhash](https://www.cs.princeton.edu/courses/archive/spr04/cos598B/bib/CharikarEstim.pdf).
-//// It works for the _angular distance_ (or cosine similarity) and produces
-//// binary hash values. It is very simple (just a dot product of the input vector with a random
-//// vector with coordinated sampled from a standard normal distribution) but does not readily
-//// support the Euclidean distance. Not all hope is lost, however, since we can _embed_ our input
-//// vectors into a _kernel space_ such that the dot product in the kernel space is a function of the
-//// euclidean distance of the original vectors. This is discussed in the [embedding
-//// module](embedding.html).
-////
-//// Embedding a subsequence of length `w` into a space of dimension `w` has a cost which is
-//// $O(w^2)$, since it requires a matrix-vector multiplication.
-////
-////
-//// ## LSH for p-stable distributions
-////
-//// The cost of the aforementioned approach might be too high, since we have to pay w^2 time for
-//// each subsequence.
-//// An alternative scheme is to use the approach for distances related to p-stable distributions,
+//// A LSH scheme for the Euclidean distance is
 //// described in [this paper](http://theory.csail.mit.edu/~mirrokni/pstable.ps).
 //// The idea is rather simple: for each input vector (in our case the subsequences of the input time
 //// series) we compute the inner product with a random vector, whose components are distributed
 //// according to the p-stable distribution associated with the distance. For the Euclidean
 //// distance such distribution is the Standard Normal. The result is then bucketed into bins whose
-//// width is a parameter of the algorithm.
-//// The nice property of this approach is that we can compute the dot products in one go using the
-//// same trick of [MASS](https://www.cs.unm.edu/~mueen/FastestSimilaitySearch.html), i.e. by doing
-//// element-wise multiplication in the frequency domain. This way, computing a single hash
-//// function for the entire time series takes time n log n. Therefore, for k concatenations
-//// and L repetitions (without tensoring) we have that we require just k L n log n to compute all
-//// hash values.
-//// This is obviously desirable, and also leverages the fact that subsequences are overlapping, a
-//// fact that makes this problem different from traditional nearest neighbor search.
+//// width is a parameter of the algorithm (we shall later see how to estimate this parameter automatically).
 ////
-//// ## Computing dot procuts in n log n time
-////
-//// This trick is at the base of the fast MASS algorithm for computing the distance profile.
-//// The approach is based on the definition of convolution (see these [lecture notes](http://www.dei.unipd.it/~geppo/DA2/DOCS/FFT.pdf))
+//// The nice property of this approach, when used with time series, is that for a given random vector 
+//// we can compute all the dot products with every subsequence of the time series in one go using the
+//// same trick of [MASS](https://www.cs.unm.edu/~mueen/FastestSimilaitySearch.html).
+//// The idea is to use the [cyclic convolution theorem](http://www.dei.unipd.it/~geppo/DA2/DOCS/FFT.pdf)
+//// to perform the dot products by means of element-wise multiplication in the frequency domain.
+//// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
+//// we save a factor `w` in the complexity, where `w` is the motif length.
 
 use crate::{sort::*, timeseries::PrettyBytes};
 use crate::timeseries::WindowedTimeseries;
@@ -70,15 +46,18 @@ use std::{
 //// ## Hash values
 //// We consider hash values made of 8-bit words. So we have to make sure, setting the
 //// `width` parameter, that the values are in the range `[-128, 127]`.
+//// More on the estimation of the `width` parameter down below.
 
 //// We only consider concatenations of hash values of a fixed length, defined in this
 //// constant `K`. The reason is that this way we can inline the hash values when allocated into a
 //// vector, rather than falling back to vector of vectors. Removing this dereference allows for
 //// a rather large speed up.
+//// Also, it is one fewer parameter for the user to set.
 pub const K: usize = 32;
 pub const K_HALF: usize = K / 2;
 
-/// Wrapper structx for vectors of 8-bits words, which sort lexicographically from the lowest significant bit.
+//// That said, here is the definition of a hash value, with several 
+//// utility implementations following.
 #[derive(Clone, Eq, PartialEq)]
 pub struct HashValue {
     pub hashes: [i8; K],
@@ -108,7 +87,7 @@ impl DeepSizeOf for HashValue {
 
 //// We also use a custom implementation of the ordering, that sorts lexicographically the
 //// hash values from the first value, so that hashes _with the same prefix_ are all
-//// grouped together.
+//// grouped together, for any prefix length.
 impl Ord for HashValue {
     fn cmp(&self, other: &Self) -> Ordering {
         debug_assert!(self.hashes.len() == other.hashes.len());
@@ -130,8 +109,8 @@ impl PartialOrd for HashValue {
 }
 
 impl HashValue {
-    //// Furthermore, we need a way to compare for equality on prefixes
-    //// with this method, which checks if two hash values have the same
+    //// Furthermore, we need a way to compare for equality on prefixes.
+    //// This method checks if two hash values have the same
     //// prefix of a given length.
     #[inline]
     fn prefix_eq(&self, other: &Self, l: usize) -> bool {
@@ -141,17 +120,40 @@ impl HashValue {
     }
 }
 
+//// ## Collections of hash values
+
+//// A key part of the algorithm is the ability to process hash values related to different subsequence
+//// in bulk. In particular, we want to be able to access all the hash values associated to one particular repetition,
+//// so that all subsequences sharing a common prefix of a given length can be accessed together.
+////
+//// Furthermore, we want to reduce the number of hash function evaluations, which tend to be expensive even
+//// when using the convolution trick. Implementing the LSH repetitions naively would require
+//// computing `K * L` hash values for each subsequence of the time series, where `K` is the
+//// number of concatenations, and `L` is the number of repetitions.
+//// We can cut down these evaluations by using the [tensoring technique](https://arxiv.org/pdf/1708.07586.pdf), which
+//// allows to compute just `2 * K * sqrt(L)` hash values, which are then combined to derive the
+//// instances of `HashValue` we need.
+////
+//// **TODO**: maybe give more details on the tensoring approach.
+
+//// This data structure contains all the information needed to generate the hash values for all the repeititions
+//// for all the subsequences.
 pub struct HashCollection<'hasher> {
     hasher: &'hasher Hasher,
     n_subsequences: usize,
-    //// Both pools are organized as three dimensional matrices, in C order.
-    //// The stride in the first dimenson is `K_HALF*n_subsequences`, and the stride in the second
-    //// dimension is `K_HALF`.
+    // Both pools are organized as three dimensional matrices, in C order.
+    // The stride in the first dimenson is `K_HALF*n_subsequences`, and the stride in the second
+    // dimension is `K_HALF`.
     left_pools: Vec<i8>,
     right_pools: Vec<i8>,
 }
 
 impl<'hasher> HashCollection<'hasher> {
+    //// LSH schemes usually have at least two parameters: the number of concatenations `K` and
+    //// the number or repetitions `L`. We fix the first parameter in the constant `K` at the top of
+    //// this source file. As for the second, with this function we allow the user to get an estimate of the
+    //// memory that would be needed to run the given number or `repetitions`. Hence,
+    //// it can be used to tune the LSH data structure to the available memory.
     pub fn required_memory(ts: &WindowedTimeseries, repetitions: usize) -> usize {
         let tensor_repetitions = (repetitions as f64).sqrt().ceil() as usize;
         //// This is the memory required by the hash pools
@@ -162,6 +164,9 @@ impl<'hasher> HashCollection<'hasher> {
         mem_pools + mem_matrix
     }
 
+
+    //// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
+    //// and a `Hasher`.
     pub fn from_ts(ts: Rc<WindowedTimeseries>, hasher: &'hasher Hasher) -> Self {
         let ns = ts.num_subsequences();
         let mut left_pools = vec![0; hasher.tensor_repetitions * K_HALF * ns];
@@ -222,20 +227,13 @@ impl<'hasher> HashCollection<'hasher> {
         }
     }
 
-    // fn init_repetition(&self, repetition: usize) {
-    //     let rep_left = repetition % self.hasher.tensor_repetitions;
-    //     let rep_right = repetition / self.hasher.tensor_repetitions;
-    // }
-
     fn left(&self, i: usize, repetition: usize) -> &[i8] {
-        // let idx = self.idx_left(i, repetition);
         let trep = repetition % self.hasher.tensor_repetitions;
         let idx = K_HALF * self.n_subsequences * trep + i * K_HALF;
         &self.left_pools[idx..idx + K_HALF]
     }
 
     fn right(&self, i: usize, repetition: usize) -> &[i8] {
-        // let idx = self.idx_right(i, repetition);
         let trep = repetition / self.hasher.tensor_repetitions;
         let idx = K_HALF * self.n_subsequences * trep + i * K_HALF;
         &self.right_pools[idx..idx + K_HALF]
@@ -319,6 +317,8 @@ impl<'hasher> DeepSizeOf for HashCollection<'hasher> {
         self.left_pools.deep_size_of() + self.right_pools.deep_size_of()
     }
 }
+
+//// From the collection defined above we can generate a matrix of hash values.
 
 #[derive(DeepSizeOf)]
 pub struct HashMatrix<'hasher> {
@@ -437,7 +437,7 @@ impl Hasher {
     }
 
     //// ## Estimating the width parameter
-    ////
+
     //// With this function we estimate the `width` parameter for bucketing the projections in
     //// the LSH function. While the precise value of this parameter is not so important (since
     //// the effects on the collision probability of a misconfiguration can be counterbalanced by
