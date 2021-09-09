@@ -18,7 +18,7 @@
 //// distance such distribution is the Standard Normal. The result is then bucketed into bins whose
 //// width is a parameter of the algorithm (we shall later see how to estimate this parameter automatically).
 ////
-//// The nice property of this approach, when used with time series, is that for a given random vector 
+//// The nice property of this approach, when used with time series, is that for a given random vector
 //// we can compute all the dot products with every subsequence of the time series in one go using the
 //// same trick of [MASS](https://www.cs.unm.edu/~mueen/FastestSimilaitySearch.html).
 //// The idea is to use the [cyclic convolution theorem](http://www.dei.unipd.it/~geppo/DA2/DOCS/FFT.pdf)
@@ -26,7 +26,7 @@
 //// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
-use crate::{sort::*, timeseries::PrettyBytes};
+use crate::sort::*;
 use crate::timeseries::WindowedTimeseries;
 use deepsize::DeepSizeOf;
 use rand::prelude::*;
@@ -34,14 +34,7 @@ use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
-use std::{
-    cell::{RefCell},
-    cmp::Ordering,
-    fmt::Debug,
-    mem::size_of,
-    ops::Range,
-    rc::Rc,
-};
+use std::{cell::RefCell, cmp::Ordering, fmt::Debug, mem::size_of, ops::Range, rc::Rc};
 
 //// ## Hash values
 //// We consider hash values made of 8-bit words. So we have to make sure, setting the
@@ -56,7 +49,7 @@ use std::{
 pub const K: usize = 32;
 pub const K_HALF: usize = K / 2;
 
-//// That said, here is the definition of a hash value, with several 
+//// That said, here is the definition of a hash value, with several
 //// utility implementations following.
 #[derive(Clone, Eq, PartialEq)]
 pub struct HashValue {
@@ -163,7 +156,6 @@ impl<'hasher> HashCollection<'hasher> {
 
         mem_pools + mem_matrix
     }
-
 
     //// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
     //// and a `Hasher`.
@@ -446,8 +438,8 @@ impl Hasher {
     //// To this end, we use the following heuristic. We compute dot products between a number
     //// `sample` of random normal vectors and all the subsequences of the time series. This is basically
     //// simulating what happens during the LSH computation prior to the bucketing.
-    //// Then, we compute a histogram of the values of the dot products, to approximate their 
-    //// probability distribution. The idea is that since there are dot product values which are more 
+    //// Then, we compute a histogram of the values of the dot products, to approximate their
+    //// probability distribution. The idea is that since there are dot product values which are more
     //// likely than others, we want to split the highest density probability range (such that 3/4 of the mass
     //// falls within it) into a
     //// sensible number of buckets, say 8, so that the collision probability is moderate.
