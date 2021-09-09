@@ -29,7 +29,7 @@ struct Config {
     pub delta: f64,
 
     #[argh(option, short = 'm')]
-    /// the number of LSH repetitions
+    /// the amount of memory the algorithm can use
     pub memory: String,
 
     #[argh(switch)]
