@@ -2,7 +2,7 @@ use crate::distance::dot;
 use deepsize::DeepSizeOf;
 use rand_distr::num_traits::Zero;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
-use std::{cell::RefCell, fmt::Display, mem::size_of, sync::Arc};
+use std::{cell::RefCell, convert::TryFrom, fmt::Display, mem::size_of, sync::Arc};
 
 pub struct WindowedTimeseries {
     pub data: Vec<f64>,
@@ -245,6 +245,34 @@ impl Display for PrettyBytes {
             write!(f, "{} Kbytes", self.0 / 1024)
         } else {
             write!(f, "{} bytes", self.0)
+        }
+    }
+}
+
+impl TryFrom<String> for PrettyBytes {
+    type Error = anyhow::Error;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        let mut s = s.clone();
+        if s.ends_with("Gb") {
+            s.remove_matches("Gb");
+            let num = s.parse::<f64>().map_err(|e| anyhow::anyhow!(e))?;
+            let bytes = num * 1024.0 * 1024.0 * 1024.0;
+            Ok(PrettyBytes(bytes as usize))
+        } else if s.ends_with("Mb") {
+            s.remove_matches("Mb");
+            let num = s.parse::<f64>().map_err(|e| anyhow::anyhow!(e))?;
+            let bytes = num * 1024.0 * 1024.0;
+            Ok(PrettyBytes(bytes as usize))
+        } else if s.ends_with("Kb") {
+            s.remove_matches("Kb");
+            let num = s.parse::<f64>().map_err(|e| anyhow::anyhow!(e))?;
+            let bytes = num * 1024.0;
+            Ok(PrettyBytes(bytes as usize))
+        } else {
+            let num = s.parse::<f64>().map_err(|e| anyhow::anyhow!(e))?;
+            let bytes = num;
+            Ok(PrettyBytes(bytes as usize))
         }
     }
 }

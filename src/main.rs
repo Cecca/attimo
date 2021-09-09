@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use argh::FromArgs;
 use attimo::distance::zeucl;
 use attimo::load::*;
@@ -12,6 +12,7 @@ use slog_scope::GlobalLoggerGuard;
 use std::fs::OpenOptions;
 use std::ops::Range;
 use std::rc::Rc;
+use std::convert::TryFrom;
 
 #[derive(FromArgs)]
 /// ATTIMO computes ApproximaTe TImeseries MOtifs.
@@ -28,9 +29,9 @@ struct Config {
     /// failure probability of the LSH scheme
     pub delta: f64,
 
-    #[argh(option, short = 'r')]
+    #[argh(option, short = 'm')]
     /// the number of LSH repetitions
-    pub repetitions: usize,
+    pub memory: String,
 
     #[argh(switch)]
     /// open a browser window with a plot of the approximate matrix profile
@@ -67,10 +68,11 @@ fn main() -> Result<()> {
     let ts: Vec<f64> = loadts(path, config.prefix)?;
     let ts = Rc::new(WindowedTimeseries::new(ts, w));
     println!("Loaded time series, taking {}", ts.bytes_size());
+    let memory: PrettyBytes = PrettyBytes::try_from(config.memory).context("parsing allowed memory")?;
     let motifs = motifs(
         Rc::clone(&ts),
         config.motifs,
-        config.repetitions,
+        memory,
         config.delta,
         config.seed,
     );

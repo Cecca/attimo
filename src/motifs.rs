@@ -9,7 +9,6 @@ use crate::timeseries::*;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use slog_scope::info;
-use std::collections::BTreeSet;
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
@@ -130,14 +129,28 @@ impl TopK {
 pub fn motifs(
     ts: Rc<WindowedTimeseries>,
     topk: usize,
-    repetitions: usize,
+    memory: PrettyBytes,
     delta: f64,
     seed: u64,
 ) -> Vec<Motif> {
     let start = Instant::now();
 
     let exclusion_zone = ts.w;
-    info!("Motifs setup"; "topk" => topk, "repetitions" => repetitions, "delta" => delta, "seed" => seed, "exclusion_zone" => exclusion_zone);
+    info!("Motifs setup"; "topk" => topk, "memory" => format!("{}", memory), "delta" => delta, "seed" => seed, "exclusion_zone" => exclusion_zone);
+
+    //// First, we have to determine how many repetitions we can afford with the allowed memory
+    let repetitions = {
+        let mut r = 1;
+        let target = memory.0;
+        loop {
+            if HashCollection::required_memory(&ts, r + 1) > target {
+                break;
+            }
+            r += 1;
+        }
+        r
+    };
+    println!("Performing {} repetitions", repetitions);
 
     let hasher_width = Hasher::estimate_width(&ts, 20, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);

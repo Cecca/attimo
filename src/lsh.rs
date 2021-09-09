@@ -50,7 +50,7 @@
 //// This trick is at the base of the fast MASS algorithm for computing the distance profile.
 //// The approach is based on the definition of convolution (see these [lecture notes](http://www.dei.unipd.it/~geppo/DA2/DOCS/FFT.pdf))
 
-use crate::sort::*;
+use crate::{sort::*, timeseries::PrettyBytes};
 use crate::timeseries::WindowedTimeseries;
 use deepsize::DeepSizeOf;
 use rand::prelude::*;
@@ -156,6 +156,18 @@ pub struct HashCollection<'hasher> {
 }
 
 impl<'hasher> HashCollection<'hasher> {
+    pub fn required_memory(ts: &WindowedTimeseries, repetitions: usize) -> usize {
+        let tensor_repetitions = (repetitions as f64).sqrt().ceil() as usize;
+        //// This is the memory required by the hash pools
+        let mem_pools = tensor_repetitions * K_HALF * ts.num_subsequences() * 2;
+        //// And this is the memory eventually required by the hash matrix, when all the columns are materialized
+        let mem_matrix = ts.num_subsequences() * (K + std::mem::size_of::<usize>()) * repetitions;
+
+        println!("rep={} pools={} matrix={}", repetitions, PrettyBytes(mem_pools), PrettyBytes(mem_matrix));
+
+        mem_pools + mem_matrix
+    }
+
     pub fn from_ts(ts: Rc<WindowedTimeseries>, hasher: &'hasher Hasher) -> Self {
         let ns = ts.num_subsequences();
         let mut left_pools = vec![0; hasher.tensor_repetitions * K_HALF * ns];
