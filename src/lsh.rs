@@ -159,8 +159,6 @@ impl<'hasher> HashCollection<'hasher> {
         //// And this is the memory eventually required by the hash matrix, when all the columns are materialized
         let mem_matrix = ts.num_subsequences() * (K + std::mem::size_of::<usize>()) * repetitions;
 
-        println!("rep={} pools={} matrix={}", repetitions, PrettyBytes(mem_pools), PrettyBytes(mem_matrix));
-
         mem_pools + mem_matrix
     }
 
@@ -527,9 +525,10 @@ impl Hasher {
 
         let lower = -((i - 1) as f64) * bin_width;
         let upper = (i - 1) as f64 * bin_width;
+        #[cfg(debug)]
         println!("lower and upper {} {}", lower, upper);
 
-        (upper - lower) / 8.0
+        (upper - lower) / 16.0
     }
 
     fn get_vector(&self, repetition: usize, concat: usize) -> &'_ [f64] {
@@ -581,7 +580,6 @@ mod test {
         let pools = HashCollection::from_ts(Rc::clone(&ts), &hasher);
 
         for &depth in &[32usize, 20, 10] {
-            println!("depth {}", depth);
             for i in 0..ts.num_subsequences() {
                 for j in 0..ts.num_subsequences() {
                     // println!("i={} j={}", i, j);
