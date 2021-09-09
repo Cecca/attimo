@@ -5,7 +5,8 @@ use attimo::load::*;
 use attimo::motifs::{motifs, Motif};
 use attimo::timeseries::*;
 use plotly::common::{Line, Mode};
-use plotly::{Plot, Scatter};
+use plotly::layout::LayoutGrid;
+use plotly::{Layout, Plot, Scatter};
 use slog::*;
 use slog_scope::GlobalLoggerGuard;
 use std::fs::OpenOptions;
@@ -80,15 +81,26 @@ fn main() -> Result<()> {
 
     if config.plot {
         let mut plot = Plot::new();
+        let layout = Layout::default().height(500);
+        plot.set_layout(layout);
+
         let ts_lines = Scatter::new(0..ts.data.len(), ts.data.clone())
             .name("time series")
+            .line(Line::new().color("#667393").width(0.5))
             .mode(Mode::Lines);
-        // plot.set_layout(Layout::new().grid(LayoutGrid::new().rows(2)));
         plot.add_trace(ts_lines);
         let occs = find_occurences(&ts, &motifs[0]);
         for (idxs, vals) in occs {
             let l = Scatter::new(idxs, vals)
-                .line(Line::new().color("#FF0000").width(5.0))
+                .line(Line::new().color("#f7a61b").width(1.5))
+                .mode(Mode::Lines);
+            plot.add_trace(l);
+        }
+        for i in [motifs[0].idx_a, motifs[0].idx_b] {
+            let idxs = i..i+w;
+            let vals = ts.data[idxs.clone()].to_vec();
+            let l = Scatter::new(idxs, vals)
+                .line(Line::new().color("#db4620").width(3.0))
                 .mode(Mode::Lines);
             plot.add_trace(l);
         }
@@ -100,31 +112,15 @@ fn main() -> Result<()> {
 fn find_occurences(ts: &WindowedTimeseries, motif: &Motif) -> Vec<(Range<usize>, Vec<f64>)> {
     let mdist = motif.distance;
     let w = ts.w;
-    let thresh = (w as f64 / 4.0) as isize;
     let idxs: Vec<usize> = ts
         .distance_profile(motif.idx_a, zeucl)
         .iter()
         .enumerate()
+        .filter(|&(i, _d)| i != motif.idx_a && i != motif.idx_b)
         .filter_map(|(i, d)| if *d <= 2.0 * mdist { Some(i) } else { None })
         .collect();
 
-    let mut idxs: Vec<usize> = idxs
-        .into_iter()
-        .filter(|&i| {
-            (i as isize - motif.idx_a as isize).abs() >= thresh
-                || (i as isize - motif.idx_b as isize).abs() >= thresh
-        })
-        .collect();
-    idxs.sort();
-    let mut output_idxs = Vec::new();
-    output_idxs.push(idxs[0]);
-    for i in idxs.into_iter() {
-        if (i as isize - *output_idxs.last().unwrap() as isize).abs() >= thresh {
-            output_idxs.push(i);
-        }
-    }
-
-    output_idxs
+    idxs
         .into_iter()
         .map(|i| {
             let r = i..i + w;

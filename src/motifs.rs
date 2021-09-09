@@ -51,17 +51,12 @@ impl Motif {
     /// Tells whether the two motifs overlap, in order to avoid storing trivial matches
     fn overlaps(&self, other: &Self, exclusion_zone: usize) -> bool {
         //// To check, we just sort the four indices defining the two m
-        let mut idxs = [
-            self.idx_a,
-            self.idx_b,
-            other.idx_a,
-            other.idx_b
-        ];
+        let mut idxs = [self.idx_a, self.idx_b, other.idx_a, other.idx_b];
         idxs.sort_unstable();
 
-        idxs[0] + exclusion_zone > idxs[1] ||
-            idxs[1] + exclusion_zone > idxs[2] ||
-            idxs[2] + exclusion_zone > idxs[3]
+        idxs[0] + exclusion_zone > idxs[1]
+            || idxs[1] + exclusion_zone > idxs[2]
+            || idxs[2] + exclusion_zone > idxs[3]
     }
 }
 
@@ -94,7 +89,6 @@ impl TopK {
             }
             i += 1;
         }
-
 
         //// Insert in the correct position.
         //// Because of this the `top` array is always in sorted
@@ -160,14 +154,13 @@ pub fn motifs(
     //// We have a range of already examined hash indices for each element and repetition
     let mut bounds: Vec<Vec<Range<usize>>> = vec![vec![0..0; ts.num_subsequences()]; repetitions];
 
-    //// and keep track whether a subsequence has already bee inserted in the `top` data structure
-    let mut inserted: Vec<bool> = vec![false; ts.num_subsequences()];
-
     //// In this vector we will hold the solution: we have an entry for each subsequence, initialized
-    //// to the empty value, and eventually replaced with a pair whose first element is the
+    //// to the empty value, and eventually replaced with a triplet whose first element is the
     //// distance to the (estimated) nearest neighbor, and the second element is the index
-    //// of the nearest neigbor itself.
-    let mut nearest_neighbor: Vec<Option<(f64, usize)>> = vec![None; ts.num_subsequences()];
+    //// of the nearest neigbor itself. The third element is a boolean flag that tells us whether the
+    //// nearest neighbor has recently been updated, requiring us to try to insert it into
+    //// the `top` data structure.
+    let mut nearest_neighbor: Vec<Option<(f64, usize, bool)>> = vec![None; ts.num_subsequences()];
 
     let mut cnt_dist = 0;
 
@@ -196,7 +189,14 @@ pub fn motifs(
                 break;
             }
             let mut rep_cnt_dists = 0;
-            pbar.set_message(format!("depth {} pq={}", depth, top.len()));
+            let with_estimate = nearest_neighbor.iter().filter(|nn| nn.is_some()).count();
+            pbar.set_message(format!(
+                "depth {} pq={} w/nn={} thresh={}",
+                depth,
+                top.len(),
+                with_estimate,
+                min_threshold
+            ));
             for (hash_range, bucket) in hashes.buckets(depth, rep) {
                 if stop {
                     break;
@@ -232,13 +232,13 @@ pub fn motifs(
                                     if nearest_neighbor[a_idx].is_none()
                                         || d < nearest_neighbor[a_idx].unwrap().0
                                     {
-                                        nearest_neighbor[a_idx] = Some((d, b_idx));
+                                        nearest_neighbor[a_idx] = Some((d, b_idx, true));
                                     }
                                     //// Similarly, set `a` as the nearest neighbor of `b`.
                                     if nearest_neighbor[b_idx].is_none()
                                         || d < nearest_neighbor[b_idx].unwrap().0
                                     {
-                                        nearest_neighbor[b_idx] = Some((d, a_idx));
+                                        nearest_neighbor[b_idx] = Some((d, a_idx, true));
                                     }
                                 }
                             }
@@ -249,31 +249,31 @@ pub fn motifs(
                     //// bucket go through here, irrespective of how they were processed in
                     //// the loop above.
                     bounds[rep][a_idx] = hash_range.clone();
-                    if let Some((d, nn_idx)) = nearest_neighbor[a_idx] {
-                        if a_idx < nn_idx {
-                            let p = hasher.collision_probability_at(d);
+                    if let Some((d, nn_idx, updated)) = nearest_neighbor[a_idx].as_mut() {
+                        if *updated && a_idx < *nn_idx {
+                            let p = hasher.collision_probability_at(*d);
 
-                            let should_insert = if let Some(kth) = top.k_th() {
-                                !inserted[a_idx] && d < kth.distance
-                            } else {
-                                //// If we have still fewer than k items in `top`,
-                                //// then just insert this directly.
-                                !inserted[a_idx]
-                            };
+                            //// We insert the motif into the `top` data structure only if
+                            //// its distance is smaller than the k-th in in `top`.
+                            let should_insert =
+                                top.k_th().map(|kth| *d < kth.distance).unwrap_or(true);
 
                             if should_insert {
                                 let motif = Motif {
                                     idx_a: a_idx,
-                                    idx_b: nn_idx,
-                                    distance: d,
+                                    idx_b: *nn_idx,
+                                    distance: *d,
                                     elapsed: start.elapsed(),
                                     collision_probability: p,
                                 };
                                 top.insert(motif);
-                                inserted[a_idx] = true;
                             }
 
-                            //// Check the stopping condition
+                            //// Now we check the stopping condition. If we have seen enough
+                            //// repetitions to make it unlikely (where _unlikely_ is quantified
+                            //// by the parameter `delta`) that we have missed a pair
+                            //// closer than the k-th in the `top` data structure, then
+                            //// we stop the computation.
                             if let Some(kth) = top.k_th() {
                                 let threshold = ((1.0 / delta).ln()
                                     / kth.collision_probability.powi(depth as i32))
@@ -281,6 +281,10 @@ pub fn motifs(
                                 min_threshold = threshold;
                                 stop = rep >= threshold;
                             }
+
+                            //// Flip the `updated` flag so that we don't try to insert it again (unless
+                            //// it is updated in a future iteration)
+                            *updated = false;
                         }
                     }
                 }

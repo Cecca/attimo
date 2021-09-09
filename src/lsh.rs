@@ -456,8 +456,8 @@ impl Hasher {
             info!("estimating width"; "min_dotp" => min_dotp, "max_dotp" => max_dotp);
         }
 
-        //// Pick the width so that the range is divided in 16 buckets
-        (max_dotp - min_dotp) / 16.0
+        //// Pick the width so that the range is divided in controlled number of buckets
+        (max_dotp - min_dotp) / 64.0
     }
 
     fn get_vector(&self, repetition: usize, concat: usize) -> &'_ [f64] {
