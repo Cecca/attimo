@@ -144,10 +144,12 @@ fn find_occurences(ts: &WindowedTimeseries, motif: &Motif) -> Vec<usize> {
 
     idxs.sort();
     let mut output_idxs = Vec::new();
-    output_idxs.push(idxs[0]);
-    for &i in &idxs[1..] {
-        if output_idxs.last().unwrap() + w < i {
-            output_idxs.push(i);
+    if !idxs.is_empty() {
+        output_idxs.push(idxs[0]);
+        for &i in &idxs[1..] {
+            if output_idxs.last().unwrap() + w < i {
+                output_idxs.push(i);
+            }
         }
     }
 
