@@ -113,7 +113,7 @@ fn main() -> Result<()> {
 fn find_occurences(ts: &WindowedTimeseries, motif: &Motif) -> Vec<(Range<usize>, Vec<f64>)> {
     let mdist = motif.distance;
     let w = ts.w;
-    let idxs: Vec<usize> = ts
+    let mut idxs: Vec<usize> = ts
         .distance_profile(motif.idx_a, zeucl)
         .iter()
         .enumerate()
@@ -121,7 +121,16 @@ fn find_occurences(ts: &WindowedTimeseries, motif: &Motif) -> Vec<(Range<usize>,
         .filter_map(|(i, d)| if *d <= 2.0 * mdist { Some(i) } else { None })
         .collect();
 
-    idxs
+    idxs.sort();
+    let mut output_idxs = Vec::new();
+    output_idxs.push(idxs[0]);
+    for &i in &idxs[1..] {
+        if output_idxs.last().unwrap() + ts.w < i {
+            output_idxs.push(i);
+        }
+    }
+
+    output_idxs
         .into_iter()
         .map(|i| {
             let r = i..i + w;
