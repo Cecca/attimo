@@ -85,22 +85,25 @@ fn main() -> Result<()> {
         let layout = Layout::default().height(500);
         plot.set_layout(layout);
 
-        let ts_lines = Scatter::new(0..ts.data.len(), ts.data.clone())
-            .name("time series")
-            .line(Line::new().color("#667393").width(0.5))
-            .mode(Mode::Lines);
-        plot.add_trace(ts_lines);
+        // let ts_lines = Scatter::new(0..ts.data.len(), ts.data.clone())
+        //     .name("time series")
+        //     .line(Line::new().color("#667393").width(0.5))
+        //     .mode(Mode::Lines);
+        // plot.add_trace(ts_lines);
+        let motif_range = 0..ts.w;
         let occs = find_occurences(&ts, &motifs[0]);
-        for (idxs, vals) in occs {
-            let l = Scatter::new(idxs, vals)
+        for i in occs {
+            let mut vals = vec![0.0;ts.w];
+            ts.znormalized(i, &mut vals);
+            let l = Scatter::new(motif_range.clone(), vals)
                 .line(Line::new().color("#f7a61b").width(1.5))
                 .mode(Mode::Lines);
             plot.add_trace(l);
         }
         for i in [motifs[0].idx_a, motifs[0].idx_b] {
-            let idxs = i..i+w;
-            let vals = ts.data[idxs.clone()].to_vec();
-            let l = Scatter::new(idxs, vals)
+            let mut vals = vec![0.0;ts.w];
+            ts.znormalized(i, &mut vals);
+            let l = Scatter::new(motif_range.clone(), vals)
                 .line(Line::new().color("#db4620").width(3.0))
                 .mode(Mode::Lines);
             plot.add_trace(l);
@@ -110,7 +113,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn find_occurences(ts: &WindowedTimeseries, motif: &Motif) -> Vec<(Range<usize>, Vec<f64>)> {
+fn find_occurences(ts: &WindowedTimeseries, motif: &Motif) -> Vec<usize> {
     let mdist = motif.distance;
     let w = ts.w;
     let mut idxs: Vec<usize> = ts
@@ -125,18 +128,12 @@ fn find_occurences(ts: &WindowedTimeseries, motif: &Motif) -> Vec<(Range<usize>,
     let mut output_idxs = Vec::new();
     output_idxs.push(idxs[0]);
     for &i in &idxs[1..] {
-        if output_idxs.last().unwrap() + ts.w < i {
+        if output_idxs.last().unwrap() + w < i {
             output_idxs.push(i);
         }
     }
 
     output_idxs
-        .into_iter()
-        .map(|i| {
-            let r = i..i + w;
-            (r.clone(), ts.data[r].to_vec())
-        })
-        .collect()
 }
 
 fn setup_logger() -> Result<GlobalLoggerGuard> {
