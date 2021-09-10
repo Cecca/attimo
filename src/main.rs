@@ -9,7 +9,6 @@ use plotly::{Layout, Plot, Scatter};
 use slog::*;
 use slog_scope::GlobalLoggerGuard;
 use std::fs::OpenOptions;
-use std::ops::Range;
 use std::rc::Rc;
 use std::convert::TryFrom;
 
@@ -90,13 +89,31 @@ fn main() -> Result<()> {
         //     .line(Line::new().color("#667393").width(0.5))
         //     .mode(Mode::Lines);
         // plot.add_trace(ts_lines);
+
         let motif_range = 0..ts.w;
+        // Provide some context time series
+        let n_context = 50;
+        let stride = ts.num_subsequences() / n_context;
+        let mut idx = 0;
+        while idx < ts.num_subsequences() {
+            let mut vals = vec![0.0;ts.w];
+            ts.znormalized(idx, &mut vals);
+            let l = Scatter::new(motif_range.clone(), vals)
+                .line(Line::new().color("#a0a0a0").width(0.5))
+                .show_legend(false)
+                .hover_info(plotly::common::HoverInfo::Skip)
+                .mode(Mode::Lines);
+            plot.add_trace(l);
+            idx += stride;
+        }
+
         let occs = find_occurences(&ts, &motifs[0]);
         for i in occs {
             let mut vals = vec![0.0;ts.w];
             ts.znormalized(i, &mut vals);
             let l = Scatter::new(motif_range.clone(), vals)
                 .line(Line::new().color("#f7a61b").width(1.5))
+                .show_legend(false)
                 .mode(Mode::Lines);
             plot.add_trace(l);
         }
@@ -105,6 +122,7 @@ fn main() -> Result<()> {
             ts.znormalized(i, &mut vals);
             let l = Scatter::new(motif_range.clone(), vals)
                 .line(Line::new().color("#db4620").width(3.0))
+                .show_legend(false)
                 .mode(Mode::Lines);
             plot.add_trace(l);
         }
