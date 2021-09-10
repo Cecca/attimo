@@ -520,7 +520,11 @@ impl Hasher {
         #[cfg(debug)]
         println!("lower and upper {} {}", lower, upper);
 
-        (upper - lower) / 16.0
+        if upper > lower {
+            (upper - lower) / 16.0
+        } else {
+            (max_dotp - min_dotp) / 16.0
+        }
     }
 
     fn get_vector(&self, repetition: usize, concat: usize) -> &'_ [f64] {
