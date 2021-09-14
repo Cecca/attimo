@@ -19,7 +19,7 @@ struct Config {
     /// subsequcence length
     pub window: usize,
 
-    #[argh(option)]
+    #[argh(option, default = "default_motifs()")]
     /// the number of motifs to look for
     pub motifs: usize,
 
@@ -54,6 +54,10 @@ fn default_seed() -> u64 {
 
 fn default_delta() -> f64 {
     0.001
+}
+
+fn default_motifs() -> usize {
+    1
 }
 
 fn main() -> Result<()> {

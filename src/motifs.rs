@@ -229,20 +229,14 @@ pub fn motifs(
     //// We have a range of already examined hash indices for each element and repetition
     let mut bounds: Vec<Vec<Range<usize>>> = vec![vec![0..0; ts.num_subsequences()]; repetitions];
 
-    //// In this vector we will hold the solution: we have an entry for each subsequence, initialized
-    //// to the empty value, and eventually replaced with a triplet whose first element is the
-    //// distance to the (estimated) nearest neighbor, and the second element is the index
-    //// of the nearest neigbor itself. The third element is a boolean flag that tells us whether the
-    //// nearest neighbor has recently been updated, requiring us to try to insert it into
-    //// the `top` data structure.
-    let mut nearest_neighbor: Vec<Option<(f64, usize, bool)>> = vec![None; ts.num_subsequences()];
-
     let mut cnt_dist = 0;
 
     let mut top = TopK::new(topk, exclusion_zone);
 
     //// Keep track of the evolution of the minimum required number of repetitions
     let mut min_threshold = std::usize::MAX;
+
+    let mut insertions_cnt = 0;
 
     //// Flag to signal if we have to continue the computation
     let mut stop = false;
@@ -264,12 +258,10 @@ pub fn motifs(
                 break;
             }
             let mut rep_cnt_dists = 0;
-            let with_estimate = nearest_neighbor.iter().filter(|nn| nn.is_some()).count();
             pbar.set_message(format!(
-                "depth {} pq={} w/nn={} thresh={}",
+                "depth {} pq={} thresh={}",
                 depth,
                 top.len(),
-                with_estimate,
                 min_threshold
             ));
             for (hash_range, bucket) in hashes.buckets(depth, rep) {
@@ -299,21 +291,26 @@ pub fn motifs(
                                     .expect("hashes must collide in buckets");
                                 if first_colliding_repetition == rep {
                                     //// After computing the distance between the two subsequences,
-                                    //// we set `b` as the nearest neigbor of `a`, if it is closer
-                                    //// than the previous candidate.
+                                    //// we try to insert the pair in the top data structure
                                     let d = zeucl(&ts, a_idx, b_idx);
                                     cnt_dist += 1;
                                     rep_cnt_dists += 1;
-                                    if nearest_neighbor[a_idx].is_none()
-                                        || d < nearest_neighbor[a_idx].unwrap().0
-                                    {
-                                        nearest_neighbor[a_idx] = Some((d, b_idx, true));
-                                    }
-                                    //// Similarly, set `a` as the nearest neighbor of `b`.
-                                    if nearest_neighbor[b_idx].is_none()
-                                        || d < nearest_neighbor[b_idx].unwrap().0
-                                    {
-                                        nearest_neighbor[b_idx] = Some((d, a_idx, true));
+
+                                    //// We insert the motif into the `top` data structure only if
+                                    //// its distance is smaller than the k-th in in `top`.
+                                    if top.k_th().map(|kth| d < kth.distance).unwrap_or(true) {
+                                        //// This is the collision probability for this distance
+                                        let p = hasher.collision_probability_at(d);
+
+                                        let motif = Motif {
+                                            idx_a: a_idx,
+                                            idx_b: b_idx,
+                                            distance: d,
+                                            elapsed: start.elapsed(),
+                                            collision_probability: p,
+                                        };
+                                        top.insert(motif);
+                                        insertions_cnt += 1;
                                     }
                                 }
                             }
@@ -324,31 +321,6 @@ pub fn motifs(
                     //// bucket go through here, irrespective of how they were processed in
                     //// the loop above.
                     bounds[rep][a_idx] = hash_range.clone();
-                    if let Some((d, nn_idx, updated)) = nearest_neighbor[a_idx].as_mut() {
-                        if *updated && a_idx < *nn_idx {
-                            let p = hasher.collision_probability_at(*d);
-
-                            //// We insert the motif into the `top` data structure only if
-                            //// its distance is smaller than the k-th in in `top`.
-                            let should_insert =
-                                top.k_th().map(|kth| *d < kth.distance).unwrap_or(true);
-
-                            if should_insert {
-                                let motif = Motif {
-                                    idx_a: a_idx,
-                                    idx_b: *nn_idx,
-                                    distance: *d,
-                                    elapsed: start.elapsed(),
-                                    collision_probability: p,
-                                };
-                                top.insert(motif);
-                            }
-
-                            //// Flip the `updated` flag so that we don't try to insert it again (unless
-                            //// it is updated in a future iteration)
-                            *updated = false;
-                        }
-                    }
 
                     //// Now we check the stopping condition. If we have seen enough
                     //// repetitions to make it unlikely (where _unlikely_ is quantified
@@ -381,11 +353,12 @@ pub fn motifs(
     );
     let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
     println!(
-        "[{:?}] done! Computed {}/{} distances ({}%)",
+        "[{:?}] done! Computed {}/{} distances ({}%), {} insertions in queue",
         start.elapsed(),
         cnt_dist,
         total_distances,
-        (cnt_dist as f64 / total_distances as f64) * 100.0
+        (cnt_dist as f64 / total_distances as f64) * 100.0,
+        insertions_cnt
     );
     top.to_vec()
 }
