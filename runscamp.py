@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS scamp (
 db.execute("""
 CREATE TABLE IF NOT EXISTS attimo (
     dataset      TEXT,
-    memory       TEXT,
+    repetitions  INT,
     window       INT,
     time_s       REAL
 );
@@ -33,12 +33,12 @@ datasets = [
     "data/ECG-600000.csv",
     "data/ECG-700000.csv",
 ]
-window = 200
+window = 1500
 
 ###############################################################################
 #
 # Run the SCAMP baseline
-threads = 4
+threads = 1
 for dataset in datasets:
     print(f"running on {dataset} with w={window} and {threads} threads... ", end="")
     start = time.time()
@@ -60,13 +60,13 @@ for dataset in datasets:
 # Run Attimo
 
 for dataset in datasets:
-    for memory in ["1Gb"]:
-        print(f"running on {dataset} with w={window} and {memory} memory... ", end="")
+    for repetitions in [512]:
+        print(f"running on {dataset} with w={window} and {repetitions} repetitions... ", end="")
         start = time.time()
         sp.run([
             "attimo", 
             "--window", str(window),
-            "--memory", memory,
+            "--repetitions", repetitions,
             dataset
         ])
         end = time.time()
@@ -74,5 +74,5 @@ for dataset in datasets:
         print(f"{elapsed} seconds")
         db.execute("""
         INSERT INTO attimo VALUES (?,?,?,?);
-        """, (dataset, memory, window, elapsed))
+        """, (dataset, repetitions, window, elapsed))
 
