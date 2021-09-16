@@ -37,6 +37,28 @@ window = 1500
 
 ###############################################################################
 #
+# Run Attimo
+
+for dataset in datasets:
+    for repetitions in [512]:
+        print(f"running on {dataset} with w={window} and {repetitions} repetitions... ", end="")
+        start = time.time()
+        sp.run([
+            "attimo", 
+            "--window", str(window),
+            "--repetitions", str(repetitions),
+            dataset
+        ])
+        end = time.time()
+        elapsed = end - start
+        print(f"{elapsed} seconds")
+        db.execute("""
+        INSERT INTO attimo VALUES (?,?,?,?);
+        """, (dataset, repetitions, window, elapsed))
+
+
+###############################################################################
+#
 # Run the SCAMP baseline
 threads = 1
 for dataset in datasets:
@@ -54,25 +76,3 @@ for dataset in datasets:
     db.execute("""
     INSERT INTO scamp VALUES (?,?,?,?);
     """, (dataset, threads, window, elapsed))
-
-###############################################################################
-#
-# Run Attimo
-
-for dataset in datasets:
-    for repetitions in [512]:
-        print(f"running on {dataset} with w={window} and {repetitions} repetitions... ", end="")
-        start = time.time()
-        sp.run([
-            "attimo", 
-            "--window", str(window),
-            "--repetitions", repetitions,
-            dataset
-        ])
-        end = time.time()
-        elapsed = end - start
-        print(f"{elapsed} seconds")
-        db.execute("""
-        INSERT INTO attimo VALUES (?,?,?,?);
-        """, (dataset, repetitions, window, elapsed))
-

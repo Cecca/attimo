@@ -219,8 +219,9 @@ pub fn motifs(
 
     let mut top = TopK::new(topk, exclusion_zone);
 
-    //// Keep track of the evolution of the minimum required number of repetitions
+    //// Keep track of the evolution of the minimum required number of repetitions, and of the distance
     let mut min_threshold = std::usize::MAX;
+    let mut kdist = std::f64::INFINITY;
 
     let mut insertions_cnt = 0;
 
@@ -245,9 +246,10 @@ pub fn motifs(
             }
             let mut rep_cnt_dists = 0;
             pbar.set_message(format!(
-                "depth {} pq={} thresh={}",
+                "depth {} pq={} d={} thresh={}",
                 depth,
                 top.len(),
+                kdist,
                 min_threshold
             ));
             for (hash_range, bucket) in hashes.buckets(depth, rep) {
@@ -320,6 +322,7 @@ pub fn motifs(
                             / kth.collision_probability.powi(depth as i32))
                         .ceil() as usize;
                         min_threshold = threshold;
+                        kdist = kth.distance;
                         stop = rep >= threshold;
                     }
                 }
