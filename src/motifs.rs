@@ -91,6 +91,7 @@ impl Motif {
 //// This data structure implements a buffer, holding up to `k` sorted motifs,
 //// such that no two motifs in the data structure are overlapping,
 //// according to the parameter `exclusion_zone`.
+#[derive(Clone)]
 struct TopK {
     k: usize,
     exclusion_zone: usize,
@@ -152,6 +153,15 @@ impl TopK {
         //// Finally, we ratain only `k` elements
         if self.top.len() > self.k {
             self.top.truncate(self.k);
+        }
+    }
+
+    fn merge(&mut self, other: &Self) {
+        let kth_d = self.k_th().map(|m| m.distance).unwrap_or(std::f64::INFINITY);
+        for m in other.top.iter() {
+            if m.distance < kth_d {
+                self.insert(*m);
+            }
         }
     }
 
@@ -223,7 +233,7 @@ pub fn motifs(
     //// We have a range of already examined hash indices for each element and repetition
     let mut bounds: Vec<Vec<Range<usize>>> = vec![vec![0..0; ts.num_subsequences()]; repetitions];
 
-    let mut cnt_dist = AtomicUsize::new(0);
+    let cnt_dist = AtomicUsize::new(0);
 
     let top = Arc::new(RwLock::new(TopK::new(topk, exclusion_zone)));
 
@@ -252,6 +262,7 @@ pub fn motifs(
         let complete_repetitions = AtomicUsize::new(0);
 
         (0..repetitions).into_par_iter().zip(bounds.par_iter_mut()).for_each(|(rep, rep_bounds)| {
+            let mut local_top = top.read().unwrap().clone();
             if stop.load(Ordering::SeqCst) {
                 return;
             }
@@ -292,9 +303,7 @@ pub fn motifs(
 
                                     //// We insert the motif into the `top` data structure only if
                                     //// its distance is smaller than the k-th in in `top`.
-                                    let should_insert = top
-                                        .read()
-                                        .unwrap()
+                                    let should_insert = local_top
                                         .k_th()
                                         .map(|kth| d < kth.distance)
                                         .unwrap_or(true);
@@ -309,7 +318,7 @@ pub fn motifs(
                                             elapsed: start.elapsed(),
                                             collision_probability: p,
                                         };
-                                        top.write().unwrap().insert(motif);
+                                        local_top.insert(motif);
                                     }
                                 }
                             }
@@ -328,7 +337,7 @@ pub fn motifs(
                     //// we stop the computation.
                     //// We check the condition even if no update happened, because there is
                     //// one more repetition that could have made us pass the threshold.
-                    if let Some(kth) = top.read().unwrap().k_th() {
+                    if let Some(kth) = local_top.k_th() {
                         let threshold = ((1.0 / delta).ln()
                             / kth.collision_probability.powi(depth as i32))
                         .ceil() as usize;
@@ -336,6 +345,7 @@ pub fn motifs(
                     }
                 }
             }
+            top.write().unwrap().merge(&local_top);
             info!("completed repetition"; "computed_distances" => rep_cnt_dists, "depth" => depth, "repetition" => rep, "min_threshold" => min_threshold, "buckets_time" => buckets_timer.elapsed().as_secs_f64());
             cnt_dist.fetch_add(rep_cnt_dists, Ordering::SeqCst);
             complete_repetitions.fetch_add(1, Ordering::SeqCst);
