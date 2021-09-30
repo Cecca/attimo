@@ -357,10 +357,32 @@ impl<'hasher> HashMatrix<'hasher> {
         Self { hashes, coll }
     }
 
+    pub fn setup_hashes(&mut self) {
+        let ns = self.coll.n_subsequences;
+        let coll = &self.coll;
+        let it = (0..self.coll.hasher.repetitions).into_par_iter().map(|rep| {
+            let mut rephashes = Vec::with_capacity(ns);
+            let start = Instant::now();
+            for i in 0..ns {
+                rephashes.push((coll.hash_value(i, rep), i));
+            }
+            let elapsed_hashes = start.elapsed();
+            let start = Instant::now();
+            rephashes.sort_unstable();
+            let elapsed_sort = start.elapsed();
+            debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));
+            info!("column building"; "repetition" => rep, "time_hashes_s" => elapsed_hashes.as_secs_f64(), "time_sort_s" => elapsed_sort.as_secs_f64());
+            rephashes
+        });
+
+        self.hashes.par_extend(it);
+    }
+
     pub fn update_hashes(&mut self, repetition: usize) {
         //// If we didn't build the repetition yet, compute all missing repetitions,
         //// in chunks proportional to the number of available Rayon threads
         while self.hashes.len() <= repetition {
+            println!("Setting up repetition {}", self.hashes.len());
             let rep = self.hashes.len();
             let coll = &self.coll;
             let ns = self.coll.n_subsequences;
@@ -388,12 +410,11 @@ impl<'hasher> HashMatrix<'hasher> {
     }
 
     pub fn buckets_vec<'hashes>(
-        &'hashes mut self,
+        &'hashes self,
         depth: usize,
         repetition: usize,
     ) -> Vec<(Range<usize>, &'hashes [(HashValue, usize)])> {
         let timer = Instant::now();
-        self.update_hashes(repetition);
         let column = &self.hashes[repetition];
 
         let mut res = Vec::new();
