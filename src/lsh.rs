@@ -35,7 +35,9 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
-use std::{cell::RefCell, cmp::Ordering, fmt::Debug, mem::size_of, ops::Range, rc::Rc, time::Instant};
+use std::{
+    cell::RefCell, cmp::Ordering, fmt::Debug, mem::size_of, ops::Range, rc::Rc, time::Instant,
+};
 use thread_local::ThreadLocal;
 
 //// ## Hash values
@@ -204,7 +206,10 @@ impl<'hasher> HashCollection<'hasher> {
                     pools[idx] = *h;
                 }
             });
-        println!("  Parallel computation of hash values: {:?}", timer.elapsed());
+        println!(
+            "  Parallel computation of hash values: {:?}",
+            timer.elapsed()
+        );
 
         let timer = Instant::now();
         let left_pools = tl_left_pools
@@ -357,22 +362,31 @@ impl<'hasher> HashMatrix<'hasher> {
         depth: usize,
         repetition: usize,
     ) -> BucketIterator<'hashes> {
-        use std::time::Instant;
-        //// If we didn't build the repetition yet, compute all missing repetitions
+        //// If we didn't build the repetition yet, compute all missing repetitions,
+        //// in chunks equal to the number of available Rayon threads
         while self.hashes.len() <= repetition {
             let rep = self.hashes.len();
-            let mut rephashes = Vec::with_capacity(self.coll.n_subsequences);
-            let start = Instant::now();
-            for i in 0..self.coll.n_subsequences {
-                rephashes.push((self.coll.hash_value(i, rep), i));
-            }
-            let elapsed_hashes = start.elapsed();
-            let start = Instant::now();
-            rephashes.sort_unstable();
-            let elapsed_sort = start.elapsed();
-            debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));
-            info!("completed lazy hash column building"; "repetition" => rep, "time_hashes_s" => elapsed_hashes.as_secs_f64(), "time_sort_s" => elapsed_sort.as_secs_f64());
-            self.hashes.push(rephashes);
+            let coll = &self.coll;
+            let ns = self.coll.n_subsequences;
+            let threads = rayon::current_num_threads();
+            let lastrep = std::cmp::min(rep + threads, self.coll.hasher.repetitions);
+            let it = (rep..lastrep).into_par_iter().map(|rep| {
+                let mut rephashes = Vec::with_capacity(ns);
+                let start = Instant::now();
+                for i in 0..ns {
+                    rephashes.push((coll.hash_value(i, rep), i));
+                }
+                let elapsed_hashes = start.elapsed();
+                let start = Instant::now();
+                rephashes.sort_unstable();
+                let elapsed_sort = start.elapsed();
+                debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));
+                info!("completed lazy hash column building"; "repetition" => rep, "time_hashes_s" => elapsed_hashes.as_secs_f64(), "time_sort_s" => elapsed_sort.as_secs_f64());
+                rephashes
+            });
+
+            self.hashes.par_extend(it);
+            self.hashes.len();
         }
 
         BucketIterator {
