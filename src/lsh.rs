@@ -407,6 +407,7 @@ pub struct BucketIterator<'hashes> {
 impl<'hashes> Iterator for BucketIterator<'hashes> {
     type Item = (Range<usize>, &'hashes [(HashValue, usize)]);
 
+    // FIXME: 20% of the time is spent on this method, in particular 14% of the overall time is spent on the `prefix_eq` function
     fn next(&mut self) -> Option<Self::Item> {
         if self.idx >= self.hashes.len() {
             return None;
