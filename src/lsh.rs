@@ -35,7 +35,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
-use std::{cell::RefCell, cmp::Ordering, fmt::Debug, mem::size_of, ops::Range, rc::Rc};
+use std::{cell::RefCell, cmp::Ordering, fmt::Debug, mem::size_of, ops::Range, rc::Rc, time::Instant};
 use thread_local::ThreadLocal;
 
 //// ## Hash values
@@ -163,109 +163,78 @@ impl<'hasher> HashCollection<'hasher> {
     //// and a `Hasher`.
     pub fn from_ts(ts: &WindowedTimeseries, hasher: &'hasher Hasher) -> Self {
         let ns = ts.num_subsequences();
-        // let mut left_pools = vec![0; hasher.tensor_repetitions * K_HALF * ns];
-        // let mut right_pools = vec![0; hasher.tensor_repetitions * K_HALF * ns];
-
-        #[cfg(debug)]
-        let mut init_left = vec![false; hasher.tensor_repetitions * K_HALF * ns];
-        #[cfg(debug)]
-        let mut init_right = vec![false; hasher.tensor_repetitions * K_HALF * ns];
 
         let tl_buffer = ThreadLocal::new();
         let tl_left_pools = ThreadLocal::new();
         let tl_right_pools = ThreadLocal::new();
 
-        //// Instead of doing a double nested loop over the repetitions and K, we flatten all 
+        let timer = Instant::now();
+        //// Instead of doing a double nested loop over the repetitions and K, we flatten all
         //// the iterations (which are independent) so to expose more parallelism
-        (0..(hasher.tensor_repetitions * K)).into_par_iter().for_each(|hash_idx| {
-            let repetition = hash_idx / K;
-            let k = hash_idx % K;
+        (0..(hasher.tensor_repetitions * K))
+            .into_par_iter()
+            .for_each(|hash_idx| {
+                let repetition = hash_idx / K;
+                let k = hash_idx % K;
 
-            let mut buffer = tl_buffer.get_or(|| RefCell::new(vec![0; ns])).borrow_mut();
-            let (mut pools, offset) = if k < K_HALF {
-                (
-                    tl_left_pools
-                        .get_or(|| RefCell::new(vec![0; hasher.tensor_repetitions * K_HALF * ns]))
-                        .borrow_mut(),
-                    k,
-                )
-            } else {
-                (
-                    tl_right_pools
-                        .get_or(|| RefCell::new(vec![0; hasher.tensor_repetitions * K_HALF * ns]))
-                        .borrow_mut(),
-                    k - K_HALF,
-                )
-            };
+                let mut buffer = tl_buffer.get_or(|| RefCell::new(vec![0; ns])).borrow_mut();
+                let (mut pools, offset) = if k < K_HALF {
+                    (
+                        tl_left_pools
+                            .get_or(|| {
+                                RefCell::new(vec![0; hasher.tensor_repetitions * K_HALF * ns])
+                            })
+                            .borrow_mut(),
+                        k,
+                    )
+                } else {
+                    (
+                        tl_right_pools
+                            .get_or(|| {
+                                RefCell::new(vec![0; hasher.tensor_repetitions * K_HALF * ns])
+                            })
+                            .borrow_mut(),
+                        k - K_HALF,
+                    )
+                };
 
-            hasher.hash_all(&ts, k, repetition, &mut buffer);
-            for (i, h) in buffer.iter().enumerate() {
-                let idx = K_HALF * ns * repetition + i * K_HALF + offset;
-                pools[idx] = *h;
-            }
-        });
-
-        let left_pools = tl_left_pools.into_iter().reduce(|buf1, buf2| {
-            {
-                let mut b1 = buf1.borrow_mut();
-                for (i, v) in buf2.borrow().iter().enumerate() {
-                    b1[i] += v;
+                hasher.hash_all(&ts, k, repetition, &mut buffer);
+                for (i, h) in buffer.iter().enumerate() {
+                    let idx = K_HALF * ns * repetition + i * K_HALF + offset;
+                    pools[idx] = *h;
                 }
-            }
-            return buf1;
-        }).unwrap().take();
-        let right_pools = tl_right_pools.into_iter().reduce(|buf1, buf2| {
-            {
-                let mut b1 = buf1.borrow_mut();
-                for (i, v) in buf2.borrow().iter().enumerate() {
-                    b1[i] += v;
-                }
-            }
-            return buf1;
-        }).unwrap().take();
+            });
+        println!("  Parallel computation of hash values: {:?}", timer.elapsed());
 
-        // let mut buffer = vec![0; ns];
-        // for repetition in 0..hasher.tensor_repetitions {
-        //     for k in 0..K_HALF {
-        //         hasher.hash_all(&ts, k, repetition, &mut buffer);
-        //         for (i, h) in buffer.iter().enumerate() {
-        //             let idx = K_HALF * ns * repetition + i * K_HALF + k;
-        //             #[cfg(debug)]
-        //             assert!(!init_left[idx]);
-        //             left_pools[idx] = *h;
-        //             #[cfg(debug)]
-        //             {
-        //                 init_left[idx] = true;
-        //             }
-        //         }
-        //     }
-        //     for k in K_HALF..K {
-        //         hasher.hash_all(&ts, k, repetition, &mut buffer);
-        //         for (i, h) in buffer.iter().enumerate() {
-        //             let idx = K_HALF * ns * repetition + i * K_HALF + (k - K_HALF);
-        //             #[cfg(debug)]
-        //             assert!(!init_right[idx]);
-        //             right_pools[idx] = *h;
-        //             #[cfg(debug)]
-        //             {
-        //                 init_right[idx] = true;
-        //             }
-        //         }
-        //     }
-        // }
-    //     #[cfg(debug)]
-    //     {
-    //         assert!(init_left.iter().all());
-    //         assert!(init_right.iter().all());
-    //         let mut hist = [0; 256];
-    //         for h in &left_pools {
-    //             hist[(*h as u8) as usize] += 1;
-    //         }
-    //         for h in &right_pools {
-    //             hist[(*h as u8) as usize] += 1;
-    //         }
-    //         dbg!(hist);
-    //     }
+        let timer = Instant::now();
+        let left_pools = tl_left_pools
+            .into_iter()
+            .reduce(|buf1, buf2| {
+                {
+                    let mut b1 = buf1.borrow_mut();
+                    for (i, v) in buf2.borrow().iter().enumerate() {
+                        b1[i] += v;
+                    }
+                }
+                return buf1;
+            })
+            .unwrap()
+            .take();
+        let right_pools = tl_right_pools
+            .into_iter()
+            .reduce(|buf1, buf2| {
+                {
+                    let mut b1 = buf1.borrow_mut();
+                    for (i, v) in buf2.borrow().iter().enumerate() {
+                        b1[i] += v;
+                    }
+                }
+                return buf1;
+            })
+            .unwrap()
+            .take();
+        println!("  Reduction of hash values: {:?}", timer.elapsed());
+
         Self {
             hasher,
             n_subsequences: ns,
