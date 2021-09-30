@@ -229,7 +229,9 @@ pub fn motifs(
     let mut stop = false;
 
     //// for decreasing depths
-    for depth in (0..=crate::lsh::K).rev() {
+    let mut depth = crate::lsh::K as isize;
+    // for depth in (0..=crate::lsh::K).rev() {
+    while depth >= 0 {
         if stop {
             break;
         }
@@ -252,7 +254,7 @@ pub fn motifs(
                 kdist,
                 min_threshold
             ));
-            for (hash_range, bucket) in hashes.buckets(depth, rep) {
+            for (hash_range, bucket) in hashes.buckets(depth as usize, rep) {
                 if stop {
                     break;
                 }
@@ -275,7 +277,7 @@ pub fn motifs(
                                 //// they collide. We get this information from the pool of bits
                                 //// from which hash values for all repetitions are extracted.
                                 let first_colliding_repetition: usize = pools
-                                    .first_collision(a_idx, b_idx, depth)
+                                    .first_collision(a_idx, b_idx, depth as usize)
                                     .expect("hashes must collide in buckets");
                                 if first_colliding_repetition == rep {
                                     //// After computing the distance between the two subsequences,
@@ -334,6 +336,25 @@ pub fn motifs(
             }
         }
         pbar.finish();
+
+        //// And finally we decide to which level of the trie to jump, based on the distance of the k-th motif.
+        //// This heuristic does not hurt correctness. Even if the current k-th motif is not the correct one, then
+        //// it means that we are jumping on a level too low. But this only hurts performance, since it means we 
+        //// are going to evaluate more pairs, but we will not miss any pair that would have been evaluated at
+        //// deeper levels.
+        if let Some(kth) = top.k_th() {
+            while depth >= 0 {
+                let threshold =
+                    ((1.0 / delta).ln() / kth.collision_probability.powi(depth as i32)).ceil() as usize;
+                min_threshold = threshold;
+                if threshold <= repetitions {
+                    break;
+                }
+                depth -= 1;
+            }
+        } else {
+            depth -= 1;
+        }
     }
     println!(
         "[{:?}] hash matrix matrix used {}",
