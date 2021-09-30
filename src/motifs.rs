@@ -13,6 +13,8 @@ use indicatif::ProgressStyle;
 use slog_scope::info;
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -226,13 +228,13 @@ pub fn motifs(
     let mut insertions_cnt = 0;
 
     //// Flag to signal if we have to continue the computation
-    let mut stop = false;
+    let stop = AtomicBool::new(false);
 
     //// for decreasing depths
     let mut depth = crate::lsh::K as isize;
     // for depth in (0..=crate::lsh::K).rev() {
     while depth >= 0 {
-        if stop {
+        if stop.load(Ordering::SeqCst) {
             break;
         }
         let pbar = ProgressBar::new(repetitions as u64);
@@ -242,8 +244,8 @@ pub fn motifs(
                 .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
         );
 
-        for rep in 0..repetitions {
-            if stop {
+        for (rep, rep_bounds) in (0..repetitions).zip(bounds.iter_mut()) {
+            if stop.load(Ordering::SeqCst) {
                 break;
             }
             let mut rep_cnt_dists = 0;
@@ -254,22 +256,24 @@ pub fn motifs(
                 kdist,
                 min_threshold
             ));
-            for (hash_range, bucket) in hashes.buckets(depth as usize, rep) {
-                if stop {
+            let buckets = hashes.buckets_vec(depth as usize, rep);
+            let buckets_timer = Instant::now();
+            for (hash_range, bucket) in buckets.iter() {
+                if stop.load(Ordering::SeqCst) {
                     break;
                 }
                 for (a_offset, &(_, a_idx)) in bucket.iter().enumerate() {
-                    if stop {
+                    if stop.load(Ordering::SeqCst) {
                         break;
                     }
-                    let a_already_checked = &bounds[rep][a_idx];
+                    let a_already_checked = &rep_bounds[a_idx];
                     let a_hash_idx = hash_range.start + a_offset;
                     for (b_offset, &(_, b_idx)) in bucket.iter().enumerate() {
                         //// Here we handle trivial matches: we don't consider a pair if the difference between
                         //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
                         if a_idx + exclusion_zone < b_idx {
                             let b_hash_idx = hash_range.start + b_offset;
-                            let b_already_checked = &bounds[rep][b_idx];
+                            let b_already_checked = &rep_bounds[b_idx];
                             let check_a = !a_already_checked.contains(&b_hash_idx);
                             let check_b = !b_already_checked.contains(&a_hash_idx);
                             if check_a || check_b {
@@ -310,7 +314,7 @@ pub fn motifs(
                     //// Mark the bucket as seen for the ref_idx subsequence. All the points in the
                     //// bucket go through here, irrespective of how they were processed in
                     //// the loop above.
-                    bounds[rep][a_idx] = hash_range.clone();
+                    rep_bounds[a_idx] = hash_range.clone();
 
                     //// Now we check the stopping condition. If we have seen enough
                     //// repetitions to make it unlikely (where _unlikely_ is quantified
@@ -325,11 +329,11 @@ pub fn motifs(
                         .ceil() as usize;
                         min_threshold = threshold;
                         kdist = kth.distance;
-                        stop = rep >= threshold;
+                        stop.fetch_or(rep >= threshold, Ordering::SeqCst);
                     }
                 }
             }
-            info!("completed repetition"; "computed_distances" => rep_cnt_dists, "depth" => depth, "repetition" => rep, "min_threshold" => min_threshold);
+            info!("completed repetition"; "computed_distances" => rep_cnt_dists, "depth" => depth, "repetition" => rep, "min_threshold" => min_threshold, "buckets_time" => buckets_timer.elapsed().as_secs_f64());
             pbar.inc(1);
             if depth == 0 {
                 break;
@@ -339,13 +343,13 @@ pub fn motifs(
 
         //// And finally we decide to which level of the trie to jump, based on the distance of the k-th motif.
         //// This heuristic does not hurt correctness. Even if the current k-th motif is not the correct one, then
-        //// it means that we are jumping on a level too low. But this only hurts performance, since it means we 
+        //// it means that we are jumping on a level too low. But this only hurts performance, since it means we
         //// are going to evaluate more pairs, but we will not miss any pair that would have been evaluated at
         //// deeper levels.
         if let Some(kth) = top.k_th() {
             while depth >= 0 {
-                let threshold =
-                    ((1.0 / delta).ln() / kth.collision_probability.powi(depth as i32)).ceil() as usize;
+                let threshold = ((1.0 / delta).ln() / kth.collision_probability.powi(depth as i32))
+                    .ceil() as usize;
                 min_threshold = threshold;
                 if threshold <= repetitions {
                     break;

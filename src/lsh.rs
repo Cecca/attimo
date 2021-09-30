@@ -357,11 +357,7 @@ impl<'hasher> HashMatrix<'hasher> {
         Self { hashes, coll }
     }
 
-    pub fn buckets<'hashes>(
-        &'hashes mut self,
-        depth: usize,
-        repetition: usize,
-    ) -> BucketIterator<'hashes> {
+    pub fn update_hashes(&mut self, repetition: usize) {
         //// If we didn't build the repetition yet, compute all missing repetitions,
         //// in chunks proportional to the number of available Rayon threads
         while self.hashes.len() <= repetition {
@@ -370,7 +366,7 @@ impl<'hasher> HashMatrix<'hasher> {
             let ns = self.coll.n_subsequences;
             let threads = rayon::current_num_threads();
             //// We make each thread work on 4 columns, so to amortize the overhead
-            let lastrep = std::cmp::min(rep + threads*4, self.coll.hasher.repetitions);
+            let lastrep = std::cmp::min(rep + threads * 4, self.coll.hasher.repetitions);
             let it = (rep..lastrep).into_par_iter().map(|rep| {
                 let mut rephashes = Vec::with_capacity(ns);
                 let start = Instant::now();
@@ -389,6 +385,41 @@ impl<'hasher> HashMatrix<'hasher> {
             self.hashes.par_extend(it);
             self.hashes.len();
         }
+    }
+
+    pub fn buckets_vec<'hashes>(
+        &'hashes mut self,
+        depth: usize,
+        repetition: usize,
+    ) -> Vec<(Range<usize>, &'hashes [(HashValue, usize)])> {
+        let timer = Instant::now();
+        self.update_hashes(repetition);
+        let column = &self.hashes[repetition];
+
+        let mut res = Vec::new();
+
+        let mut idx = 0;
+        while idx < column.len() {
+            let start = idx;
+            let current = &column[idx].0;
+            while idx < column.len()
+                && column[idx].0.prefix_eq(current, depth)
+            {
+                idx += 1;
+            }
+            res.push((start..idx, &column[start..idx]));
+        }
+        info!("computing bucket boundaries"; "elapsed" => timer.elapsed().as_secs_f64());
+
+        res
+    }
+
+    pub fn buckets<'hashes>(
+        &'hashes mut self,
+        depth: usize,
+        repetition: usize,
+    ) -> BucketIterator<'hashes> {
+        self.update_hashes(repetition);
 
         BucketIterator {
             hashes: &self.hashes[repetition],
