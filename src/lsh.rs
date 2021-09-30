@@ -363,13 +363,14 @@ impl<'hasher> HashMatrix<'hasher> {
         repetition: usize,
     ) -> BucketIterator<'hashes> {
         //// If we didn't build the repetition yet, compute all missing repetitions,
-        //// in chunks equal to the number of available Rayon threads
+        //// in chunks proportional to the number of available Rayon threads
         while self.hashes.len() <= repetition {
             let rep = self.hashes.len();
             let coll = &self.coll;
             let ns = self.coll.n_subsequences;
             let threads = rayon::current_num_threads();
-            let lastrep = std::cmp::min(rep + threads, self.coll.hasher.repetitions);
+            //// We make each thread work on 4 columns, so to amortize the overhead
+            let lastrep = std::cmp::min(rep + threads*4, self.coll.hasher.repetitions);
             let it = (rep..lastrep).into_par_iter().map(|rep| {
                 let mut rephashes = Vec::with_capacity(ns);
                 let start = Instant::now();
