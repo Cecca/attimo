@@ -188,7 +188,7 @@ impl TopK {
 ////       of the current length are too selective. Therefore, we relax them by considering
 ////       hash values one value shorter, repeating from the beginning of point 3.
 pub fn motifs(
-    ts: Rc<WindowedTimeseries>,
+    ts: &WindowedTimeseries,
     topk: usize,
     repetitions: usize,
     delta: f64,
@@ -203,7 +203,7 @@ pub fn motifs(
     let hasher_width = Hasher::estimate_width(&ts, 20, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
     let hasher = Hasher::new(ts.w, repetitions, hasher_width, seed);
-    let pools = HashCollection::from_ts(Rc::clone(&ts), &hasher);
+    let pools = HashCollection::from_ts(ts, &hasher);
     println!(
         "[{:?}] Computed hash pools, taking {}",
         start.elapsed(),

@@ -110,12 +110,14 @@ dependencies = [
  "rand 0.8.4",
  "rand_distr 0.4.1",
  "rand_xoshiro",
+ "rayon",
  "rustfft",
  "slog",
  "slog-async",
  "slog-json",
  "slog-scope",
  "statrs",
+ "thread_local",
 ]
 
 [[package]]

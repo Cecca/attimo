@@ -72,10 +72,10 @@ pub fn bench_hash_ts(c: &mut Criterion) {
     group.sampling_mode(criterion::SamplingMode::Flat);
     group.sample_size(10);
     let w = 500;
-    let ts = Rc::new(WindowedTimeseries::gen_randomwalk(1000000, w, 12345));
+    let ts = WindowedTimeseries::gen_randomwalk(1000000, w, 12345);
     let hasher = Hasher::new(w, 200, 10.0, 12345);
     group.bench_function("hash time series", |b| {
-        b.iter(|| HashCollection::from_ts(Rc::clone(&ts), &hasher))
+        b.iter(|| HashCollection::from_ts(&ts, &hasher))
     });
     group.finish()
 }
@@ -145,9 +145,9 @@ pub fn bench_sort_usize(c: &mut Criterion) {
 pub fn bench_sort_hashes(c: &mut Criterion) {
     let mut group = c.benchmark_group("sorting hashes");
     let w = 500;
-    let ts = Rc::new(WindowedTimeseries::gen_randomwalk(1000000, w, 12345));
+    let ts = WindowedTimeseries::gen_randomwalk(1000000, w, 12345);
     let h = Hasher::new(w, 200, 10.0, 12345);
-    let hasher = HashCollection::from_ts(Rc::clone(&ts), &h);
+    let hasher = HashCollection::from_ts(&ts, &h);
     let hashes: Vec<HashValue> = (0..ts.num_subsequences())
         .map(|i| hasher.hash_value(i, 0))
         .collect();

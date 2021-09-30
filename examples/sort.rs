@@ -26,13 +26,13 @@ fn main() {
     println!("Generating time series");
     let start = Instant::now();
     let ts: Vec<f64> = attimo::load::loadts("data/ECG.csv", Some(n)).unwrap();
-    let ts = Rc::new(WindowedTimeseries::new(ts, 300));
+    let ts = WindowedTimeseries::new(ts, 300);
     println!("...{:?}", start.elapsed());
     // let ts = Rc::new(WindowedTimeseries::gen_randomwalk(n, 300, 1243));
     println!("Computing hashes");
     let start = Instant::now();
     let hasher = Hasher::new(300, 200, 2.0, 123);
-    let hc = HashCollection::from_ts(ts, &hasher);
+    let hc = HashCollection::from_ts(&ts, &hasher);
     let v: Vec<(HashValue, usize)> = (0..n).map(|i| (hc.hash_value(i, 0), i)).collect();
     // let v: Vec<HashValue> = (0..n).map(|i| hc.hash_value(i, 0)).collect();
     println!("...{:?}", start.elapsed());

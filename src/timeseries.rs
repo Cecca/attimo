@@ -2,6 +2,7 @@ use crate::distance::dot;
 use deepsize::DeepSizeOf;
 use rand_distr::num_traits::Zero;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
+use thread_local::ThreadLocal;
 use std::{cell::RefCell, convert::TryFrom, fmt::Display, mem::size_of, sync::Arc};
 
 pub struct WindowedTimeseries {
@@ -18,8 +19,8 @@ pub struct WindowedTimeseries {
     fft_chunks: Vec<Vec<Complex<f64>>>,
     fftfun: Arc<dyn Fft<f64>>,
     ifftfun: Arc<dyn Fft<f64>>,
-    buf_vfft: RefCell<Vec<Complex<f64>>>,
-    buf_ivfft: RefCell<Vec<Complex<f64>>>,
+    buf_vfft: ThreadLocal<RefCell<Vec<Complex<f64>>>>,
+    buf_ivfft: ThreadLocal<RefCell<Vec<Complex<f64>>>>,
 }
 
 impl WindowedTimeseries {
@@ -88,8 +89,8 @@ impl WindowedTimeseries {
             fft_chunks,
             fftfun,
             ifftfun,
-            buf_vfft: RefCell::new(vec![Complex::zero(); fft_length]),
-            buf_ivfft: RefCell::new(vec![Complex::zero(); fft_length]),
+            buf_vfft: ThreadLocal::new(),//RefCell::new(vec![Complex::zero(); fft_length]),
+            buf_ivfft: ThreadLocal::new(),//RefCell::new(vec![Complex::zero(); fft_length]),
         }
     }
 
@@ -147,8 +148,9 @@ impl WindowedTimeseries {
         output.resize(self.num_subsequences(), 0.0);
 
         //// Get local scratch vectors, to avoid allocations
-        let mut vfft = self.buf_vfft.borrow_mut();
-        let mut ivfft = self.buf_ivfft.borrow_mut();
+        let fft_length = self.fft_length;
+        let mut vfft = self.buf_vfft.get_or(|| RefCell::new(vec![Complex::zero(); fft_length])).borrow_mut();
+        let mut ivfft = self.buf_ivfft.get_or(|| RefCell::new(vec![Complex::zero(); fft_length])).borrow_mut();
 
         //// Then compute the FFT of the reversed input vector, padded with zeros
         vfft.fill(Complex::zero());

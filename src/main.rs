@@ -67,10 +67,10 @@ fn main() -> Result<()> {
     let path = config.path;
     let w = config.window;
     let ts: Vec<f64> = loadts(path, config.prefix)?;
-    let ts = Rc::new(WindowedTimeseries::new(ts, w));
+    let ts = WindowedTimeseries::new(ts, w);
     println!("Loaded time series, taking {}", ts.bytes_size());
     let motifs = motifs(
-        Rc::clone(&ts),
+        &ts,
         config.motifs,
         config.repetitions,
         config.delta,
