@@ -20,9 +20,14 @@ mutate(
     n = as.integer(str_extract(dataset, "\\d+"))
 )
 
+speedups <- data %>%
+    filter((algorithm == 'attimo') | (threads == 32)) %>%
+    select(n, algorithm, time_s) %>%
+    pivot_wider(names_from=algorithm, values_from=time_s) %>%
+    mutate(speedup = `scamp-32` / attimo,
+           label = scales::number(speedup, accuracy=0.1, prefix="x"))
+
 p <- ggplot(data, aes(n, time_s, color=algorithm, shape=algorithm)) +
-    geom_line(stat='summary') +
-    geom_point() +
     geom_text(
         aes(label = label),
         data = ~group_by(.x, algorithm) %>% mutate(label = if_else(n == max(n), algorithm, "")),
@@ -30,6 +35,24 @@ p <- ggplot(data, aes(n, time_s, color=algorithm, shape=algorithm)) +
         hjust = 1,
         nudge_y = 200
     ) +
+    geom_segment(
+        aes(y = attimo, yend=`scamp-32`, x=n, xend=n),
+        data=filter(speedups, n >= 3000000),
+        inherit.aes = F,
+        color="gray"
+    ) +
+    geom_label(
+        aes(label = label, x=n, y=(`scamp-32` + attimo) / 2),
+        data=filter(speedups, n >= 3000000),
+        size=2,
+        fill = "white",
+        color="black",
+        show.legend = F,
+        hjust = 0.5,
+        inherit.aes = F
+    ) +
+    geom_line(stat='summary') +
+    geom_point() +
     scale_x_continuous(labels=scales::number_format()) +
     labs(
         x = "n",
