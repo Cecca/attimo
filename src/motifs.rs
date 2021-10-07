@@ -209,7 +209,13 @@ pub fn motifs(
 
     //// We set the exclusion zone to the motif length, so that motifs cannot overlap at all.
     let exclusion_zone = ts.w;
-    info!("Motifs setup"; "topk" => topk, "repetitions" => repetitions, "delta" => delta, "seed" => seed, "exclusion_zone" => exclusion_zone);
+    info!("Motifs setup"; 
+        "topk" => topk, 
+        "repetitions" => repetitions, 
+        "delta" => delta, 
+        "seed" => seed, 
+        "exclusion_zone" => exclusion_zone
+    );
 
     let hasher_width = Hasher::estimate_width(&ts, 20, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
@@ -234,9 +240,12 @@ pub fn motifs(
 
     let mut stop = false;
 
+    let num_threads = rayon::current_num_threads();
+
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
     let mut depth = crate::lsh::K as isize;
     while depth >= 0 && !stop {
+        let depth_timer = Instant::now();
         let pbar = ProgressBar::new(repetitions as u64);
         pbar.set_draw_rate(4);
         pbar.set_style(
@@ -245,9 +254,6 @@ pub fn motifs(
         );
         pbar.set_message(format!("depth {}", depth));
 
-
-        let num_threads = rayon::current_num_threads();
-
         let mut start_rep = 0;
         while start_rep < repetitions {
             let end_rep = std::cmp::min(start_rep + num_threads, repetitions);
@@ -255,8 +261,8 @@ pub fn motifs(
             let local_tops: Vec<TopK> = repetition_range.clone().into_par_iter().zip(bounds[repetition_range].par_iter_mut()).map(|(rep, rep_bounds)| {
                 let mut local_top = top.clone();
                 let mut rep_cnt_dists = 0;
+                let rep_timer = Instant::now();
                 let buckets = hashes.buckets_vec(depth as usize, rep);
-                let buckets_timer = Instant::now();
                 for (hash_range, bucket) in buckets.iter() {
                     for (a_offset, &(_, a_idx)) in bucket.iter().enumerate() {
                         let a_already_checked = &rep_bounds[a_idx];
@@ -313,7 +319,13 @@ pub fn motifs(
 
                     }
                 }
-                info!("completed repetition"; "computed_distances" => rep_cnt_dists, "depth" => depth, "repetition" => rep, "buckets_time" => buckets_timer.elapsed().as_secs_f64());
+                info!("completed repetition"; 
+                    "tag" => "profiling",
+                    "computed_distances" => rep_cnt_dists, 
+                    "depth" => depth, 
+                    "repetition" => rep, 
+                    "time_s" => rep_timer.elapsed().as_secs_f64()
+                );
                 cnt_dist.fetch_add(rep_cnt_dists, Ordering::SeqCst);
                 pbar.inc(1);
                 local_top
@@ -366,11 +378,21 @@ pub fn motifs(
                 depth -= 1;
             }
         }
+
+        info!("level completed";
+            "tag" => "profiling",
+            "depth" => depth,
+            "time_s" => depth_timer.elapsed().as_secs_f64()
+        );
     }
     println!(
         "[{:?}] hash matrix matrix used {}",
         start.elapsed(),
         hashes.bytes_size()
+    );
+    info!("motifs completed";
+        "tag" => "profiling",
+        "elapsed_s" => start.elapsed().as_secs_f64()
     );
     let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
     let cnt_dist = cnt_dist.load(Ordering::SeqCst);

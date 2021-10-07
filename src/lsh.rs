@@ -206,12 +206,7 @@ impl<'hasher> HashCollection<'hasher> {
                     pools[idx] = *h;
                 }
             });
-        println!(
-            "  Parallel computation of hash values: {:?}",
-            timer.elapsed()
-        );
 
-        let timer = Instant::now();
         let left_pools = tl_left_pools
             .into_iter()
             .reduce(|buf1, buf2| {
@@ -238,7 +233,11 @@ impl<'hasher> HashCollection<'hasher> {
             })
             .unwrap()
             .take();
-        println!("  Reduction of hash values: {:?}", timer.elapsed());
+        let elapsed = timer.elapsed();
+        info!("tensor pool building";
+            "tag" => "profiling",
+            "time_s" => elapsed.as_secs_f64()
+        );
 
         Self {
             hasher,
@@ -411,7 +410,11 @@ impl<'hasher> HashMatrix<'hasher> {
             }
             res.push((start..idx, &column[start..idx]));
         }
-        info!("computing bucket boundaries"; "elapsed" => timer.elapsed().as_secs_f64());
+        info!("computing bucket boundaries"; 
+            "tag" => "profiling",
+            "repetition" => repetition,
+            "time_s" => timer.elapsed().as_secs_f64()
+        );
 
         res
     }
