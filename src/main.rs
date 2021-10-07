@@ -9,7 +9,6 @@ use plotly::{Layout, Plot, Scatter};
 use slog::*;
 use slog_scope::GlobalLoggerGuard;
 use std::fs::OpenOptions;
-use std::rc::Rc;
 
 #[derive(FromArgs)]
 /// ATTIMO computes ApproximaTe TImeseries MOtifs.

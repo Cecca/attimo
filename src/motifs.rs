@@ -13,12 +13,8 @@ use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
 use std::ops::Range;
-use std::rc::Rc;
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
-use std::sync::RwLock;
 use std::time::Duration;
 use std::time::Instant;
 
