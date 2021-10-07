@@ -41,6 +41,10 @@ struct Config {
     /// seed for the psudorandom number generator
     pub seed: u64,
 
+    #[argh(option, default = "default_log_path()")]
+    /// the file in which to store the detailed execution log
+    pub log_path: String,
+
     #[argh(positional)]
     /// path to the data file
     pub path: String,
@@ -58,11 +62,15 @@ fn default_motifs() -> usize {
     1
 }
 
-fn main() -> Result<()> {
-    let _guard = setup_logger()?;
+fn default_log_path() -> String {
+    ".trace.json".to_owned()
+}
 
+fn main() -> Result<()> {
     // read configuration
     let config: Config = argh::from_env();
+
+    let _guard = setup_logger(&config.log_path)?;
     let path = config.path;
     let w = config.window;
     let ts: Vec<f64> = loadts(path, config.prefix)?;
@@ -157,8 +165,7 @@ fn find_occurences(ts: &WindowedTimeseries, motif: &Motif) -> Vec<usize> {
     output_idxs
 }
 
-fn setup_logger() -> Result<GlobalLoggerGuard> {
-    let log_path = ".trace.log";
+fn setup_logger(log_path: &str) -> Result<GlobalLoggerGuard> {
     let file = OpenOptions::new()
         .create(true)
         .write(true)
