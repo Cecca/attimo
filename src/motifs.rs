@@ -153,7 +153,10 @@ impl TopK {
     }
 
     fn merge(&mut self, other: &Self) {
-        let kth_d = self.k_th().map(|m| m.distance).unwrap_or(std::f64::INFINITY);
+        let kth_d = self
+            .k_th()
+            .map(|m| m.distance)
+            .unwrap_or(std::f64::INFINITY);
         for m in other.top.iter() {
             if m.distance < kth_d {
                 self.insert(*m);
@@ -231,147 +234,141 @@ pub fn motifs(
 
     let cnt_dist = AtomicUsize::new(0);
 
-    let top = Arc::new(RwLock::new(TopK::new(topk, exclusion_zone)));
+    let mut top = TopK::new(topk, exclusion_zone);
 
-    //// Keep track of the threshold on the number of repetitions we aim at.
-    //// This will be updated each time we start a new level, and also whenever the top-k
-    //// data structure is updated.
-    let threshold = AtomicUsize::new(usize::MAX);
+    let mut stop = false;
 
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
     let mut depth = crate::lsh::K as isize;
-    while depth >= 0 {
-        //// Update the threshold for the current depth
-        if let Some(kth) = top.read().unwrap().k_th() {
-            let cur_threshold = ((1.0 / delta).ln()
-                / kth.collision_probability.powi(depth as i32))
-            .ceil() as usize;
-            threshold.fetch_min(cur_threshold, Ordering::SeqCst);
-        }
-
+    while depth >= 0 && !stop {
         let pbar = ProgressBar::new(repetitions as u64);
         pbar.set_draw_rate(4);
         pbar.set_style(
             ProgressStyle::default_bar()
                 .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
         );
+        pbar.set_message(format!("depth {}", depth));
 
-        //// Since we potentially compute the repetitions out of order, we need to keep track atomically of the 
-        //// number of completed repetitions, otherwise we might stop too early.
-        let complete_repetitions = AtomicUsize::new(0);
 
-        (0..repetitions).into_par_iter().zip(bounds.par_iter_mut()).for_each(|(rep, rep_bounds)| {
-            let mut local_top = top.read().unwrap().clone();
-            if rep >= threshold.load(Ordering::SeqCst) {
-                return;
-            }
-            let mut rep_cnt_dists = 0;
-            pbar.set_message(format!("depth {}", depth));
-            let buckets = hashes.buckets_vec(depth as usize, rep);
-            let buckets_timer = Instant::now();
-            for (hash_range, bucket) in buckets.iter() {
-                for (a_offset, &(_, a_idx)) in bucket.iter().enumerate() {
-                    let a_already_checked = &rep_bounds[a_idx];
-                    let a_hash_idx = hash_range.start + a_offset;
-                    for (b_offset, &(_, b_idx)) in bucket.iter().enumerate() {
-                        //// Here we handle trivial matches: we don't consider a pair if the difference between
-                        //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
-                        if a_idx + exclusion_zone < b_idx {
-                            let b_hash_idx = hash_range.start + b_offset;
-                            let b_already_checked = &rep_bounds[b_idx];
-                            let check_a = !a_already_checked.contains(&b_hash_idx);
-                            let check_b = !b_already_checked.contains(&a_hash_idx);
-                            if check_a || check_b {
-                                //// We only process the pair if this is the first repetition in which
-                                //// they collide. We get this information from the pool of bits
-                                //// from which hash values for all repetitions are extracted.
-                                let first_colliding_repetition: usize = pools
-                                    .first_collision(a_idx, b_idx, depth as usize)
-                                    .expect("hashes must collide in buckets");
-                                if first_colliding_repetition == rep {
-                                    //// After computing the distance between the two subsequences,
-                                    //// we try to insert the pair in the top data structure
-                                    let d = zeucl(&ts, a_idx, b_idx);
-                                    rep_cnt_dists += 1;
+        let num_threads = rayon::current_num_threads();
 
-                                    //// We insert the motif into the `top` data structure only if
-                                    //// its distance is smaller than the k-th in in `top`.
-                                    let should_insert = local_top
-                                        .k_th()
-                                        .map(|kth| d < kth.distance)
-                                        .unwrap_or(true);
-                                    if should_insert {
-                                        //// This is the collision probability for this distance
-                                        let p = hasher.collision_probability_at(d);
+        let mut start_rep = 0;
+        while start_rep < repetitions {
+            let end_rep = std::cmp::min(start_rep + num_threads, repetitions);
+            let repetition_range = start_rep..end_rep;
+            let local_tops: Vec<TopK> = repetition_range.clone().into_par_iter().zip(bounds[repetition_range].par_iter_mut()).map(|(rep, rep_bounds)| {
+                let mut local_top = top.clone();
+                let mut rep_cnt_dists = 0;
+                let buckets = hashes.buckets_vec(depth as usize, rep);
+                let buckets_timer = Instant::now();
+                for (hash_range, bucket) in buckets.iter() {
+                    for (a_offset, &(_, a_idx)) in bucket.iter().enumerate() {
+                        let a_already_checked = &rep_bounds[a_idx];
+                        let a_hash_idx = hash_range.start + a_offset;
+                        for (b_offset, &(_, b_idx)) in bucket.iter().enumerate() {
+                            //// Here we handle trivial matches: we don't consider a pair if the difference between
+                            //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
+                            if a_idx + exclusion_zone < b_idx {
+                                let b_hash_idx = hash_range.start + b_offset;
+                                let b_already_checked = &rep_bounds[b_idx];
+                                let check_a = !a_already_checked.contains(&b_hash_idx);
+                                let check_b = !b_already_checked.contains(&a_hash_idx);
+                                if check_a || check_b {
+                                    //// We only process the pair if this is the first repetition in which
+                                    //// they collide. We get this information from the pool of bits
+                                    //// from which hash values for all repetitions are extracted.
+                                    let first_colliding_repetition: usize = pools
+                                        .first_collision(a_idx, b_idx, depth as usize)
+                                        .expect("hashes must collide in buckets");
+                                    if first_colliding_repetition == rep {
+                                        //// After computing the distance between the two subsequences,
+                                        //// we try to insert the pair in the top data structure
+                                        let d = zeucl(&ts, a_idx, b_idx);
+                                        rep_cnt_dists += 1;
 
-                                        let motif = Motif {
-                                            idx_a: a_idx,
-                                            idx_b: b_idx,
-                                            distance: d,
-                                            elapsed: start.elapsed(),
-                                            collision_probability: p,
-                                        };
-                                        local_top.insert(motif);
+                                        //// We insert the motif into the `top` data structure only if
+                                        //// its distance is smaller than the k-th in in `top`.
+                                        let should_insert = local_top
+                                            .k_th()
+                                            .map(|kth| d < kth.distance)
+                                            .unwrap_or(true);
+                                        if should_insert {
+                                            //// This is the collision probability for this distance
+                                            let p = hasher.collision_probability_at(d);
+
+                                            let motif = Motif {
+                                                idx_a: a_idx,
+                                                idx_b: b_idx,
+                                                distance: d,
+                                                elapsed: start.elapsed(),
+                                                collision_probability: p,
+                                            };
+                                            local_top.insert(motif);
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    //// Mark the bucket as seen for the ref_idx subsequence. All the points in the
-                    //// bucket go through here, irrespective of how they were processed in
-                    //// the loop above.
-                    rep_bounds[a_idx] = hash_range.clone();
+                        //// Mark the bucket as seen for the ref_idx subsequence. All the points in the
+                        //// bucket go through here, irrespective of how they were processed in
+                        //// the loop above.
+                        rep_bounds[a_idx] = hash_range.clone();
 
-                    //// Now we check the stopping condition. If we have seen enough
-                    //// repetitions to make it unlikely (where _unlikely_ is quantified
-                    //// by the parameter `delta`) that we have missed a pair
-                    //// closer than the k-th in the `top` data structure, then
-                    //// we stop the computation.
-                    //// We check the condition even if no update happened, because there is
-                    //// one more repetition that could have made us pass the threshold.
-                    if let Some(kth) = local_top.k_th() {
-                        let cur_threshold = ((1.0 / delta).ln()
-                            / kth.collision_probability.powi(depth as i32))
-                        .ceil() as usize;
-                        threshold.fetch_min(cur_threshold, Ordering::SeqCst);
                     }
                 }
+                info!("completed repetition"; "computed_distances" => rep_cnt_dists, "depth" => depth, "repetition" => rep, "buckets_time" => buckets_timer.elapsed().as_secs_f64());
+                cnt_dist.fetch_add(rep_cnt_dists, Ordering::SeqCst);
+                pbar.inc(1);
+                local_top
+            }).collect();
+            for t in local_tops {
+                top.merge(&t);
             }
-            top.write().unwrap().merge(&local_top);
-            info!("completed repetition"; "computed_distances" => rep_cnt_dists, "depth" => depth, "repetition" => rep, "buckets_time" => buckets_timer.elapsed().as_secs_f64());
-            cnt_dist.fetch_add(rep_cnt_dists, Ordering::SeqCst);
-            complete_repetitions.fetch_add(1, Ordering::SeqCst);
-            pbar.inc(1);
-            if depth == 0 {
-                return;
+
+            //// Now we check the stopping condition. If we have seen enough
+            //// repetitions to make it unlikely (where _unlikely_ is quantified
+            //// by the parameter `delta`) that we have missed a pair
+            //// closer than the k-th in the `top` data structure, then
+            //// we stop the computation.
+            //// We check the condition even if no update happened, because there is
+            //// one more repetition that could have made us pass the threshold.
+            if let Some(kth) = top.k_th() {
+                let threshold = ((1.0 / delta).ln()
+                    / kth.collision_probability.powi(depth as i32))
+                .ceil() as usize;
+                if threshold <= repetitions {
+                    stop = true;
+                    break;
+                }
             }
-        });
+
+            start_rep += num_threads;
+        }
+
         pbar.finish();
 
-        //// Check if we are done
-        if threshold.load(Ordering::SeqCst) <= repetitions {
-            break;
-        }
 
         //// If we are not done, we decide to which level of the trie to jump, based on the distance of the k-th motif.
         //// This heuristic does not hurt correctness. Even if the current k-th motif is not the correct one, then
         //// it means that we are jumping on a level too low. But this only hurts performance, since it means we
         //// are going to evaluate more pairs, but we will not miss any pair that would have been evaluated at
         //// deeper levels.
-        if let Some(kth) = top.read().unwrap().k_th() {
-            let orig_depth = depth;
-            while depth >= 0 {
-                let threshold = ((1.0 / delta).ln() / kth.collision_probability.powi(depth as i32))
-                    .ceil() as usize;
-                if threshold <= repetitions {
-                    break;
+        if !stop {
+            if let Some(kth) = top.k_th() {
+                let orig_depth = depth;
+                while depth >= 0 {
+                    let threshold = ((1.0 / delta).ln() / kth.collision_probability.powi(depth as i32))
+                        .ceil() as usize;
+                    if threshold <= repetitions {
+                        break;
+                    }
+                    depth -= 1;
                 }
+                assert!(depth < orig_depth, "we are not making progress in depth");
+            } else {
                 depth -= 1;
             }
-            assert!(depth < orig_depth, "we are not making progress in depth");
-        } else {
-            depth -= 1;
         }
     }
     println!(
@@ -388,6 +385,5 @@ pub fn motifs(
         total_distances,
         (cnt_dist as f64 / total_distances as f64) * 100.0,
     );
-    let top = top.read().unwrap();
     top.to_vec()
 }
