@@ -360,6 +360,7 @@ impl<'hasher> HashMatrix<'hasher> {
     pub fn setup_hashes(&mut self) {
         let ns = self.coll.n_subsequences;
         let coll = &self.coll;
+        let timer = Instant::now();
         let it = (0..self.coll.hasher.repetitions).into_par_iter().map(|rep| {
             let mut rephashes = Vec::with_capacity(ns);
             let start = Instant::now();
@@ -371,42 +372,22 @@ impl<'hasher> HashMatrix<'hasher> {
             rephashes.sort_unstable();
             let elapsed_sort = start.elapsed();
             debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));
-            info!("column building"; "repetition" => rep, "time_hashes_s" => elapsed_hashes.as_secs_f64(), "time_sort_s" => elapsed_sort.as_secs_f64());
+            info!("column building"; 
+                "tag" => "profiling",
+                "repetition" => rep, 
+                "time_hashes_s" => elapsed_hashes.as_secs_f64(), 
+                "time_sort_s" => elapsed_sort.as_secs_f64(),
+                "time_s" => (elapsed_hashes + elapsed_sort).as_secs_f64()
+            );
             rephashes
         });
+        let elapsed = timer.elapsed();
+        info!("matrix building";
+            "tag" => "profiling",
+            "time_s" => elapsed.as_secs_f64()
+        );
 
         self.hashes.par_extend(it);
-    }
-
-    pub fn update_hashes(&mut self, repetition: usize) {
-        //// If we didn't build the repetition yet, compute all missing repetitions,
-        //// in chunks proportional to the number of available Rayon threads
-        while self.hashes.len() <= repetition {
-            println!("Setting up repetition {}", self.hashes.len());
-            let rep = self.hashes.len();
-            let coll = &self.coll;
-            let ns = self.coll.n_subsequences;
-            let threads = rayon::current_num_threads();
-            //// We make each thread work on 4 columns, so to amortize the overhead
-            let lastrep = std::cmp::min(rep + threads * 4, self.coll.hasher.repetitions);
-            let it = (rep..lastrep).into_par_iter().map(|rep| {
-                let mut rephashes = Vec::with_capacity(ns);
-                let start = Instant::now();
-                for i in 0..ns {
-                    rephashes.push((coll.hash_value(i, rep), i));
-                }
-                let elapsed_hashes = start.elapsed();
-                let start = Instant::now();
-                rephashes.sort_unstable();
-                let elapsed_sort = start.elapsed();
-                debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));
-                info!("completed lazy hash column building"; "repetition" => rep, "time_hashes_s" => elapsed_hashes.as_secs_f64(), "time_sort_s" => elapsed_sort.as_secs_f64());
-                rephashes
-            });
-
-            self.hashes.par_extend(it);
-            self.hashes.len();
-        }
     }
 
     pub fn buckets_vec<'hashes>(
@@ -435,43 +416,6 @@ impl<'hasher> HashMatrix<'hasher> {
         res
     }
 
-    pub fn buckets<'hashes>(
-        &'hashes mut self,
-        depth: usize,
-        repetition: usize,
-    ) -> BucketIterator<'hashes> {
-        self.update_hashes(repetition);
-
-        BucketIterator {
-            hashes: &self.hashes[repetition],
-            depth,
-            idx: 0,
-        }
-    }
-}
-
-pub struct BucketIterator<'hashes> {
-    hashes: &'hashes Vec<(HashValue, usize)>,
-    depth: usize,
-    idx: usize,
-}
-
-impl<'hashes> Iterator for BucketIterator<'hashes> {
-    type Item = (Range<usize>, &'hashes [(HashValue, usize)]);
-
-    // FIXME: 20% of the time is spent on this method, in particular 14% of the overall time is spent on the `prefix_eq` function
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.idx >= self.hashes.len() {
-            return None;
-        }
-        let start = self.idx;
-        let current = &self.hashes[self.idx].0;
-        while self.idx < self.hashes.len() && self.hashes[self.idx].0.prefix_eq(current, self.depth)
-        {
-            self.idx += 1;
-        }
-        Some((start..self.idx, &self.hashes[start..self.idx]))
-    }
 }
 
 /// Data structure to do LSH of subsequences.
