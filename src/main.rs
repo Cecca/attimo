@@ -9,6 +9,7 @@ use plotly::{Layout, Plot, Scatter};
 use slog::*;
 use slog_scope::GlobalLoggerGuard;
 use std::fs::OpenOptions;
+use std::path::Path;
 
 #[derive(FromArgs)]
 /// ATTIMO computes ApproximaTe TImeseries MOtifs.
@@ -45,6 +46,10 @@ struct Config {
     /// the file in which to store the detailed execution log
     pub log_path: String,
 
+    #[argh(option, default = "default_output()")]
+    /// path to the output file
+    pub output: String,
+
     #[argh(positional)]
     /// path to the data file
     pub path: String,
@@ -60,6 +65,10 @@ fn default_delta() -> f64 {
 
 fn default_motifs() -> usize {
     1
+}
+
+fn default_output() -> String {
+    "motifs.csv".to_owned()
 }
 
 fn default_log_path() -> String {
@@ -83,21 +92,13 @@ fn main() -> Result<()> {
         config.delta,
         config.seed,
     );
-    println!("{:#?}", motifs);
 
-    // TODO: output all motifs to CSV
-    println!("Top motif: {:?}", motifs[0]);
+    output_csv(&config.output, &motifs)?;
 
     if config.plot {
         let mut plot = Plot::new();
         let layout = Layout::default().height(500);
         plot.set_layout(layout);
-
-        // let ts_lines = Scatter::new(0..ts.data.len(), ts.data.clone())
-        //     .name("time series")
-        //     .line(Line::new().color("#667393").width(0.5))
-        //     .mode(Mode::Lines);
-        // plot.add_trace(ts_lines);
 
         let motif_range = 0..ts.w;
         // Provide some context time series
@@ -105,7 +106,7 @@ fn main() -> Result<()> {
         let stride = ts.num_subsequences() / n_context;
         let mut idx = 0;
         while idx < ts.num_subsequences() {
-            let mut vals = vec![0.0;ts.w];
+            let mut vals = vec![0.0; ts.w];
             ts.znormalized(idx, &mut vals);
             let l = Scatter::new(motif_range.clone(), vals)
                 .line(Line::new().color("#a0a0a0").width(0.5))
@@ -118,7 +119,7 @@ fn main() -> Result<()> {
 
         let occs = find_occurences(&ts, &motifs[0]);
         for i in occs {
-            let mut vals = vec![0.0;ts.w];
+            let mut vals = vec![0.0; ts.w];
             ts.znormalized(i, &mut vals);
             let l = Scatter::new(motif_range.clone(), vals)
                 .line(Line::new().color("#f7a61b").width(1.5))
@@ -127,7 +128,7 @@ fn main() -> Result<()> {
             plot.add_trace(l);
         }
         for i in [motifs[0].idx_a, motifs[0].idx_b] {
-            let mut vals = vec![0.0;ts.w];
+            let mut vals = vec![0.0; ts.w];
             ts.znormalized(i, &mut vals);
             let l = Scatter::new(motif_range.clone(), vals)
                 .line(Line::new().color("#db4620").width(3.0))
@@ -136,6 +137,15 @@ fn main() -> Result<()> {
             plot.add_trace(l);
         }
         plot.show();
+    }
+    Ok(())
+}
+
+fn output_csv<P: AsRef<Path>>(path: P, motifs: &[Motif]) -> Result<()> {
+    use std::io::prelude::*;
+    let mut f = std::fs::File::create(path.as_ref())?;
+    for m in motifs {
+        writeln!(f, "{}, {}, {}", m.idx_a, m.idx_b, m.distance)?;
     }
     Ok(())
 }

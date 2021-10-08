@@ -6,3 +6,4 @@ bench.sqlite
 .trace.*
 *.db
 *.png
+*.csv
