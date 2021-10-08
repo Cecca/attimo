@@ -345,7 +345,8 @@ pub fn motifs(
                 let threshold = ((1.0 / delta).ln()
                     / kth.collision_probability.powi(depth as i32))
                 .ceil() as usize;
-                if threshold <= repetitions {
+                info!("check stopping condition"; "threshold" => threshold);
+                if end_rep >= threshold {
                     stop = true;
                     break;
                 }
@@ -355,7 +356,11 @@ pub fn motifs(
         }
 
         pbar.finish();
-
+        info!("level completed";
+            "tag" => "profiling",
+            "depth" => depth,
+            "time_s" => depth_timer.elapsed().as_secs_f64()
+        );
 
         //// If we are not done, we decide to which level of the trie to jump, based on the distance of the k-th motif.
         //// This heuristic does not hurt correctness. Even if the current k-th motif is not the correct one, then
@@ -378,12 +383,6 @@ pub fn motifs(
                 depth -= 1;
             }
         }
-
-        info!("level completed";
-            "tag" => "profiling",
-            "depth" => depth,
-            "time_s" => depth_timer.elapsed().as_secs_f64()
-        );
     }
     println!(
         "[{:?}] hash matrix matrix used {}",

@@ -3,7 +3,7 @@ use deepsize::DeepSizeOf;
 use rand_distr::num_traits::Zero;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use thread_local::ThreadLocal;
-use std::{cell::RefCell, convert::TryFrom, fmt::Display, mem::size_of, sync::Arc};
+use std::{cell::RefCell, convert::TryFrom, fmt::Display, mem::size_of, sync::Arc, time::Instant};
 
 pub struct WindowedTimeseries {
     pub data: Vec<f64>,
@@ -30,6 +30,8 @@ impl WindowedTimeseries {
         let mut rolling_avg = Vec::with_capacity(n_subs);
         let mut rolling_sd = Vec::with_capacity(n_subs);
         let mut squared_norms = Vec::with_capacity(n_subs);
+
+        let timer = Instant::now();
 
         // FIXME: compute it using sliding window
         let mut buffer = vec![0.0; w];
@@ -73,6 +75,11 @@ impl WindowedTimeseries {
             //// since we need to compute all dot products
             begin += fft_length - w;
         }
+
+        slog_scope::info!("stats computation";
+            "tag" => "profiling",
+            "time_s" => timer.elapsed().as_secs_f64()
+        );
 
         WindowedTimeseries {
             data: ts,
