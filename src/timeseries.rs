@@ -37,8 +37,7 @@ impl WindowedTimeseries {
         let mut buffer = vec![0.0; w];
         for i in 0..n_subs {
             let mean = ts[i..i + w].iter().sum::<f64>() / w as f64;
-            let sd =
-                ((ts[i..i + w].iter().map(|x| x * x).sum::<f64>() - mean * mean) / w as f64).sqrt();
+            let sd = (ts[i..i+w].iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (w - 1) as f64).sqrt();
             buffer.fill(0.0);
             for (i, x) in ts[i..i + w].iter().enumerate() {
                 buffer[i] = (x - mean) / sd;
@@ -304,7 +303,7 @@ impl DeepSizeOf for WindowedTimeseries {
 
 #[cfg(test)]
 mod test {
-    use crate::timeseries::WindowedTimeseries;
+    use crate::{distance::zeucl, timeseries::WindowedTimeseries};
 
     #[test]
     fn test_sliding_dot_product() {
@@ -391,7 +390,7 @@ mod test {
             let a = ts.subsequence(i);
             let mean: f64 = a.iter().sum::<f64>() / a.len() as f64;
             let actual_mean = ts.mean(i);
-            let sd = ((a.iter().map(|x| x * x).sum::<f64>() - mean * mean) / a.len() as f64).sqrt();
+            let sd = ((a.iter().map(|x| (x - mean).powi(2)).sum::<f64>()) / (a.len() - 1) as f64).sqrt();
             let actual_sd = ts.sd(i);
             assert_eq!(mean, actual_mean);
             assert_eq!(sd, actual_sd);
