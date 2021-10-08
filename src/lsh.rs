@@ -380,13 +380,13 @@ impl<'hasher> HashMatrix<'hasher> {
             );
             rephashes
         });
+        self.hashes.par_extend(it);
+
         let elapsed = timer.elapsed();
         info!("matrix building";
             "tag" => "profiling",
             "time_s" => elapsed.as_secs_f64()
         );
-
-        self.hashes.par_extend(it);
     }
 
     pub fn buckets_vec<'hashes>(
