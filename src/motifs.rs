@@ -391,7 +391,7 @@ pub fn motifs(
     );
     info!("motifs completed";
         "tag" => "profiling",
-        "elapsed_s" => start.elapsed().as_secs_f64()
+        "time_s" => start.elapsed().as_secs_f64()
     );
     let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
     let cnt_dist = cnt_dist.load(Ordering::SeqCst);
