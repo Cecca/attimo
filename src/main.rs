@@ -11,6 +11,8 @@ use slog_scope::GlobalLoggerGuard;
 use std::fs::OpenOptions;
 use std::path::Path;
 
+const VERSION: u32 = 1;
+
 #[derive(FromArgs)]
 /// ATTIMO computes ApproximaTe TImeseries MOtifs.
 struct Config {
@@ -76,6 +78,11 @@ fn default_log_path() -> String {
 }
 
 fn main() -> Result<()> {
+    if std::env::args().filter(|arg| arg == "--version").count() == 1 {
+        println!("{}", VERSION);
+        return Ok(())
+    }
+
     // read configuration
     let config: Config = argh::from_env();
 

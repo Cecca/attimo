@@ -129,8 +129,6 @@ def run_scamp():
         df = df[df['a'] < df['b']]
         df = remove_trivial(df, window)
         motifs = df.head(100)[['a', 'b', 'dist']].to_json(orient='records')
-        # print(motifs)
-        # return
 
         db.execute("""
             INSERT INTO scamp VALUES (:hostname,:dataset,:threads,:window,:elapsed,:motifs);
