@@ -78,9 +78,31 @@ def prefix(path, n):
 
 def get_datasets():
     return [
-        # ("data/Steamgen.csv", 300)
-        (prefix("data/ECG.csv", 100000), 1500),
-        (prefix("data/ECG.csv", 200000), 1500)
+        (prefix("data/GAP.csv", 1000000), 1000),
+        (prefix("data/GAP.csv", 2000000), 1000),
+
+        (prefix("data/EMG.csv", 1000000), 1500),
+        (prefix("data/EMG.csv", 2000000), 1500),
+        (prefix("data/EMG.csv", 3000000), 1500),
+
+        (prefix("data/ECG.csv", 1000000), 1500),
+        (prefix("data/ECG.csv", 2000000), 1500),
+        (prefix("data/ECG.csv", 3000000), 1500),
+        (prefix("data/ECG.csv", 4000000), 1500),
+        (prefix("data/ECG.csv", 5000000), 1500),
+        (prefix("data/ECG.csv", 6000000), 1500),
+        (prefix("data/ECG.csv", 7000000), 1500),
+
+        (prefix("data/ASTRO.csv", 100000), 1500),
+        (prefix("data/ASTRO.csv", 200000), 1500),
+        (prefix("data/ASTRO.csv", 300000), 1500),
+        (prefix("data/ASTRO.csv", 400000), 1500),
+        (prefix("data/ASTRO.csv", 500000), 1500),
+        (prefix("data/ASTRO.csv", 600000), 1500),
+        (prefix("data/ASTRO.csv", 700000), 1500),
+        (prefix("data/ASTRO.csv", 800000), 1500),
+        (prefix("data/ASTRO.csv", 900000), 1500),
+        (prefix("data/ASTRO.csv", 1000000), 1500),
     ]
 
 def remove_trivial(df, w):
