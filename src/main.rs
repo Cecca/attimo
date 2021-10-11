@@ -10,6 +10,7 @@ use slog::*;
 use slog_scope::GlobalLoggerGuard;
 use std::fs::OpenOptions;
 use std::path::Path;
+use std::time::Instant;
 
 const VERSION: u32 = 1;
 
@@ -89,9 +90,16 @@ fn main() -> Result<()> {
     let _guard = setup_logger(&config.log_path)?;
     let path = config.path;
     let w = config.window;
+    let timer = Instant::now();
     let ts: Vec<f64> = loadts(path, config.prefix)?;
     let ts = WindowedTimeseries::new(ts, w);
-    println!("Loaded time series, taking {}", ts.bytes_size());
+    let input_elapsed = timer.elapsed();
+    println!("Loaded time series in {:?}, taking {}", input_elapsed, ts.bytes_size());
+    slog_scope::info!("input reading";
+        "tag" => "profiling",
+        "time_s" => input_elapsed.as_secs_f64()
+    );
+
     let motifs = motifs(
         &ts,
         config.motifs,
