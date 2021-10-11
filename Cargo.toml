@@ -15,6 +15,7 @@ rand_distr = "0.4"
 packed_simd = { version = "0.3.6", package = "packed_simd_2" }
 rayon = "1.5"
 crossbeam-channel = "0.5"
+fast-float = "0.2"
 thread_local = "1.1"
 deepsize = "0.2"
 rustfft = "6.0"

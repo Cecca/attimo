@@ -104,6 +104,7 @@ dependencies = [
  "criterion",
  "crossbeam-channel",
  "deepsize",
+ "fast-float",
  "indicatif",
  "log",
  "packed_simd_2",
@@ -353,6 +354,12 @@ name = "encode_unicode"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
+
+[[package]]
+name = "fast-float"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95765f67b4b18863968b4a1bd5bb576f732b29a4a28c7cd84c09fa3e2875f33c"
 
 [[package]]
 name = "getrandom"
