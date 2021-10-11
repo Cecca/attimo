@@ -49,6 +49,7 @@ def get_db():
     db.execute("""
     CREATE TABLE IF NOT EXISTS attimo (
         hostname     TEXT,
+        git_sha      TEXT,
         version      INT,
         dataset      TEXT,
         threads      INT,
@@ -105,6 +106,7 @@ def remove_trivial(df, w):
 
 
 def run_attimo():
+    gitsha = sp.check_output(shlex.split("git rev-parse HEAD"))
     sp.check_call(shlex.split("cargo install --force --locked --path ."))
     version = int(sp.check_output(["attimo", "--version"]))
     db = get_db()
@@ -168,6 +170,7 @@ def run_attimo():
         db.execute("""
             INSERT INTO attimo VALUES (
                 :hostname,
+                :gitsha,
                 :version,
                 :dataset,
                 :threads,
@@ -183,6 +186,7 @@ def run_attimo():
             """,
             {
                 "hostname": HOSTNAME,
+                "gitsha": gitsha,
                 "version": version,
                 "dataset": dataset,
                 "threads": threads,
@@ -244,8 +248,8 @@ def run_scamp():
         df = remove_trivial(df, window)
         motifs = df.head(100)[['a', 'b', 'dist']].to_json(orient='records')
 
-        os.remve("mp_columns_out")
-        os.remve("mp_columns_out_index")
+        os.remove("mp_columns_out")
+        os.remove("mp_columns_out_index")
 
         db.execute("""
             INSERT INTO scamp VALUES (:hostname,:dataset,:threads,:window,:elapsed,:motifs);
