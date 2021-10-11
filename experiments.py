@@ -1,3 +1,5 @@
+import json
+import shlex
 import pandas as pd
 import numpy as np
 import subprocess as sp
@@ -12,7 +14,6 @@ NUM_CPUS = multiprocessing.cpu_count()
 
 
 def install_scamp():
-    import shlex
     try:
         if sp.run(["./SCAMP", "--version"]).returncode == 0:
             return
@@ -48,6 +49,7 @@ def get_db():
     db.execute("""
     CREATE TABLE IF NOT EXISTS attimo (
         hostname     TEXT,
+        version      INT,
         dataset      TEXT,
         threads      INT,
         repetitions  INT,
@@ -75,9 +77,9 @@ def prefix(path, n):
 
 def get_datasets():
     return [
-        ("data/Steamgen.csv", 300)
-        # (prefix("data/ECG.csv", 100000), 1500),
-        # (prefix("data/ECG.csv", 200000), 1500)
+        # ("data/Steamgen.csv", 300)
+        (prefix("data/ECG.csv", 100000), 1500),
+        (prefix("data/ECG.csv", 200000), 1500)
     ]
 
 def remove_trivial(df, w):
@@ -102,12 +104,121 @@ def remove_trivial(df, w):
     return df[df['trivial'] == False]
 
 
+def run_attimo():
+    sp.check_call(shlex.split("cargo install --force --locked --path ."))
+    version = int(sp.check_output(["attimo", "--version"]))
+    db = get_db()
+    datasets = get_datasets()
+    threads = NUM_CPUS
+    motifs = 1
+    repetitions = 50
+    delta = 0.001
+    seed = 14514
+    for dataset, window in datasets:
+        # Check if already run
+        execid = db.execute("""
+            select rowid from attimo
+            where hostname=:hostname
+              and version=:version
+              and dataset=:dataset
+              and threads=:threads
+              and repetitions=:repetitions
+              and delta=:delta
+              and seed=:seed
+              and window=:window
+              and motifs=:motifs
+            """,
+            {
+                "hostname": HOSTNAME,
+                "version": version,
+                "dataset": dataset,
+                "threads": threads,
+                "repetitions": repetitions,
+                "delta": delta,
+                "seed": seed,
+                "window": window,
+                "motifs":motifs,
+            }
+        ).fetchone()
+        if execid is not None:
+            print("experiment already executed (attimo id={})".format(execid[0]))
+            continue
+
+        start = time.time()
+        sp.run([
+            "attimo",
+            "--window", str(window),
+            "--motifs", str(motifs),
+            "--repetitions", str(repetitions),
+            "--delta", str(delta),
+            "--seed", str(seed),
+            "--log-path", "/tmp/attimo.json",
+            "--output", "/tmp/motifs.csv",
+            dataset
+        ]).check_returncode()
+        end = time.time()
+        elapsed = end - start
+        motif_pairs = pd.read_csv('/tmp/motifs.csv', names=['a', 'b','dist']).to_json(orient='records')
+        with open("/tmp/attimo.json") as fp:
+            log = json.dumps([json.loads(l) for l in fp.readlines()])
+
+        db.execute("""
+            INSERT INTO attimo VALUES (
+                :hostname,
+                :version,
+                :dataset,
+                :threads,
+                :repetitions,
+                :delta,
+                :seed,
+                :window,
+                :motifs,
+                :time_s,
+                :log,
+                :motif_pairs
+            );
+            """,
+            {
+                "hostname": HOSTNAME,
+                "version": version,
+                "dataset": dataset,
+                "threads": threads,
+                "repetitions": repetitions,
+                "delta": delta,
+                "seed": seed,
+                "window": window,
+                "motifs":motifs,
+                "time_s": elapsed,
+                "log": log,
+                "motif_pairs": motif_pairs
+            }
+        )
+
 
 def run_scamp():
+    install_scamp()
     db = get_db()
     datasets = get_datasets()
     threads = NUM_CPUS
     for dataset, window in datasets:
+        execid = db.execute("""
+            SELECT rowid from scamp
+            where hostname=:hostname
+              and dataset=:dataset
+              and threads=:threads
+              and window=:window
+            """,
+            {
+                "hostname": HOSTNAME,
+                "dataset": dataset,
+                "threads": threads,
+                "window": window,
+            }
+        ).fetchone()
+        if execid is not None:
+            print("Experiment already executed (scamp id={})".format(execid[0]))
+            continue
+
         print(f"running on {dataset} with w={window} and {threads} threads... ", end="")
         start = time.time()
         sp.run([
@@ -115,7 +226,7 @@ def run_scamp():
             "--window={}".format(str(window)), 
             "--input_a_file_name={}".format(dataset),
             "--num_cpu_workers={}".format(threads)
-        ])
+        ]).check_returncode()
         end = time.time()
         elapsed = end - start
         print(f"{elapsed} seconds")
@@ -146,6 +257,6 @@ def run_scamp():
 
 
 if __name__ == "__main__":
-    install_scamp()
     run_scamp()
+    run_attimo()
     
