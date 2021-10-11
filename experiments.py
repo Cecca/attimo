@@ -162,6 +162,9 @@ def run_attimo():
         with open("/tmp/attimo.json") as fp:
             log = json.dumps([json.loads(l) for l in fp.readlines()])
 
+        os.remove("/tmp/attimo.json")
+        os.remove("/tmp/motifs.csv")
+
         db.execute("""
             INSERT INTO attimo VALUES (
                 :hostname,
@@ -240,6 +243,9 @@ def run_scamp():
         df = df[df['a'] < df['b']]
         df = remove_trivial(df, window)
         motifs = df.head(100)[['a', 'b', 'dist']].to_json(orient='records')
+
+        os.remve("mp_columns_out")
+        os.remve("mp_columns_out_index")
 
         db.execute("""
             INSERT INTO scamp VALUES (:hostname,:dataset,:threads,:window,:elapsed,:motifs);
