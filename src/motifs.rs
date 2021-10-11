@@ -389,12 +389,15 @@ pub fn motifs(
         start.elapsed(),
         hashes.bytes_size()
     );
-    info!("motifs completed";
-        "tag" => "profiling",
-        "time_s" => start.elapsed().as_secs_f64()
-    );
     let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
     let cnt_dist = cnt_dist.load(Ordering::SeqCst);
+    info!("motifs completed";
+        "tag" => "profiling",
+        "time_s" => start.elapsed().as_secs_f64(),
+        "cnt_dist" => cnt_dist,
+        "total_distances" => total_distances,
+        "distances_fraction" => (cnt_dist as f64 / total_distances as f64)
+    );
     println!(
         "[{:?}] done! Computed {}/{} distances ({}%)",
         start.elapsed(),
