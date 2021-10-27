@@ -1,11 +1,12 @@
 use std::rc::Rc;
 
+use attimo::distance::zdot;
 use attimo::sort::*;
 use attimo::{lsh::*, timeseries::WindowedTimeseries};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use rand_distr::{Distribution, Uniform};
-use rand_xoshiro::Xoroshiro128PlusPlus;
+use rand_xoshiro::{Xoroshiro128Plus, Xoroshiro128PlusPlus};
 
 pub fn bench_construct_ts(c: &mut Criterion) {
     use rand::prelude::*;
@@ -205,6 +206,27 @@ pub fn bench_sort_uniform_hashes(c: &mut Criterion) {
     group.finish()
 }
 
+pub fn bench_zdot(c: &mut Criterion) {
+    let n = 3000;
+    let mut rng = Xoroshiro128Plus::seed_from_u64(342);
+    let a: Vec<f64> = (&mut rng)
+        .sample_iter(Uniform::new(0.0, 1.0))
+        .take(n)
+        .collect();
+    let b: Vec<f64> = (&mut rng)
+        .sample_iter(Uniform::new(0.0, 1.0))
+        .take(n)
+        .collect();
+    let ma = a.iter().sum::<f64>() / a.len() as f64;
+    let mb = b.iter().sum::<f64>() / a.len() as f64;
+    let sa = ((a.iter().map(|x| (x - ma).powi(2)).sum::<f64>()) / (a.len() - 1) as f64).sqrt();
+    let sb = ((b.iter().map(|x| (x - mb).powi(2)).sum::<f64>()) / (b.len() - 1) as f64).sqrt();
+
+    c.bench_function("zdot bench", move |bencher| {
+        bencher.iter(|| zdot(&a, ma, sa, &b, mb, sb))
+    });
+}
+
 criterion_group!(
     benches,
     bench_sliding_dot_product,
@@ -213,6 +235,7 @@ criterion_group!(
     bench_sort_hashes,
     bench_sort_uniform_hashes,
     bench_sort_usize,
-    bench_sort_u8
+    bench_sort_u8,
+    bench_zdot
 );
 criterion_main!(benches);

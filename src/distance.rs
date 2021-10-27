@@ -74,19 +74,17 @@ pub fn zdot(a: &[f64], ma: f64, sda: f64, b: &[f64], mb: f64, sdb: f64) -> f64 {
         .remainder()
         .iter()
         .zip(bc.remainder().iter())
-        .map(|(a, b)| (a - ma) / sda * (b - mb) / sdb)
+        .map(|(a, b)| (a - ma) * (b - mb))
         .sum::<f64>() as f64;
     let ma = f64x8::splat(ma);
     let mb = f64x8::splat(mb);
-    let sda = f64x8::splat(sda);
-    let sdb = f64x8::splat(sdb);
     let part = ac
         .map(f64x8::from_slice_unaligned)
         .zip(bc.map(f64x8::from_slice_unaligned))
-        .map(|(a, b)| (a - ma) / sda * (b - mb) / sdb)
+        .map(|(a, b)| (a - ma) * (b - mb))
         .sum::<f64x8>()
         .sum() as f64;
-    part + rem
+    (part + rem) / (sda * sdb)
 }
 
 #[inline]
