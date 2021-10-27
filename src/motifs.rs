@@ -261,6 +261,7 @@ pub fn motifs(
             let local_tops: Vec<TopK> = repetition_range.clone().into_par_iter().zip(bounds[repetition_range].par_iter_mut()).map(|(rep, rep_bounds)| {
                 let mut local_top = top.clone();
                 let mut rep_cnt_dists = 0;
+                let mut rep_candidate_pairs = 0;
                 let rep_timer = Instant::now();
                 let buckets = hashes.buckets_vec(depth as usize, rep);
                 for (hash_range, bucket) in buckets.iter() {
@@ -276,6 +277,7 @@ pub fn motifs(
                                 let check_a = !a_already_checked.contains(&b_hash_idx);
                                 let check_b = !b_already_checked.contains(&a_hash_idx);
                                 if check_a || check_b {
+                                    rep_candidate_pairs += 1;
                                     //// We only process the pair if this is the first repetition in which
                                     //// they collide. We get this information from the pool of bits
                                     //// from which hash values for all repetitions are extracted.
@@ -322,6 +324,7 @@ pub fn motifs(
                 info!("completed repetition"; 
                     "tag" => "profiling",
                     "computed_distances" => rep_cnt_dists, 
+                    "candidate_pairs" => rep_candidate_pairs,
                     "depth" => depth, 
                     "repetition" => rep, 
                     "time_s" => rep_timer.elapsed().as_secs_f64()
