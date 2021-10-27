@@ -560,9 +560,9 @@ impl Hasher {
         println!("lower and upper {} {}", lower, upper);
 
         if upper > lower {
-            (upper - lower) / 16.0
+            (upper - lower) / 4.0
         } else {
-            (max_dotp - min_dotp) / 16.0
+            (max_dotp - min_dotp) / 4.0
         }
     }
 

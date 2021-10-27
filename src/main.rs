@@ -151,6 +151,7 @@ fn main() -> Result<()> {
                 .mode(Mode::Lines);
             plot.add_trace(l);
         }
+        plot.use_local_plotly();
         plot.show();
     }
     Ok(())
