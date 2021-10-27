@@ -35,9 +35,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
-use std::{
-    cell::RefCell, cmp::Ordering, fmt::Debug, mem::size_of, ops::Range, time::Instant,
-};
+use std::{cell::RefCell, cmp::Ordering, collections::BTreeMap, fmt::Debug, mem::size_of, ops::Range, time::Instant};
 use thread_local::ThreadLocal;
 
 //// ## Hash values
@@ -238,6 +236,18 @@ impl<'hasher> HashCollection<'hasher> {
             "tag" => "profiling",
             "time_s" => elapsed.as_secs_f64()
         );
+
+        #[cfg(debug)]
+        {
+            let mut hash_hist = BTreeMap::new();
+            for h in &left_pools {
+                hash_hist.entry(h).and_modify(|c| *c += 1).or_insert(1);
+            }
+            for h in &right_pools {
+                hash_hist.entry(h).and_modify(|c| *c += 1).or_insert(1);
+            }
+            println!("{:#?}", hash_hist);
+        }
 
         Self {
             hasher,
@@ -560,9 +570,9 @@ impl Hasher {
         println!("lower and upper {} {}", lower, upper);
 
         if upper > lower {
-            (upper - lower) / 4.0
+            (upper - lower) / 2.0
         } else {
-            (max_dotp - min_dotp) / 4.0
+            (max_dotp - min_dotp) / 2.0
         }
     }
 
