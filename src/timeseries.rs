@@ -42,6 +42,8 @@ impl WindowedTimeseries {
             for (i, x) in ts[i..i + w].iter().enumerate() {
                 buffer[i] = (x - mean) / sd;
             }
+            assert!(mean.is_finite());
+            assert!(sd.is_finite());
             rolling_avg.push(mean);
             rolling_sd.push(sd);
             squared_norms.push(dot(&buffer, &buffer));
@@ -203,7 +205,14 @@ impl WindowedTimeseries {
         for i in 0..self.num_subsequences() {
             let m = self.mean(i);
             let sd = self.sd(i);
-            output[i] = output[i] / sd - sumv * m / sd;
+            if sd > 0.0 {
+                output[i] = output[i] / sd - sumv * m / sd;
+            } else {
+                //// If the standard deviation is 0 (i.e. the subsequence is constant),
+                //// we just shift by the mean
+                output[i] = output[i] - sumv * m;
+            }
+            assert!(output[i].is_finite(), "dotp={} where mean={} and sd={}", output[i], m, sd);
         }
     }
 
@@ -230,7 +239,7 @@ impl WindowedTimeseries {
 
         for i in 0..self.num_subsequences() {
             dp[i] = d(self, from, i);
-            assert!(!dp[i].is_nan());
+            // assert!(!dp[i].is_nan());
         }
         dp
     }

@@ -237,7 +237,7 @@ impl<'hasher> HashCollection<'hasher> {
             "time_s" => elapsed.as_secs_f64()
         );
 
-        #[cfg(debug)]
+        // #[cfg(debug)]
         {
             let mut hash_hist = BTreeMap::new();
             for h in &left_pools {
@@ -529,7 +529,7 @@ impl Hasher {
                     histogram_neg[bin] += 1;
                 }
             }
-            let min = *buf.iter().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
+            let min = *buf.iter().min_by(|x, y| x.partial_cmp(y).unwrap_or_else(|| panic!("{}, {}", x, y))).unwrap();
             let max = *buf.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
             if min < min_dotp {
                 min_dotp = min;
@@ -597,8 +597,18 @@ impl Hasher {
             ts.znormalized_sliding_dot_product(v, &mut dotp_buf.borrow_mut());
             for (i, dotp) in dotp_buf.borrow().iter().enumerate() {
                 let h = (dotp + shift) / self.width;
-                assert!(h <= 128.0);
-                assert!(h >= -127.0);
+                //// Handle the cases where the hash value is too large or too small to be stored
+                //// in a i8. These cases, due to our choice of the quantization width for
+                //// the hash function, should happen rather rarely.
+                let h = if h > 128.0 {
+                    128.0
+                } else if h < -127.0 {
+                    -127.0
+                } else {
+                    h
+                };
+                assert!(h <= 128.0, "h = {} > 128", h);
+                assert!(h >= -127.0, "h = {} < -127", h);
                 buffer[i] = h as i8;
             }
         });
