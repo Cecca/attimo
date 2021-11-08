@@ -35,7 +35,10 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
-use std::{cell::RefCell, cmp::Ordering, collections::BTreeMap, fmt::Debug, mem::size_of, ops::Range, time::Instant};
+use std::{
+    cell::RefCell, cmp::Ordering, collections::BTreeMap, fmt::Debug, mem::size_of, ops::Range,
+    time::Instant,
+};
 use thread_local::ThreadLocal;
 
 //// ## Hash values
@@ -162,6 +165,10 @@ impl<'hasher> HashCollection<'hasher> {
     //// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
     //// and a `Hasher`.
     pub fn from_ts(ts: &WindowedTimeseries, hasher: &'hasher Hasher) -> Self {
+        println!(
+            "Number of tensor repetitions: {}",
+            hasher.tensor_repetitions
+        );
         let ns = ts.num_subsequences();
 
         let tl_buffer = ThreadLocal::new();
@@ -291,9 +298,11 @@ impl<'hasher> HashCollection<'hasher> {
         let lindex = (0..self.hasher.tensor_repetitions).find(|&rep| {
             let iidx = K_HALF * self.n_subsequences * rep + i * K_HALF;
             let jidx = K_HALF * self.n_subsequences * rep + j * K_HALF;
-            let hi = &self.left_pools[iidx..iidx + depth_l];
-            let hj = &self.left_pools[jidx..jidx + depth_l];
-            hi == hj
+            unsafe{
+                let hi = &self.left_pools.get_unchecked(iidx..iidx + depth_l);
+                let hj = &self.left_pools.get_unchecked(jidx..jidx + depth_l);
+                hi == hj
+            }
         })?;
 
         if depth < K_HALF {
@@ -304,9 +313,11 @@ impl<'hasher> HashCollection<'hasher> {
         let rindex = (0..self.hasher.tensor_repetitions).find(|&rep| {
             let iidx = K_HALF * self.n_subsequences * rep + i * K_HALF;
             let jidx = K_HALF * self.n_subsequences * rep + j * K_HALF;
-            let hi = &self.right_pools[iidx..iidx + depth_r];
-            let hj = &self.right_pools[jidx..jidx + depth_r];
-            hi == hj
+            unsafe {
+                let hi = &self.right_pools.get_unchecked(iidx..iidx + depth_r);
+                let hj = &self.right_pools.get_unchecked(jidx..jidx + depth_r);
+                hi == hj
+            }
         })?;
 
         let idx = rindex * self.hasher.tensor_repetitions + lindex;
@@ -370,26 +381,28 @@ impl<'hasher> HashMatrix<'hasher> {
         let ns = self.coll.n_subsequences;
         let coll = &self.coll;
         let timer = Instant::now();
-        let it = (0..self.coll.hasher.repetitions).into_par_iter().map(|rep| {
-            let mut rephashes = Vec::with_capacity(ns);
-            let start = Instant::now();
-            for i in 0..ns {
-                rephashes.push((coll.hash_value(i, rep), i));
-            }
-            let elapsed_hashes = start.elapsed();
-            let start = Instant::now();
-            rephashes.sort_unstable();
-            let elapsed_sort = start.elapsed();
-            debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));
-            info!("column building"; 
-                "tag" => "profiling",
-                "repetition" => rep, 
-                "time_hashes_s" => elapsed_hashes.as_secs_f64(), 
-                "time_sort_s" => elapsed_sort.as_secs_f64(),
-                "time_s" => (elapsed_hashes + elapsed_sort).as_secs_f64()
-            );
-            rephashes
-        });
+        let it = (0..self.coll.hasher.repetitions)
+            .into_par_iter()
+            .map(|rep| {
+                let mut rephashes = Vec::with_capacity(ns);
+                let start = Instant::now();
+                for i in 0..ns {
+                    rephashes.push((coll.hash_value(i, rep), i));
+                }
+                let elapsed_hashes = start.elapsed();
+                let start = Instant::now();
+                rephashes.sort_unstable();
+                let elapsed_sort = start.elapsed();
+                debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));
+                info!("column building";
+                    "tag" => "profiling",
+                    "repetition" => rep,
+                    "time_hashes_s" => elapsed_hashes.as_secs_f64(),
+                    "time_sort_s" => elapsed_sort.as_secs_f64(),
+                    "time_s" => (elapsed_hashes + elapsed_sort).as_secs_f64()
+                );
+                rephashes
+            });
         self.hashes.par_extend(it);
 
         let elapsed = timer.elapsed();
@@ -413,14 +426,12 @@ impl<'hasher> HashMatrix<'hasher> {
         while idx < column.len() {
             let start = idx;
             let current = &column[idx].0;
-            while idx < column.len()
-                && column[idx].0.prefix_eq(current, depth)
-            {
+            while idx < column.len() && column[idx].0.prefix_eq(current, depth) {
                 idx += 1;
             }
             res.push((start..idx, &column[start..idx]));
         }
-        info!("computing bucket boundaries"; 
+        info!("computing bucket boundaries";
             "tag" => "profiling",
             "repetition" => repetition,
             "time_s" => timer.elapsed().as_secs_f64()
@@ -428,7 +439,6 @@ impl<'hasher> HashMatrix<'hasher> {
 
         res
     }
-
 }
 
 /// Data structure to do LSH of subsequences.
@@ -529,7 +539,10 @@ impl Hasher {
                     histogram_neg[bin] += 1;
                 }
             }
-            let min = *buf.iter().min_by(|x, y| x.partial_cmp(y).unwrap_or_else(|| panic!("{}, {}", x, y))).unwrap();
+            let min = *buf
+                .iter()
+                .min_by(|x, y| x.partial_cmp(y).unwrap_or_else(|| panic!("{}, {}", x, y)))
+                .unwrap();
             let max = *buf.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
             if min < min_dotp {
                 min_dotp = min;

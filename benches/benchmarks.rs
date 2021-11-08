@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::rc::Rc;
 
 use attimo::distance::zdot;
@@ -227,6 +228,38 @@ pub fn bench_zdot(c: &mut Criterion) {
     });
 }
 
+pub fn bench_first_collision(c: &mut Criterion) {
+    let repetitions = 200;
+    let depth = 16;
+
+    let w = 300;
+    let ts = WindowedTimeseries::gen_randomwalk(1000000, w, 12345);
+
+    let h = Hasher::new(w, repetitions, 10.0, 12345);
+    let pools = HashCollection::from_ts(&ts, &h);
+    let mut hash_matrix = pools.get_hash_matrix();
+    hash_matrix.setup_hashes();
+
+    let mut buckets  = hash_matrix.buckets_vec(depth, 0);
+    buckets.sort_by_key(|bucket| Reverse(bucket.0.len()));
+    // Take the largest bucket
+    let bucket = &buckets[0];
+    let bucket: Vec<usize> = bucket.1.iter().map(|(_, i)| {
+        *i + bucket.0.start
+    }).collect();
+    println!("Bucket with {} elements", bucket.len());
+
+    c.bench_function("first collision", move |bencher| {
+        bencher.iter(|| {
+            for i in 0..bucket.len() {
+                for j in i..bucket.len() {
+                    pools.first_collision(i, j, depth);
+                }
+            }
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_sliding_dot_product,
@@ -236,6 +269,7 @@ criterion_group!(
     bench_sort_uniform_hashes,
     bench_sort_usize,
     bench_sort_u8,
-    bench_zdot
+    bench_zdot,
+    bench_first_collision
 );
 criterion_main!(benches);
