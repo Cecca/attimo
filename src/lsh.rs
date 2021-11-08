@@ -294,31 +294,48 @@ impl<'hasher> HashCollection<'hasher> {
     }
 
     pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
+        let jump = K_HALF * self.n_subsequences;
+
         let depth_l = std::cmp::min(depth, K_HALF);
-        let lindex = (0..self.hasher.tensor_repetitions).find(|&rep| {
-            let iidx = K_HALF * self.n_subsequences * rep + i * K_HALF;
-            let jidx = K_HALF * self.n_subsequences * rep + j * K_HALF;
-            unsafe{
+        let mut lindex = None;
+        let mut iidx = i * K_HALF;
+        let mut jidx = j * K_HALF;
+        for rep in 0..self.hasher.tensor_repetitions {
+            if unsafe{
                 let hi = &self.left_pools.get_unchecked(iidx..iidx + depth_l);
                 let hj = &self.left_pools.get_unchecked(jidx..jidx + depth_l);
                 hi == hj
+            } {
+                lindex = Some(rep);
+                break;
             }
-        })?;
+            iidx += jump;
+            jidx += jump;
+        }
+
+        let lindex = lindex?;
 
         if depth < K_HALF {
             return Some(lindex);
         }
 
         let depth_r = depth - K_HALF;
-        let rindex = (0..self.hasher.tensor_repetitions).find(|&rep| {
-            let iidx = K_HALF * self.n_subsequences * rep + i * K_HALF;
-            let jidx = K_HALF * self.n_subsequences * rep + j * K_HALF;
-            unsafe {
+        let mut rindex = None;
+        let mut iidx = i * K_HALF;
+        let mut jidx = j * K_HALF;
+        for rep in 0..self.hasher.tensor_repetitions {
+            if unsafe{
                 let hi = &self.right_pools.get_unchecked(iidx..iidx + depth_r);
                 let hj = &self.right_pools.get_unchecked(jidx..jidx + depth_r);
                 hi == hj
+            } {
+                rindex = Some(rep);
+                break;
             }
-        })?;
+            iidx += jump;
+            jidx += jump;
+        }
+        let rindex = rindex?;
 
         let idx = rindex * self.hasher.tensor_repetitions + lindex;
         if idx < self.hasher.repetitions {
