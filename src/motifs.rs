@@ -341,10 +341,6 @@ pub fn motifs(
                         "repetition" => rep,
                         "time_s" => rep_elapsed.as_secs_f64()
                     );
-                    pbar.println(format!(
-                        "{} distances per second",
-                        rep_cnt_dists as f64 / rep_elapsed.as_secs_f64()
-                    ));
                     cnt_dist.fetch_add(rep_cnt_dists, Ordering::SeqCst);
                     pbar.inc(1);
                     local_top
