@@ -321,14 +321,16 @@ pub fn motifs(
 
                     }
                 }
+                let rep_elapsed = rep_timer.elapsed();
                 info!("completed repetition"; 
                     "tag" => "profiling",
                     "computed_distances" => rep_cnt_dists, 
                     "candidate_pairs" => rep_candidate_pairs,
                     "depth" => depth, 
                     "repetition" => rep, 
-                    "time_s" => rep_timer.elapsed().as_secs_f64()
+                    "time_s" => rep_elapsed.as_secs_f64()
                 );
+                pbar.println(format!("{} distances per second", rep_cnt_dists as f64 / rep_elapsed.as_secs_f64()));
                 cnt_dist.fetch_add(rep_cnt_dists, Ordering::SeqCst);
                 pbar.inc(1);
                 local_top
