@@ -35,34 +35,44 @@ def install_scamp():
 def get_db():
     db = sqlite3.connect("attimo-results.db", isolation_level=None)
 
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS scamp (
-        hostname     TEXT,
-        dataset      TEXT,
-        threads      INT,
-        window       INT,
-        time_s       REAL,
-        motif_pairs  TEXT
-    );
-    """)
+    dbver = db.execute("PRAGMA user_version").fetchone()[0]
+    if dbver is None:
+        dbver = 0
+    print("Database version", dbver)
+    # ------ Version 1 ---------
+    if dbver < 1:
+        db.execute("""
+        CREATE TABLE IF NOT EXISTS scamp (
+            hostname     TEXT,
+            dataset      TEXT,
+            threads      INT,
+            window       INT,
+            time_s       REAL,
+            motif_pairs  TEXT
+        );
+        """)
 
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS attimo (
-        hostname     TEXT,
-        git_sha      TEXT,
-        version      INT,
-        dataset      TEXT,
-        threads      INT,
-        repetitions  INT,
-        delta        REAL,
-        seed         INT,
-        window       INT,
-        motifs       INT,
-        time_s       REAL,
-        log          TEXT,
-        motif_pairs  TEXT
-    );
-    """)
+        db.execute("""
+        CREATE TABLE IF NOT EXISTS attimo (
+            hostname     TEXT,
+            git_sha      TEXT,
+            version      INT,
+            dataset      TEXT,
+            threads      INT,
+            repetitions  INT,
+            delta        REAL,
+            seed         INT,
+            window       INT,
+            motifs       INT,
+            time_s       REAL,
+            log          TEXT,
+            motif_pairs  TEXT
+        );
+        """)
+        db.execute("PRAGMA user_version = 1;")
+        print("  Bump version to 1")
+    
+    print("Database initialized")
 
     return db
 
@@ -248,7 +258,7 @@ def run_scamp():
             print("Experiment already executed (scamp id={})".format(execid[0]))
             continue
 
-        print(f"running on {dataset} with w={window} and {threads} threads... ", end="")
+        print(f"running on {dataset} with w={window} and {threads} threads... ")
         start = time.time()
         sp.run([
             "./SCAMP", 
