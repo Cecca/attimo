@@ -119,9 +119,25 @@ fn main() -> Result<()> {
     // To double check, I also compared with the Julia implementation of the 
     // matrix profile, finding the same results as my own code.
     //
+    // Using the following python code, with `a` and `b` being subsequences of 
+    // length 100 that start at 416 and 2580, we have
+    //
+    //     >>> np.linalg.norm(znorm(a) - znorm(b))
+    //     13.144772437977837
+    //
+    // where `znorm` computes the z-normalization of each vector. This is approximately
+    // the same result I get for the same pair with my Rust implementation,
+    // and is very far from the distance 0.36022630118347865 reported by
+    // `stumpy.stump` for the same pair.
+    //
     // My best guess is that the results are coming from the usage of
     // Equation (1) of the STOMP paper.
     if config.exact {
+        dbg!(ts.mean(416));
+        dbg!(ts.mean(2580));
+        dbg!(ts.sd(416));
+        dbg!(ts.sd(2580));
+        dbg!(zeucl_slow(&ts, 416, 2580));
         let mut mp = Vec::new();
         let pbar = ProgressBar::new(ts.num_subsequences() as u64);
         for i in 0..ts.num_subsequences() {
