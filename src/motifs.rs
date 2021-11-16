@@ -423,3 +423,32 @@ pub fn motifs(
     );
     top.to_vec()
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{load::loadts, timeseries::WindowedTimeseries};
+
+    use super::motifs;
+
+    #[test]
+    fn test_ecg_10000() {
+        // The indices and distances in this test have been computed 
+        // using STUMPY: https://github.com/TDAmeritrade/stumpy
+        // The distances are slightly different, due to numerical approximation
+        // and a different normalization in their computation of the standard deviation
+        for (w, a, b, d) in [
+            (100, 616, 2780, 0.17526071805739987),
+            (200, 416, 2580, 0.35932460689995877),
+            (1000, 1172, 6112, 2.1325079069545545)
+        ] {
+            let ts: Vec<f64> = loadts("data/ECG-10000.csv", None).unwrap();
+            let ts = WindowedTimeseries::new(ts, w);
+
+            let motif = *motifs(&ts, 1, 100, 0.01, 12435).first().unwrap();
+            assert_eq!(motif.idx_a, a);
+            assert_eq!(motif.idx_b, b);
+            println!("{}", motif.distance);
+            assert!((motif.distance - d).abs() < 0.0000001);
+        }
+    }
+}

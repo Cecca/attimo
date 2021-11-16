@@ -1,10 +1,9 @@
 use anyhow::Result;
 use argh::FromArgs;
-use attimo::distance::{zeucl, zeucl_slow};
+use attimo::distance::zeucl;
 use attimo::load::*;
 use attimo::motifs::{motifs, Motif};
 use attimo::timeseries::*;
-use indicatif::ProgressBar;
 use plotly::common::{Line, Mode};
 use plotly::{Layout, Plot, Scatter};
 use slog::*;
@@ -54,10 +53,6 @@ struct Config {
     /// path to the output file
     pub output: String,
 
-    #[argh(switch)]
-    /// compute the exact matrix profile and top motif
-    pub exact: bool,
-
     #[argh(positional)]
     /// path to the data file
     pub path: String,
@@ -86,7 +81,7 @@ fn default_log_path() -> String {
 fn main() -> Result<()> {
     if std::env::args().filter(|arg| arg == "--version").count() == 1 {
         println!("{}", VERSION);
-        return Ok(())
+        return Ok(());
     }
 
     // read configuration
@@ -99,65 +94,15 @@ fn main() -> Result<()> {
     let ts: Vec<f64> = loadts(path, config.prefix)?;
     let ts = WindowedTimeseries::new(ts, w);
     let input_elapsed = timer.elapsed();
-    println!("Loaded time series in {:?}, taking {}", input_elapsed, ts.bytes_size());
+    println!(
+        "Loaded time series in {:?}, taking {}",
+        input_elapsed,
+        ts.bytes_size()
+    );
     slog_scope::info!("input reading";
         "tag" => "profiling",
         "time_s" => input_elapsed.as_secs_f64()
     );
-
-    // This option is for debugging purposes. It computes, in a very slow
-    // but obvious way, the exact matrix profile. This makes it easy to compare
-    // the results with the ones returned by STOMP/STUMPY. On some datasets,
-    // like steamgen, the results are the same. On some other, like the prefix
-    // of the first 10000 points of ECG, the results are dramatically different:
-    //
-    // - my solution:      616 2780 0.17526071805739987
-    // - stumpy solution:  416 2580 0.36022630118347865
-    //
-    // Upon further investigation, it turns out that the z-normalized euclidean 
-    // distance computed by the different implementations is different.
-    // To double check, I also compared with the Julia implementation of the 
-    // matrix profile, finding the same results as my own code.
-    //
-    // Using the following python code, with `a` and `b` being subsequences of 
-    // length 100 that start at 416 and 2580, we have
-    //
-    //     >>> np.linalg.norm(znorm(a) - znorm(b))
-    //     13.144772437977837
-    //
-    // where `znorm` computes the z-normalization of each vector. This is approximately
-    // the same result I get for the same pair with my Rust implementation,
-    // and is very far from the distance 0.36022630118347865 reported by
-    // `stumpy.stump` for the same pair.
-    //
-    // My best guess is that the results are coming from the usage of
-    // Equation (1) of the STOMP paper.
-    if config.exact {
-        dbg!(ts.mean(416));
-        dbg!(ts.mean(2580));
-        dbg!(ts.sd(416));
-        dbg!(ts.sd(2580));
-        dbg!(zeucl_slow(&ts, 416, 2580));
-        let mut mp = Vec::new();
-        let pbar = ProgressBar::new(ts.num_subsequences() as u64);
-        for i in 0..ts.num_subsequences() {
-            let mut min_d = f64::INFINITY;
-            let mut min_idx = 0;
-            for j in (i + w)..ts.num_subsequences() {
-                let d = zeucl_slow(&ts, i, j);
-                if d < min_d {
-                    min_d = d;
-                    min_idx = j;
-                }
-            }
-            mp.push((min_d, i, min_idx));
-            pbar.inc(1);
-        }
-        pbar.finish();
-        mp.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-        println!("{} {} {}", mp[0].1, mp[0].2, mp[0].0);
-        return Ok(());
-    }
 
     let motifs = motifs(
         &ts,
