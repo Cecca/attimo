@@ -37,6 +37,9 @@ impl WindowedTimeseries {
         let mut buffer = vec![0.0; w];
         for i in 0..n_subs {
             let mean = ts[i..i + w].iter().sum::<f64>() / w as f64;
+            // NOTE: Here we compute the standard deviation normalizing by w - 1. In stumpy and scamp,
+            // instead, the standard deviation is computed normalizing by w, which makes for slightly
+            // different results.
             let sd = (ts[i..i+w].iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (w - 1) as f64).sqrt();
             buffer.fill(0.0);
             for (i, x) in ts[i..i + w].iter().enumerate() {
