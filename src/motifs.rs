@@ -268,6 +268,7 @@ pub fn motifs(
                     let mut rep_candidate_pairs = 0;
                     let rep_timer = Instant::now();
                     let buckets = hashes.buckets_vec(depth as usize, rep);
+
                     for (hash_range, bucket) in buckets.iter() {
                         //// We first sort by index, which improves locality in accessing the
                         //// subsequences of the time series
@@ -277,6 +278,7 @@ pub fn motifs(
                             .map(|(offset, (_, idx))| (*idx, offset))
                             .collect();
                         bucket.sort();
+
                         for &(a_idx, a_offset) in bucket.iter() {
                             let a_already_checked = &rep_bounds[a_idx];
                             let a_hash_idx = hash_range.start + a_offset;
@@ -325,13 +327,22 @@ pub fn motifs(
                                     }
                                 }
                             }
+                        }
+                    }
 
+                    //// Now we update the bounds that have already been explored in this repetition
+                    //// for each node. This works and can be done here instead of the loop above
+                    //// because each subsequence falls into a single bucket in any given
+                    //// repetition.
+                    for (hash_range, bucket) in buckets.iter() {
+                        for &(_, idx) in bucket.iter() {
                             //// Mark the bucket as seen for the ref_idx subsequence. All the points in the
                             //// bucket go through here, irrespective of how they were processed in
                             //// the loop above.
-                            rep_bounds[a_idx] = hash_range.clone();
+                            rep_bounds[idx] = hash_range.clone();
                         }
                     }
+
                     let rep_elapsed = rep_timer.elapsed();
                     info!("completed repetition";
                         "tag" => "profiling",
