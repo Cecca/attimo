@@ -455,7 +455,7 @@ mod test {
             let ts: Vec<f64> = loadts("data/ECG-10000.csv", None).unwrap();
             let ts = WindowedTimeseries::new(ts, w);
 
-            let motif = *motifs(&ts, 1, 100, 0.01, 12435).first().unwrap();
+            let motif = *motifs(&ts, 1, 20, 0.001, 12435).first().unwrap();
             assert_eq!(motif.idx_a, a);
             assert_eq!(motif.idx_b, b);
             println!("{}", motif.distance);
