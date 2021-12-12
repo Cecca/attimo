@@ -6,7 +6,7 @@ use attimo::{
 use rand::SeedableRng;
 use rand_distr::{Distribution, Geometric, Uniform};
 use rand_xoshiro::Xoroshiro128PlusPlus;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use std::{rc::Rc, time::Instant};
 
 fn main() {
@@ -31,8 +31,8 @@ fn main() {
     // let ts = Rc::new(WindowedTimeseries::gen_randomwalk(n, 300, 1243));
     println!("Computing hashes");
     let start = Instant::now();
-    let hasher = Hasher::new(300, 200, 2.0, 123);
-    let hc = HashCollection::from_ts(&ts, &hasher);
+    let hasher = Arc::new(Hasher::new(300, 200, 2.0, 123));
+    let hc = HashCollection::from_ts(&ts, hasher);
     let v: Vec<(HashValue, usize)> = (0..n).map(|i| (hc.hash_value(i, 0), i)).collect();
     // let v: Vec<HashValue> = (0..n).map(|i| hc.hash_value(i, 0)).collect();
     println!("...{:?}", start.elapsed());

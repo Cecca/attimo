@@ -35,10 +35,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
-use std::{
-    cell::RefCell, cmp::Ordering, collections::BTreeMap, fmt::Debug, mem::size_of, ops::Range,
-    time::Instant,
-};
+use std::{cell::RefCell, cmp::Ordering, collections::BTreeMap, fmt::Debug, mem::size_of, ops::Range, rc::Rc, sync::Arc, time::Instant};
 use thread_local::ThreadLocal;
 
 //// ## Hash values
@@ -136,8 +133,8 @@ impl HashValue {
 
 //// This data structure contains all the information needed to generate the hash values for all the repeititions
 //// for all the subsequences.
-pub struct HashCollection<'hasher> {
-    hasher: &'hasher Hasher,
+pub struct HashCollection {
+    hasher: Arc<Hasher>,
     n_subsequences: usize,
     // Both pools are organized as three dimensional matrices, in C order.
     // The stride in the first dimenson is `K_HALF*n_subsequences`, and the stride in the second
@@ -146,7 +143,7 @@ pub struct HashCollection<'hasher> {
     right_pools: Vec<i8>,
 }
 
-impl<'hasher> HashCollection<'hasher> {
+impl HashCollection {
     //// LSH schemes usually have at least two parameters: the number of concatenations `K` and
     //// the number or repetitions `L`. We fix the first parameter in the constant `K` at the top of
     //// this source file. As for the second, with this function we allow the user to get an estimate of the
@@ -164,7 +161,7 @@ impl<'hasher> HashCollection<'hasher> {
 
     //// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
     //// and a `Hasher`.
-    pub fn from_ts(ts: &WindowedTimeseries, hasher: &'hasher Hasher) -> Self {
+    pub fn from_ts(ts: &WindowedTimeseries, hasher: Arc<Hasher>) -> Self {
         println!(
             "Number of tensor repetitions: {}",
             hasher.tensor_repetitions
@@ -370,7 +367,7 @@ impl<'hasher> HashCollection<'hasher> {
     }
 }
 
-impl<'hasher> DeepSizeOf for HashCollection<'hasher> {
+impl DeepSizeOf for HashCollection {
     fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
         self.left_pools.deep_size_of() + self.right_pools.deep_size_of()
     }
@@ -383,7 +380,7 @@ pub struct HashMatrix<'hasher> {
     /// Outer vector has one entry per repetition, inner vector has one entry per subsequence,
     /// and items are hash values and indices into the timeseries
     hashes: Vec<Vec<(HashValue, usize)>>,
-    coll: &'hasher HashCollection<'hasher>,
+    coll: &'hasher HashCollection,
 }
 
 impl<'hasher> HashMatrix<'hasher> {
@@ -661,8 +658,8 @@ mod test {
 
         let repetitions = 200;
 
-        let hasher = Hasher::new(w, repetitions, 5.0, 1245);
-        let pools = HashCollection::from_ts(&ts, &hasher);
+        let hasher = Arc::new(Hasher::new(w, repetitions, 5.0, 1245));
+        let pools = HashCollection::from_ts(&ts, Arc::clone(&hasher));
 
         for &depth in &[32usize, 20, 10] {
             for i in 0..ts.num_subsequences() {

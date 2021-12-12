@@ -13,6 +13,7 @@ use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
 use std::ops::Range;
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -219,8 +220,8 @@ pub fn motifs(
 
     let hasher_width = Hasher::estimate_width(&ts, 20, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
-    let hasher = Hasher::new(ts.w, repetitions, hasher_width, seed);
-    let pools = HashCollection::from_ts(ts, &hasher);
+    let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
+    let pools = Arc::new(HashCollection::from_ts(ts, Arc::clone(&hasher)));
     println!(
         "[{:?}] Computed hash pools, taking {}",
         start.elapsed(),
@@ -269,53 +270,107 @@ pub fn motifs(
                     .collect();
                 bucket.sort();
 
-                for &(a_idx, a_offset) in bucket.iter() {
-                    let a_already_checked = &rep_bounds[a_idx];
-                    let a_hash_idx = hash_range.start + a_offset;
-                    for &(b_idx, b_offset) in bucket.iter() {
-                        //// Here we handle trivial matches: we don't consider a pair if the difference between
-                        //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
-                        if a_idx + exclusion_zone < b_idx {
-                            let b_hash_idx = hash_range.start + b_offset;
-                            let b_already_checked = &rep_bounds[b_idx];
-                            let check_a = !a_already_checked.contains(&b_hash_idx);
-                            let check_b = !b_already_checked.contains(&a_hash_idx);
-                            if check_a || check_b {
-                                rep_candidate_pairs += 1;
-                                //// We only process the pair if this is the first repetition in which
-                                //// they collide. We get this information from the pool of bits
-                                //// from which hash values for all repetitions are extracted.
-                                let first_colliding_repetition: usize = pools
-                                    .first_collision(a_idx, b_idx, depth as usize)
-                                    .expect("hashes must collide in buckets");
-                                if first_colliding_repetition == rep {
-                                    //// After computing the distance between the two subsequences,
-                                    //// we try to insert the pair in the top data structure
-                                    let d = zeucl(&ts, a_idx, b_idx);
-                                    rep_cnt_dists += 1;
+                top = bucket
+                    .iter()
+                    .flat_map(|(a_idx, a_offset)| {
+                        let pools = Arc::clone(&pools);
+                        let hasher = Arc::clone(&hasher);
+                        let a_already_checked = rep_bounds[*a_idx].clone();
+                        let a_hash_idx = hash_range.start + a_offset;
+                        bucket.iter().flat_map(move |(b_idx, b_offset)| {
+                            //// Here we handle trivial matches: we don't consider a pair if the difference between
+                            //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
+                            if *a_idx + exclusion_zone < *b_idx {
+                                let b_hash_idx = hash_range.start + b_offset;
+                                let b_already_checked = rep_bounds[*b_idx].clone();
+                                let check_a = !a_already_checked.contains(&b_hash_idx);
+                                let check_b = !b_already_checked.contains(&a_hash_idx);
+                                if check_a || check_b {
+                                    // rep_candidate_pairs += 1;
+                                    //// We only process the pair if this is the first repetition in which
+                                    //// they collide. We get this information from the pool of bits
+                                    //// from which hash values for all repetitions are extracted.
+                                    let first_colliding_repetition: usize = pools
+                                        .first_collision(*a_idx, *b_idx, depth as usize)
+                                        .expect("hashes must collide in buckets");
+                                    if first_colliding_repetition == rep {
+                                        //// After computing the distance between the two subsequences,
+                                        //// we try to insert the pair in the top data structure
+                                        let d = zeucl(&ts, *a_idx, *b_idx);
+                                        // rep_cnt_dists += 1;
 
-                                    //// We insert the motif into the `top` data structure only if
-                                    //// its distance is smaller than the k-th in in `top`.
-                                    let should_insert =
-                                        top.k_th().map(|kth| d < kth.distance).unwrap_or(true);
-                                    if should_insert {
                                         //// This is the collision probability for this distance
                                         let p = hasher.collision_probability_at(d);
 
-                                        let motif = Motif {
-                                            idx_a: a_idx,
-                                            idx_b: b_idx,
+                                        Some(Motif {
+                                            idx_a: *a_idx,
+                                            idx_b: *b_idx,
                                             distance: d,
                                             elapsed: start.elapsed(),
                                             collision_probability: p,
-                                        };
-                                        top.insert(motif);
+                                        })
+                                    } else {
+                                        None
                                     }
+                                } else {
+                                    None
                                 }
+                            } else {
+                                None
                             }
-                        }
-                    }
-                }
+                        })
+                    }).fold(top.clone(), |mut top,c| {
+                        top.insert(c);
+                        top
+                    });
+
+                // for &(a_idx, a_offset) in bucket.iter() {
+                //     let a_already_checked = &rep_bounds[a_idx];
+                //     let a_hash_idx = hash_range.start + a_offset;
+                //     for &(b_idx, b_offset) in bucket.iter() {
+                //         //// Here we handle trivial matches: we don't consider a pair if the difference between
+                //         //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
+                //         if a_idx + exclusion_zone < b_idx {
+                //             let b_hash_idx = hash_range.start + b_offset;
+                //             let b_already_checked = &rep_bounds[b_idx];
+                //             let check_a = !a_already_checked.contains(&b_hash_idx);
+                //             let check_b = !b_already_checked.contains(&a_hash_idx);
+                //             if check_a || check_b {
+                //                 rep_candidate_pairs += 1;
+                //                 //// We only process the pair if this is the first repetition in which
+                //                 //// they collide. We get this information from the pool of bits
+                //                 //// from which hash values for all repetitions are extracted.
+                //                 let first_colliding_repetition: usize = pools
+                //                     .first_collision(a_idx, b_idx, depth as usize)
+                //                     .expect("hashes must collide in buckets");
+                //                 if first_colliding_repetition == rep {
+                //                     //// After computing the distance between the two subsequences,
+                //                     //// we try to insert the pair in the top data structure
+                //                     let d = zeucl(&ts, a_idx, b_idx);
+                //                     rep_cnt_dists += 1;
+
+                //                     //// We insert the motif into the `top` data structure only if
+                //                     //// its distance is smaller than the k-th in in `top`.
+                //                     let should_insert =
+                //                         top.k_th().map(|kth| d < kth.distance).unwrap_or(true);
+                //                     if should_insert {
+                //                         //// This is the collision probability for this distance
+                //                         let p = hasher.collision_probability_at(d);
+
+                //                         let motif = Motif {
+                //                             idx_a: a_idx,
+                //                             idx_b: b_idx,
+                //                             distance: d,
+                //                             elapsed: start.elapsed(),
+                //                             collision_probability: p,
+                //                         };
+                //                         top.insert(motif);
+                //                     }
+                //                 }
+                //             }
+                //         }
+                //     }
+                // }
             }
 
             //// Now we update the bounds that have already been explored in this repetition
@@ -333,14 +388,14 @@ pub fn motifs(
             }
 
             let rep_elapsed = rep_timer.elapsed();
-            info!("completed repetition";
-                "tag" => "profiling",
-                "computed_distances" => rep_cnt_dists,
-                "candidate_pairs" => rep_candidate_pairs,
-                "depth" => depth,
-                "repetition" => rep,
-                "time_s" => rep_elapsed.as_secs_f64()
-            );
+            // info!("completed repetition";
+            //     "tag" => "profiling",
+            //     "computed_distances" => rep_cnt_dists,
+            //     "candidate_pairs" => rep_candidate_pairs,
+            //     "depth" => depth,
+            //     "repetition" => rep,
+            //     "time_s" => rep_elapsed.as_secs_f64()
+            // );
             cnt_dist.fetch_add(rep_cnt_dists, Ordering::SeqCst);
             pbar.inc(1);
 
