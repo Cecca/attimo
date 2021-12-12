@@ -271,13 +271,13 @@ pub fn motifs(
                 bucket.sort();
 
                 top = bucket
-                    .iter()
+                    .par_iter()
                     .flat_map(|(a_idx, a_offset)| {
                         let pools = Arc::clone(&pools);
                         let hasher = Arc::clone(&hasher);
                         let a_already_checked = rep_bounds[*a_idx].clone();
                         let a_hash_idx = hash_range.start + a_offset;
-                        bucket.iter().flat_map(move |(b_idx, b_offset)| {
+                        bucket.par_iter().flat_map(move |(b_idx, b_offset)| {
                             //// Here we handle trivial matches: we don't consider a pair if the difference between
                             //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
                             if *a_idx + exclusion_zone < *b_idx {
@@ -319,10 +319,10 @@ pub fn motifs(
                                 None
                             }
                         })
-                    }).fold(top.clone(), |mut top,c| {
+                    }).fold(|| top.clone(), |mut top,c| {
                         top.insert(c);
                         top
-                    });
+                    }).reduce(|| top.clone(), |mut a, b| {a.merge(&b); a});
 
                 // for &(a_idx, a_offset) in bucket.iter() {
                 //     let a_already_checked = &rep_bounds[a_idx];
