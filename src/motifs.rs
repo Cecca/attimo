@@ -269,12 +269,6 @@ pub fn motifs(
             //// Each thread works on these many buckets at one time, to reduce the
             //// overhead of scheduling.
             let chunk_size = std::cmp::max(1, n_buckets / (4 * rayon::current_num_threads()));
-            pbar.println(format!(
-                "Chunk size {}, there are {} buckets and {} threads",
-                chunk_size,
-                n_buckets,
-                rayon::current_num_threads()
-            ));
 
             (0..n_buckets / chunk_size)
                 .into_par_iter()

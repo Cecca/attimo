@@ -36,7 +36,13 @@ use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
 use std::{
-    cell::RefCell, cmp::Ordering, fmt::Debug, mem::size_of, ops::Range, sync::Arc, time::Instant,
+    cell::{RefCell, UnsafeCell},
+    cmp::Ordering,
+    fmt::Debug,
+    mem::size_of,
+    ops::Range,
+    sync::Arc,
+    time::Instant,
 };
 use thread_local::ThreadLocal;
 
@@ -133,6 +139,34 @@ impl HashValue {
 ////
 //// **TODO**: maybe give more details on the tensoring approach.
 
+//// This data structure is taken from [this StackOverflow answer](https://stackoverflow.com/questions/65178245/how-do-i-write-to-a-mutable-slice-from-multiple-threads-at-arbitrary-indexes-wit).
+//// It is simply a wrapper around a mutable slice, providing (unsafe) concurrent mutable
+//// access to its elements, without the need for synchronization primitives.
+//// We use it only in one place, when building the hash pools, when accesses to the arrays
+//// are by construction non-overlapping.
+#[derive(Copy, Clone)]
+pub struct UnsafeSlice<'a, T> {
+    slice: &'a [UnsafeCell<T>],
+}
+unsafe impl<'a, T: Send + Sync> Send for UnsafeSlice<'a, T> {}
+unsafe impl<'a, T: Send + Sync> Sync for UnsafeSlice<'a, T> {}
+
+impl<'a, T> UnsafeSlice<'a, T> {
+    pub fn new(slice: &'a mut [T]) -> Self {
+        let ptr = slice as *mut [T] as *const [UnsafeCell<T>];
+        Self {
+            slice: unsafe { &*ptr },
+        }
+    }
+
+    /// SAFETY: It is UB if two threads write to the same index without
+    /// synchronization.
+    pub unsafe fn write(&self, i: usize, value: T) {
+        let ptr = self.slice[i].get();
+        *ptr = value;
+    }
+}
+
 //// This data structure contains all the information needed to generate the hash values for all the repeititions
 //// for all the subsequences.
 pub struct HashCollection {
@@ -170,9 +204,14 @@ impl HashCollection {
         );
         let ns = ts.num_subsequences();
 
+        let mut left_pools = vec![0i8; hasher.tensor_repetitions * K_HALF * ns];
+        let mut right_pools = vec![0i8; hasher.tensor_repetitions * K_HALF * ns];
+        let uns_left_pools = UnsafeSlice::new(&mut left_pools);
+        let uns_right_pools = UnsafeSlice::new(&mut right_pools);
+
         let tl_buffer = ThreadLocal::new();
-        let tl_left_pools = ThreadLocal::new();
-        let tl_right_pools = ThreadLocal::new();
+        // let tl_left_pools = ThreadLocal::new();
+        // let tl_right_pools = ThreadLocal::new();
 
         let timer = Instant::now();
         //// Instead of doing a double nested loop over the repetitions and K, we flatten all
@@ -184,76 +223,26 @@ impl HashCollection {
                 let k = hash_idx % K;
 
                 let mut buffer = tl_buffer.get_or(|| RefCell::new(vec![0; ns])).borrow_mut();
-                let (mut pools, offset) = if k < K_HALF {
-                    (
-                        tl_left_pools
-                            .get_or(|| {
-                                RefCell::new(vec![0; hasher.tensor_repetitions * K_HALF * ns])
-                            })
-                            .borrow_mut(),
-                        k,
-                    )
+                let (pools, offset) = if k < K_HALF {
+                    (&uns_left_pools, k)
                 } else {
-                    (
-                        tl_right_pools
-                            .get_or(|| {
-                                RefCell::new(vec![0; hasher.tensor_repetitions * K_HALF * ns])
-                            })
-                            .borrow_mut(),
-                        k - K_HALF,
-                    )
+                    (&uns_right_pools, k - K_HALF)
                 };
 
                 hasher.hash_all(&ts, k, repetition, &mut buffer);
                 for (i, h) in buffer.iter().enumerate() {
                     let idx = K_HALF * ns * repetition + i * K_HALF + offset;
-                    pools[idx] = *h;
+                    //// This operation is `unsafe` but each index is accessed only once,
+                    //// so there are no data races, despite not using synchronization.
+                    unsafe { pools.write(idx, *h) };
                 }
             });
 
-        let left_pools = tl_left_pools
-            .into_iter()
-            .reduce(|buf1, buf2| {
-                {
-                    let mut b1 = buf1.borrow_mut();
-                    for (i, v) in buf2.borrow().iter().enumerate() {
-                        b1[i] += v;
-                    }
-                }
-                return buf1;
-            })
-            .unwrap()
-            .take();
-        let right_pools = tl_right_pools
-            .into_iter()
-            .reduce(|buf1, buf2| {
-                {
-                    let mut b1 = buf1.borrow_mut();
-                    for (i, v) in buf2.borrow().iter().enumerate() {
-                        b1[i] += v;
-                    }
-                }
-                return buf1;
-            })
-            .unwrap()
-            .take();
         let elapsed = timer.elapsed();
         info!("tensor pool building";
             "tag" => "profiling",
-            "time_s" => elapsed.as_secs_f64()
+            "time_s" => elapsed.as_secs_f64(),
         );
-
-        // #[cfg(debug)]
-        // {
-        //     let mut hash_hist = BTreeMap::new();
-        //     for h in &left_pools {
-        //         hash_hist.entry(h).and_modify(|c| *c += 1).or_insert(1);
-        //     }
-        //     for h in &right_pools {
-        //         hash_hist.entry(h).and_modify(|c| *c += 1).or_insert(1);
-        //     }
-        //     println!("{:#?}", hash_hist);
-        // }
 
         Self {
             hasher,
