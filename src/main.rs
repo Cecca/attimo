@@ -12,7 +12,7 @@ use std::fs::OpenOptions;
 use std::path::Path;
 use std::time::Instant;
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 #[derive(FromArgs)]
 /// ATTIMO computes ApproximaTe TImeseries MOtifs.
