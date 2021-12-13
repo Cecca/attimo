@@ -103,16 +103,16 @@ def get_datasets():
         (prefix("data/ECG.csv", 6000000), 1000),
         (prefix("data/ECG.csv", 7000000), 1000),
 
-        (prefix("data/ASTRO.csv", 100000), 500),
-        (prefix("data/ASTRO.csv", 200000), 500),
-        (prefix("data/ASTRO.csv", 300000), 500),
-        (prefix("data/ASTRO.csv", 400000), 500),
-        (prefix("data/ASTRO.csv", 500000), 500),
-        (prefix("data/ASTRO.csv", 600000), 500),
-        (prefix("data/ASTRO.csv", 700000), 500),
-        (prefix("data/ASTRO.csv", 800000), 500),
-        (prefix("data/ASTRO.csv", 900000), 500),
-        (prefix("data/ASTRO.csv", 1000000), 500),
+        (prefix("data/ASTRO.csv", 100000), 100),
+        (prefix("data/ASTRO.csv", 200000), 100),
+        (prefix("data/ASTRO.csv", 300000), 100),
+        (prefix("data/ASTRO.csv", 400000), 100),
+        (prefix("data/ASTRO.csv", 500000), 100),
+        (prefix("data/ASTRO.csv", 600000), 100),
+        (prefix("data/ASTRO.csv", 700000), 100),
+        (prefix("data/ASTRO.csv", 800000), 100),
+        (prefix("data/ASTRO.csv", 900000), 100),
+        (prefix("data/ASTRO.csv", 1000000), 100),
     ]
 
 def remove_trivial(df, w):
