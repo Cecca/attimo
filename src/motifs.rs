@@ -260,6 +260,7 @@ pub fn motifs(
             let mut rep_candidate_pairs = 0usize;
             let rep_timer = Instant::now();
             let buckets = hashes.buckets_vec(depth as usize, rep);
+            pbar.println(format!("There are {} buckets", buckets.len()));
 
             for (hash_range, bucket) in buckets.iter() {
                 let pools = Arc::clone(&pools);

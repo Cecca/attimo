@@ -242,16 +242,16 @@ impl HashCollection {
         );
 
         // #[cfg(debug)]
-        {
-            let mut hash_hist = BTreeMap::new();
-            for h in &left_pools {
-                hash_hist.entry(h).and_modify(|c| *c += 1).or_insert(1);
-            }
-            for h in &right_pools {
-                hash_hist.entry(h).and_modify(|c| *c += 1).or_insert(1);
-            }
-            println!("{:#?}", hash_hist);
-        }
+        // {
+        //     let mut hash_hist = BTreeMap::new();
+        //     for h in &left_pools {
+        //         hash_hist.entry(h).and_modify(|c| *c += 1).or_insert(1);
+        //     }
+        //     for h in &right_pools {
+        //         hash_hist.entry(h).and_modify(|c| *c += 1).or_insert(1);
+        //     }
+        //     println!("{:#?}", hash_hist);
+        // }
 
         Self {
             hasher,
