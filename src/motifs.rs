@@ -243,7 +243,8 @@ pub fn motifs(
     let mut stop = false;
 
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
-    let mut depth = crate::lsh::K as isize;
+    // let mut depth = crate::lsh::K as isize;
+    let mut depth = hashes.non_trivial_depth(exclusion_zone) as isize;
     while depth >= 0 && !stop {
         let depth_timer = Instant::now();
         let pbar = ProgressBar::new(repetitions as u64);
@@ -260,7 +261,7 @@ pub fn motifs(
             let mut rep_candidate_pairs = 0usize;
             let rep_timer = Instant::now();
             let buckets = hashes.buckets_vec(depth as usize, rep);
-            pbar.println(format!("There are {} buckets", buckets.len()));
+            // pbar.println(format!("There are {} buckets", buckets.len()));
 
             for (hash_range, bucket) in buckets.iter() {
                 let pools = Arc::clone(&pools);

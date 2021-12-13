@@ -35,7 +35,10 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
-use std::{cell::RefCell, cmp::Ordering, collections::BTreeMap, fmt::Debug, mem::size_of, ops::Range, rc::Rc, sync::Arc, time::Instant};
+use std::{
+    cell::RefCell, cmp::Ordering, collections::BTreeMap, fmt::Debug, mem::size_of, ops::Range,
+    rc::Rc, sync::Arc, time::Instant,
+};
 use thread_local::ThreadLocal;
 
 //// ## Hash values
@@ -298,7 +301,7 @@ impl HashCollection {
         let mut iidx = i * K_HALF;
         let mut jidx = j * K_HALF;
         for rep in 0..self.hasher.tensor_repetitions {
-            if unsafe{
+            if unsafe {
                 let hi = &self.left_pools.get_unchecked(iidx..iidx + depth_l);
                 let hj = &self.left_pools.get_unchecked(jidx..jidx + depth_l);
                 hi == hj
@@ -321,7 +324,7 @@ impl HashCollection {
         let mut iidx = i * K_HALF;
         let mut jidx = j * K_HALF;
         for rep in 0..self.hasher.tensor_repetitions {
-            if unsafe{
+            if unsafe {
                 let hi = &self.right_pools.get_unchecked(iidx..iidx + depth_r);
                 let hj = &self.right_pools.get_unchecked(jidx..jidx + depth_r);
                 hi == hj
@@ -452,6 +455,43 @@ impl<'hasher> HashMatrix<'hasher> {
         );
 
         res
+    }
+
+    /// Return the deepest level of the tree such that there
+    /// is at least one subtree with more than two leaves
+    pub fn non_trivial_depth(&self, exclusion_zone: usize) -> usize {
+        let timer = Instant::now();
+        let repetition = 0;
+        let column = &self.hashes[repetition];
+
+        let mut depth = K;
+        while depth > 0 {
+            let mut idx = 0;
+            while idx < column.len() {
+                let start = idx;
+                let current = &column[idx].0;
+                let mut min_i = column[idx].1;
+                let mut max_i = column[idx].1;
+                while idx < column.len() && column[idx].0.prefix_eq(current, depth) {
+                    min_i = std::cmp::min(min_i, column[idx].1);
+                    max_i = std::cmp::max(max_i, column[idx].1);
+                    idx += 1;
+                }
+                //// We return only if the bucket contains a non-trivial match
+                if idx - start > 1 && min_i + exclusion_zone < max_i {
+                    return depth;
+                }
+            }
+
+            depth -= 1;
+        }
+
+        info!("finding non-trivial depth";
+            "tag" => "profiling",
+            "time_s" => timer.elapsed().as_secs_f64()
+        );
+
+        0
     }
 }
 
@@ -597,9 +637,9 @@ impl Hasher {
         println!("lower and upper {} {}", lower, upper);
 
         if upper > lower {
-            (upper - lower) / 2.0
+            (upper - lower) / 8.0
         } else {
-            (max_dotp - min_dotp) / 2.0
+            (max_dotp - min_dotp) / 8.0
         }
     }
 
