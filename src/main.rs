@@ -1,5 +1,6 @@
 use anyhow::Result;
 use argh::FromArgs;
+use attimo::allocator::{self, CountingAllocator};
 use attimo::distance::zeucl;
 use attimo::load::*;
 use attimo::motifs::{motifs, Motif};
@@ -10,9 +11,14 @@ use slog::*;
 use slog_scope::GlobalLoggerGuard;
 use std::fs::OpenOptions;
 use std::path::Path;
-use std::time::Instant;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 const VERSION: u32 = 2;
+
+#[global_allocator]
+static A: CountingAllocator = CountingAllocator;
 
 #[derive(FromArgs)]
 /// ATTIMO computes ApproximaTe TImeseries MOtifs.
@@ -87,6 +93,9 @@ fn main() -> Result<()> {
     // read configuration
     let config: Config = argh::from_env();
 
+    let monitor_flag = Arc::new(AtomicBool::new(true));
+    let monitor = allocator::monitor(Duration::from_secs(1), Arc::clone(&monitor_flag));
+
     let _guard = setup_logger(&config.log_path)?;
     let path = config.path;
     let w = config.window;
@@ -111,6 +120,9 @@ fn main() -> Result<()> {
         config.delta,
         config.seed,
     );
+
+    monitor_flag.store(false, std::sync::atomic::Ordering::SeqCst);
+    monitor.join().unwrap();
 
     output_csv(&config.output, &motifs)?;
 

@@ -3,6 +3,7 @@
 #![feature(map_first_last)]
 #![feature(string_remove_matches)]
 
+pub mod allocator;
 pub mod distance;
 pub mod load;
 pub mod lsh;
