@@ -8,7 +8,6 @@
 use crate::distance::*;
 use crate::lsh::*;
 use crate::timeseries::*;
-use crossbeam_channel::unbounded;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use rayon::prelude::*;

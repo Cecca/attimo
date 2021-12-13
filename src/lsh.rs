@@ -36,8 +36,7 @@ use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
 use std::{
-    cell::RefCell, cmp::Ordering, collections::BTreeMap, fmt::Debug, mem::size_of, ops::Range,
-    rc::Rc, sync::Arc, time::Instant,
+    cell::RefCell, cmp::Ordering, fmt::Debug, mem::size_of, ops::Range, sync::Arc, time::Instant,
 };
 use thread_local::ThreadLocal;
 
