@@ -315,7 +315,7 @@ impl DeepSizeOf for WindowedTimeseries {
 
 #[cfg(test)]
 mod test {
-    use crate::{distance::zeucl, timeseries::WindowedTimeseries};
+    use crate::{timeseries::WindowedTimeseries};
 
     #[test]
     fn test_sliding_dot_product() {

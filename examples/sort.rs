@@ -3,11 +3,11 @@ use attimo::{
     sort::RadixSort,
     timeseries::WindowedTimeseries,
 };
-use rand::SeedableRng;
-use rand_distr::{Distribution, Geometric, Uniform};
-use rand_xoshiro::Xoroshiro128PlusPlus;
-use std::{sync::Arc, time::Duration};
-use std::{rc::Rc, time::Instant};
+
+use rand_distr::{Distribution};
+
+use std::{sync::Arc};
+use std::{time::Instant};
 
 fn main() {
     let n = std::env::args().nth(1).unwrap().parse::<usize>().unwrap();
