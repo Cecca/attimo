@@ -48,7 +48,7 @@ use thread_local::ThreadLocal;
 //// vector, rather than falling back to vector of vectors. Removing this dereference allows for
 //// a rather large speed up.
 //// Also, it is one fewer parameter for the user to set.
-pub const K: usize = 32;
+pub const K: usize = 64;
 pub const K_HALF: usize = K / 2;
 
 //// That said, here is the definition of a hash value, with several
