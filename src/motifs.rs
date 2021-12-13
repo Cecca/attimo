@@ -18,6 +18,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
+use crossbeam_channel::unbounded;
 
 //// ## Support data structures
 //// ### Motifs
@@ -260,74 +261,80 @@ pub fn motifs(
             let rep_timer = Instant::now();
             let buckets = hashes.buckets_vec(depth as usize, rep);
 
-            for (hash_range, bucket) in buckets.iter() {
-                //// We first sort by index, which improves locality in accessing the
-                //// subsequences of the time series
-                let mut bucket: Vec<(usize, usize)> = bucket
-                    .iter()
-                    .enumerate()
-                    .map(|(offset, (_, idx))| (*idx, offset))
-                    .collect();
-                bucket.sort();
+            let (send_top, recv_top) = unbounded();
 
-                top = bucket
-                    .par_iter()
-                    .flat_map(|(a_idx, a_offset)| {
-                        let rep_cnt_dists = Arc::clone(&rep_cnt_dists);
-                        let rep_candidate_pairs = Arc::clone(&rep_candidate_pairs);
-                        let pools = Arc::clone(&pools);
-                        let hasher = Arc::clone(&hasher);
-                        let a_already_checked = rep_bounds[*a_idx].clone();
-                        let a_hash_idx = hash_range.start + a_offset;
-                        bucket.par_iter().flat_map(move |(b_idx, b_offset)| {
-                            let rep_cnt_dists = Arc::clone(&rep_cnt_dists);
-                            let rep_candidate_pairs = Arc::clone(&rep_candidate_pairs);
-                            //// Here we handle trivial matches: we don't consider a pair if the difference between
-                            //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
-                            if *a_idx + exclusion_zone < *b_idx {
-                                let b_hash_idx = hash_range.start + b_offset;
-                                let b_already_checked = rep_bounds[*b_idx].clone();
-                                let check_a = !a_already_checked.contains(&b_hash_idx);
-                                let check_b = !b_already_checked.contains(&a_hash_idx);
-                                if check_a || check_b {
-                                    rep_candidate_pairs.fetch_add(1, Ordering::SeqCst);
-                                    //// We only process the pair if this is the first repetition in which
-                                    //// they collide. We get this information from the pool of bits
-                                    //// from which hash values for all repetitions are extracted.
-                                    let first_colliding_repetition: usize = pools
-                                        .first_collision(*a_idx, *b_idx, depth as usize)
-                                        .expect("hashes must collide in buckets");
-                                    if first_colliding_repetition == rep {
-                                        //// After computing the distance between the two subsequences,
-                                        //// we try to insert the pair in the top data structure
-                                        let d = zeucl(&ts, *a_idx, *b_idx);
-                                        rep_cnt_dists.fetch_add(1, Ordering::SeqCst);
+            rayon::scope(|s| {
+                for (hash_range, bucket) in buckets.iter() {
+                    let rep_cnt_dists = Arc::clone(&rep_cnt_dists);
+                    let rep_candidate_pairs = Arc::clone(&rep_candidate_pairs);
+                    let pools = Arc::clone(&pools);
+                    let hasher = Arc::clone(&hasher);
+                    let mut local_top = top.clone();
+                    let send_top = send_top.clone();
+                    s.spawn(move |_| {
+                        //// We first sort by index, which improves locality in accessing the
+                        //// subsequences of the time series
+                        let mut bucket: Vec<(usize, usize)> = bucket
+                            .iter()
+                            .enumerate()
+                            .map(|(offset, (_, idx))| (*idx, offset))
+                            .collect();
+                        bucket.sort();
 
-                                        //// This is the collision probability for this distance
-                                        let p = hasher.collision_probability_at(d);
+                        for (a_idx, a_offset) in &bucket {
+                            let a_already_checked = rep_bounds[*a_idx].clone();
+                            let a_hash_idx = hash_range.start + a_offset;
+                            for (b_idx, b_offset) in &bucket {
+                                let rep_cnt_dists = Arc::clone(&rep_cnt_dists);
+                                let rep_candidate_pairs = Arc::clone(&rep_candidate_pairs);
+                                //// Here we handle trivial matches: we don't consider a pair if the difference between
+                                //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
+                                if *a_idx + exclusion_zone < *b_idx {
+                                    let b_hash_idx = hash_range.start + b_offset;
+                                    let b_already_checked = rep_bounds[*b_idx].clone();
+                                    let check_a = !a_already_checked.contains(&b_hash_idx);
+                                    let check_b = !b_already_checked.contains(&a_hash_idx);
+                                    if check_a || check_b {
+                                        rep_candidate_pairs.fetch_add(1, Ordering::SeqCst);
+                                        //// We only process the pair if this is the first repetition in which
+                                        //// they collide. We get this information from the pool of bits
+                                        //// from which hash values for all repetitions are extracted.
+                                        let first_colliding_repetition: usize = pools
+                                            .first_collision(*a_idx, *b_idx, depth as usize)
+                                            .expect("hashes must collide in buckets");
+                                        if first_colliding_repetition == rep {
+                                            //// After computing the distance between the two subsequences,
+                                            //// we try to insert the pair in the top data structure
+                                            let d = zeucl(&ts, *a_idx, *b_idx);
+                                            rep_cnt_dists.fetch_add(1, Ordering::SeqCst);
 
-                                        Some(Motif {
-                                            idx_a: *a_idx,
-                                            idx_b: *b_idx,
-                                            distance: d,
-                                            elapsed: start.elapsed(),
-                                            collision_probability: p,
-                                        })
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
+                                            //// This is the collision probability for this distance
+                                            let p = hasher.collision_probability_at(d);
+
+                                            let m  = Motif {
+                                                idx_a: *a_idx,
+                                                idx_b: *b_idx,
+                                                distance: d,
+                                                elapsed: start.elapsed(),
+                                                collision_probability: p,
+                                            };
+                                            local_top.insert(m);
+                                        } 
+                                    } 
+                                } 
                             }
-                        })
-                    }).fold(|| top.clone(), |mut top,c| {
-                        top.insert(c);
-                        top
-                    }).reduce(|| top.clone(), |mut a, b| {a.merge(&b); a});
+                        }
 
+                        send_top.send(local_top).unwrap();
+                        drop(send_top);
+                    });
+                }
+            });
+            drop(send_top);
+
+            //// This loop in the main thread merges all the partial results
+            for part_top in recv_top {
+                top.merge(&part_top);
             }
 
             //// Now we update the bounds that have already been explored in this repetition
