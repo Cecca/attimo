@@ -13,12 +13,14 @@ use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
+use std::cell::RefCell;
 use std::ops::Range;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
+use thread_local::ThreadLocal;
 
 //// ## Support data structures
 //// ### Motifs
@@ -257,66 +259,140 @@ pub fn motifs(
 
         for rep in 0..repetitions {
             let rep_bounds = &bounds[rep];
-            let mut rep_cnt_dists = 0usize;
-            let mut rep_candidate_pairs = 0usize;
+            let rep_cnt_dists = AtomicUsize::new(0);
+            let rep_candidate_pairs = AtomicUsize::new(0);
             let rep_timer = Instant::now();
             let buckets = hashes.buckets_vec(depth as usize, rep);
-            // pbar.println(format!("There are {} buckets", buckets.len()));
+            let n_buckets = buckets.len();
 
-            for (hash_range, bucket) in buckets.iter() {
-                let pools = Arc::clone(&pools);
-                let hasher = Arc::clone(&hasher);
-                //// We first sort by index, which improves locality in accessing the
-                //// subsequences of the time series
-                let mut bucket: Vec<(usize, usize)> = bucket
-                    .iter()
-                    .enumerate()
-                    .map(|(offset, (_, idx))| (*idx, offset))
-                    .collect();
-                bucket.sort();
+            let tl_top = ThreadLocal::new();
 
-                for (a_idx, a_offset) in &bucket {
-                    let a_already_checked = rep_bounds[*a_idx].clone();
-                    let a_hash_idx = hash_range.start + a_offset;
-                    for (b_idx, b_offset) in &bucket {
-                        //// Here we handle trivial matches: we don't consider a pair if the difference between
-                        //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
-                        if *a_idx + exclusion_zone < *b_idx {
-                            let b_hash_idx = hash_range.start + b_offset;
-                            let b_already_checked = rep_bounds[*b_idx].clone();
-                            let check_a = !a_already_checked.contains(&b_hash_idx);
-                            let check_b = !b_already_checked.contains(&a_hash_idx);
-                            if check_a || check_b {
-                                rep_candidate_pairs += 1;
-                                //// We only process the pair if this is the first repetition in which
-                                //// they collide. We get this information from the pool of bits
-                                //// from which hash values for all repetitions are extracted.
-                                let first_colliding_repetition: usize = pools
-                                    .first_collision(*a_idx, *b_idx, depth as usize)
-                                    .expect("hashes must collide in buckets");
-                                if first_colliding_repetition == rep {
-                                    //// After computing the distance between the two subsequences,
-                                    //// we try to insert the pair in the top data structure
-                                    let d = zeucl(&ts, *a_idx, *b_idx);
-                                    rep_cnt_dists += 1;
+            //// Each thread works on these many buckets at one time, to reduce the
+            //// overhead of scheduling.
+            let chunk_size = std::cmp::max(1, n_buckets / (4 * rayon::current_num_threads()));
+            pbar.println(format!(
+                "Chunk size {}, there are {} buckets and {} threads",
+                chunk_size,
+                n_buckets,
+                rayon::current_num_threads()
+            ));
 
-                                    //// This is the collision probability for this distance
-                                    let p = hasher.collision_probability_at(d);
+            (0..n_buckets / chunk_size)
+                .into_par_iter()
+                .for_each(|chunk_i| {
+                    let tl_top = tl_top.get_or(|| RefCell::new(top.clone()));
+                    for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
+                        let (hash_range, bucket) = &buckets[i];
+                        let mut bucket: Vec<(usize, usize)> = bucket
+                            .iter()
+                            .enumerate()
+                            .map(|(offset, (_, idx))| (*idx, offset))
+                            .collect();
+                        bucket.sort();
 
-                                    let m = Motif {
-                                        idx_a: *a_idx,
-                                        idx_b: *b_idx,
-                                        distance: d,
-                                        elapsed: start.elapsed(),
-                                        collision_probability: p,
-                                    };
-                                    top.insert(m);
+                        for (a_idx, a_offset) in &bucket {
+                            let a_already_checked = rep_bounds[*a_idx].clone();
+                            let a_hash_idx = hash_range.start + a_offset;
+                            for (b_idx, b_offset) in &bucket {
+                                //// Here we handle trivial matches: we don't consider a pair if the difference between
+                                //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
+                                if *a_idx + exclusion_zone < *b_idx {
+                                    let b_hash_idx = hash_range.start + b_offset;
+                                    let b_already_checked = rep_bounds[*b_idx].clone();
+                                    let check_a = !a_already_checked.contains(&b_hash_idx);
+                                    let check_b = !b_already_checked.contains(&a_hash_idx);
+                                    if check_a || check_b {
+                                        rep_candidate_pairs.fetch_add(1, Ordering::SeqCst);
+                                        //// We only process the pair if this is the first repetition in which
+                                        //// they collide. We get this information from the pool of bits
+                                        //// from which hash values for all repetitions are extracted.
+                                        let first_colliding_repetition: usize = pools
+                                            .first_collision(*a_idx, *b_idx, depth as usize)
+                                            .expect("hashes must collide in buckets");
+                                        if first_colliding_repetition == rep {
+                                            //// After computing the distance between the two subsequences,
+                                            //// we try to insert the pair in the top data structure
+                                            let d = zeucl(&ts, *a_idx, *b_idx);
+                                            rep_cnt_dists.fetch_add(1, Ordering::SeqCst);
+
+                                            //// This is the collision probability for this distance
+                                            let p = hasher.collision_probability_at(d);
+
+                                            let m = Motif {
+                                                idx_a: *a_idx,
+                                                idx_b: *b_idx,
+                                                distance: d,
+                                                elapsed: start.elapsed(),
+                                                collision_probability: p,
+                                            };
+                                            tl_top.borrow_mut().insert(m);
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                }
+                });
+
+            //// Now merge the information from the thread local tops
+            for tl_top in tl_top.into_iter() {
+                top.merge(&tl_top.borrow());
             }
+
+            // for (hash_range, bucket) in buckets.iter() {
+            //     let pools = Arc::clone(&pools);
+            //     let hasher = Arc::clone(&hasher);
+            //     //// We first sort by index, which improves locality in accessing the
+            //     //// subsequences of the time series
+            //     let mut bucket: Vec<(usize, usize)> = bucket
+            //         .iter()
+            //         .enumerate()
+            //         .map(|(offset, (_, idx))| (*idx, offset))
+            //         .collect();
+            //     bucket.sort();
+
+            //     for (a_idx, a_offset) in &bucket {
+            //         let a_already_checked = rep_bounds[*a_idx].clone();
+            //         let a_hash_idx = hash_range.start + a_offset;
+            //         for (b_idx, b_offset) in &bucket {
+            //             //// Here we handle trivial matches: we don't consider a pair if the difference between
+            //             //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
+            //             if *a_idx + exclusion_zone < *b_idx {
+            //                 let b_hash_idx = hash_range.start + b_offset;
+            //                 let b_already_checked = rep_bounds[*b_idx].clone();
+            //                 let check_a = !a_already_checked.contains(&b_hash_idx);
+            //                 let check_b = !b_already_checked.contains(&a_hash_idx);
+            //                 if check_a || check_b {
+            //                     rep_candidate_pairs += 1;
+            //                     //// We only process the pair if this is the first repetition in which
+            //                     //// they collide. We get this information from the pool of bits
+            //                     //// from which hash values for all repetitions are extracted.
+            //                     let first_colliding_repetition: usize = pools
+            //                         .first_collision(*a_idx, *b_idx, depth as usize)
+            //                         .expect("hashes must collide in buckets");
+            //                     if first_colliding_repetition == rep {
+            //                         //// After computing the distance between the two subsequences,
+            //                         //// we try to insert the pair in the top data structure
+            //                         let d = zeucl(&ts, *a_idx, *b_idx);
+            //                         rep_cnt_dists += 1;
+
+            //                         //// This is the collision probability for this distance
+            //                         let p = hasher.collision_probability_at(d);
+
+            //                         let m = Motif {
+            //                             idx_a: *a_idx,
+            //                             idx_b: *b_idx,
+            //                             distance: d,
+            //                             elapsed: start.elapsed(),
+            //                             collision_probability: p,
+            //                         };
+            //                         top.insert(m);
+            //                     }
+            //                 }
+            //             }
+            //         }
+            //     }
+            // }
 
             //// Now we update the bounds that have already been explored in this repetition
             //// for each node. This works and can be done here instead of the loop above
@@ -335,13 +411,13 @@ pub fn motifs(
             let rep_elapsed = rep_timer.elapsed();
             info!("completed repetition";
                 "tag" => "profiling",
-                "computed_distances" => rep_cnt_dists,
-                "candidate_pairs" => rep_candidate_pairs,
+                "computed_distances" => rep_cnt_dists.load(Ordering::SeqCst),
+                "candidate_pairs" => rep_candidate_pairs.load(Ordering::SeqCst),
                 "depth" => depth,
                 "repetition" => rep,
                 "time_s" => rep_elapsed.as_secs_f64()
             );
-            cnt_dist.fetch_add(rep_cnt_dists, Ordering::SeqCst);
+            cnt_dist.fetch_add(rep_cnt_dists.load(Ordering::SeqCst), Ordering::SeqCst);
             pbar.inc(1);
 
             //// Now we check the stopping condition. If we have seen enough
@@ -354,8 +430,13 @@ pub fn motifs(
             if let Some(kth) = top.k_th() {
                 let threshold = ((1.0 / delta).ln() / kth.collision_probability.powi(depth as i32))
                     .ceil() as usize;
-                pbar.println(format!("Rep {}, threshold {} ({:?}, {} dists)", 
-                rep, threshold, rep_elapsed, rep_cnt_dists));
+                pbar.println(format!(
+                    "Rep {}, threshold {} ({:?}, {} dists)",
+                    rep,
+                    threshold,
+                    rep_elapsed,
+                    rep_cnt_dists.load(Ordering::SeqCst)
+                ));
                 info!("check stopping condition"; "threshold" => threshold);
                 if rep >= threshold {
                     stop = true;
