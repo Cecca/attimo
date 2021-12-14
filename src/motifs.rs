@@ -329,61 +329,6 @@ pub fn motifs(
                 top.merge(&tl_top.borrow());
             }
 
-            // for (hash_range, bucket) in buckets.iter() {
-            //     let pools = Arc::clone(&pools);
-            //     let hasher = Arc::clone(&hasher);
-            //     //// We first sort by index, which improves locality in accessing the
-            //     //// subsequences of the time series
-            //     let mut bucket: Vec<(usize, usize)> = bucket
-            //         .iter()
-            //         .enumerate()
-            //         .map(|(offset, (_, idx))| (*idx, offset))
-            //         .collect();
-            //     bucket.sort();
-
-            //     for (a_idx, a_offset) in &bucket {
-            //         let a_already_checked = rep_bounds[*a_idx].clone();
-            //         let a_hash_idx = hash_range.start + a_offset;
-            //         for (b_idx, b_offset) in &bucket {
-            //             //// Here we handle trivial matches: we don't consider a pair if the difference between
-            //             //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
-            //             if *a_idx + exclusion_zone < *b_idx {
-            //                 let b_hash_idx = hash_range.start + b_offset;
-            //                 let b_already_checked = rep_bounds[*b_idx].clone();
-            //                 let check_a = !a_already_checked.contains(&b_hash_idx);
-            //                 let check_b = !b_already_checked.contains(&a_hash_idx);
-            //                 if check_a || check_b {
-            //                     rep_candidate_pairs += 1;
-            //                     //// We only process the pair if this is the first repetition in which
-            //                     //// they collide. We get this information from the pool of bits
-            //                     //// from which hash values for all repetitions are extracted.
-            //                     let first_colliding_repetition: usize = pools
-            //                         .first_collision(*a_idx, *b_idx, depth as usize)
-            //                         .expect("hashes must collide in buckets");
-            //                     if first_colliding_repetition == rep {
-            //                         //// After computing the distance between the two subsequences,
-            //                         //// we try to insert the pair in the top data structure
-            //                         let d = zeucl(&ts, *a_idx, *b_idx);
-            //                         rep_cnt_dists += 1;
-
-            //                         //// This is the collision probability for this distance
-            //                         let p = hasher.collision_probability_at(d);
-
-            //                         let m = Motif {
-            //                             idx_a: *a_idx,
-            //                             idx_b: *b_idx,
-            //                             distance: d,
-            //                             elapsed: start.elapsed(),
-            //                             collision_probability: p,
-            //                         };
-            //                         top.insert(m);
-            //                     }
-            //                 }
-            //             }
-            //         }
-            //     }
-            // }
-
             //// Now we update the bounds that have already been explored in this repetition
             //// for each node. This works and can be done here instead of the loop above
             //// because each subsequence falls into a single bucket in any given
@@ -421,7 +366,7 @@ pub fn motifs(
                 let threshold = ((1.0 / delta).ln() / kth.collision_probability.powi(depth as i32))
                     .ceil() as usize;
                 pbar.println(format!(
-                    "Rep {}, threshold {} - d={} ({:?}, {} dists {} cands)",
+                    "Rep {}, threshold {} - d={:.3} ({:?}, {} dists {} cands)",
                     rep,
                     threshold,
                     kth.distance,
