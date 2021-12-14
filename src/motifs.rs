@@ -220,7 +220,7 @@ pub fn motifs(
         "exclusion_zone" => exclusion_zone
     );
 
-    let hasher_width = Hasher::estimate_width(&ts, 20, seed);
+    let hasher_width = Hasher::estimate_width(&ts, 5, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
     let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
     let pools = Arc::new(HashCollection::from_ts(ts, Arc::clone(&hasher)));
@@ -424,11 +424,13 @@ pub fn motifs(
                 let threshold = ((1.0 / delta).ln() / kth.collision_probability.powi(depth as i32))
                     .ceil() as usize;
                 pbar.println(format!(
-                    "Rep {}, threshold {} ({:?}, {} dists)",
+                    "Rep {}, threshold {} - d={} ({:?}, {} dists {} cands)",
                     rep,
                     threshold,
+                    kth.distance,
                     rep_elapsed,
-                    rep_cnt_dists.load(Ordering::SeqCst)
+                    rep_cnt_dists.load(Ordering::SeqCst),
+                    rep_candidate_pairs.load(Ordering::SeqCst),
                 ));
                 info!("check stopping condition"; "threshold" => threshold);
                 if rep >= threshold {

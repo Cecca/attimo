@@ -26,10 +26,11 @@
 //// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
-use crate::sort::*;
 use crate::timeseries::WindowedTimeseries;
+use crate::{distance::zeucl, sort::*};
 use deepsize::DeepSizeOf;
 use rand::prelude::*;
+use rand_distr::uniform::{UniformInt, UniformSampler};
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
@@ -551,84 +552,64 @@ impl Hasher {
     ////
     //// By instead relying on the distribution, we select the width in a data-adaptive way.
     pub fn estimate_width(ts: &WindowedTimeseries, samples: usize, seed: u64) -> f64 {
-        let mut min_dotp = f64::INFINITY;
-        let mut max_dotp = f64::NEG_INFINITY;
+        let normal = NormalDistr::new(0.0, 1.0).unwrap();
+
+        //// This function allows to compute the probability of collision at a given
+        //// distance for a given quantization width.
+        let cp = |r: f64, d: f64| {
+            1.0 - 2.0 * normal.cdf(-r / d)
+                - (2.0 / ((std::f64::consts::PI * 2.0).sqrt() * (r / d)))
+                    * (1.0 - (-r * r / (2.0 * d * d)).exp())
+        };
+
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        let normal = Normal::new(0.0, 1.0).expect("problem instantiating normal distribution");
-        let mut v = Vec::with_capacity(ts.w);
-        let mut buf = vec![0.0; ts.num_subsequences()];
-        let mut histogram_pos: Vec<usize> = Vec::new();
-        let mut histogram_neg: Vec<usize> = Vec::new();
-        let bin_width = 1.0;
-        for _ in 0..samples {
-            v.clear();
-            for x in normal.sample_iter(&mut rng).take(ts.w) {
-                v.push(x);
-            }
-            ts.znormalized_sliding_dot_product(&v, &mut buf);
-            for &x in buf.iter() {
-                if x >= 0.0 {
-                    let bin = ((x / bin_width).floor()) as usize;
-                    if bin >= histogram_pos.len() {
-                        histogram_pos.resize(bin + 1, 0);
-                    }
-                    histogram_pos[bin] += 1;
-                } else {
-                    let bin = ((-x / bin_width).floor()) as usize;
-                    if bin >= histogram_neg.len() {
-                        histogram_neg.resize(bin + 1, 0);
-                    }
-                    histogram_neg[bin] += 1;
-                }
-            }
-            let min = *buf
-                .iter()
-                .min_by(|x, y| x.partial_cmp(y).unwrap_or_else(|| panic!("{}, {}", x, y)))
-                .unwrap();
-            let max = *buf.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
-            if min < min_dotp {
-                min_dotp = min;
-            }
-            if max > max_dotp {
-                max_dotp = max;
-            }
-            info!("estimating width"; "min_dotp" => min_dotp, "max_dotp" => max_dotp);
-        }
 
-        #[cfg(debug)]
-        {
-            println!(
-                "minimum and maximum inner products: {} {}",
-                min_dotp, max_dotp
-            );
-            println!("Histogram of inner products");
-            for (i, c) in histogram_neg.iter().enumerate().rev() {
-                println!("{:.3} {}", -(i as f64) * bin_width, c);
-            }
-            for (i, c) in histogram_pos.iter().enumerate() {
-                println!("{:.3} {}", (i as f64) * bin_width, c);
-            }
-        }
+        let (d1, d2, c) = Uniform::new(0usize, ts.num_subsequences())
+            .sample_iter(&mut rng)
+            .take(samples)
+            .map(|i| {
+                let dp = ts.distance_profile(i, zeucl);
+                let mut dp: Vec<f64> = dp
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(j, d)| {
+                        if (i as isize - j as isize).abs() < ts.w as isize {
+                            None
+                        } else {
+                            Some(d)
+                        }
+                    })
+                    .collect();
+                dp.sort_by(|a, b| a.partial_cmp(&b).unwrap());
+                let d1 = dp[1];
+                let d2 = dp[2];
+                let c = d2 / d1;
+                (d1, d2, c)
+            })
+            .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
+            .unwrap();
 
-        let total = histogram_neg.iter().sum::<usize>() + histogram_pos.iter().sum::<usize>();
-        let target = 3 * total / 4;
-        let mut count = 0;
-        let mut i = 0;
-        while count < target {
-            count += histogram_neg[i] + histogram_pos[i];
-            i += 1;
-        }
-
-        let lower = -((i - 1) as f64) * bin_width;
-        let upper = (i - 1) as f64 * bin_width;
-        #[cfg(debug)]
-        println!("lower and upper {} {}", lower, upper);
-
-        if upper > lower {
-            (upper - lower) / 8.0
-        } else {
-            (max_dotp - min_dotp) / 8.0
-        }
+        let (rho, r, p1, p2) = (1..1000)
+            .map(|x| x as f64 / 10.0)
+            .map(|r| {
+                let p1 = cp(r, d1);
+                let p2 = cp(r, d2);
+                let rho = p1.ln() / p2.ln();
+                (rho, r, p1, p2)
+            })
+            .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
+            .unwrap();
+        println!(
+            "d1={:.2} d2={:.2} 1/c={:.3} rho={:.3} with r={}, p1={}, p2={}",
+            d1,
+            d2,
+            1.0 / c,
+            rho,
+            r,
+            p1,
+            p2
+        );
+        r
     }
 
     fn get_vector(&self, repetition: usize, concat: usize) -> &'_ [f64] {
@@ -648,6 +629,7 @@ impl Hasher {
         assert!(buffer.len() == ts.num_subsequences());
         let v = self.get_vector(repetition, k);
         let shift = self.shifts[repetition * K + k];
+        let mut cnt_oob = 0;
         DOTP_BUFFER.with(|dotp_buf| {
             ts.znormalized_sliding_dot_product(v, &mut dotp_buf.borrow_mut());
             for (i, dotp) in dotp_buf.borrow().iter().enumerate() {
@@ -656,8 +638,10 @@ impl Hasher {
                 //// in a i8. These cases, due to our choice of the quantization width for
                 //// the hash function, should happen rather rarely.
                 let h = if h > 128.0 {
+                    cnt_oob += 1;
                     128.0
                 } else if h < -127.0 {
+                    cnt_oob += 1;
                     -127.0
                 } else {
                     h
