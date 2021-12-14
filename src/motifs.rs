@@ -243,6 +243,9 @@ pub fn motifs(
 
     let mut stop = false;
 
+    //// This vector holds the boundaries between buckets. We reuse the allocations
+    let mut buckets = Vec::new();
+
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
     // let mut depth = crate::lsh::K as isize;
     let mut depth = hashes.non_trivial_depth(exclusion_zone) as isize;
@@ -261,7 +264,7 @@ pub fn motifs(
             let rep_cnt_dists = AtomicUsize::new(0);
             let rep_candidate_pairs = AtomicUsize::new(0);
             let rep_timer = Instant::now();
-            let buckets = hashes.buckets_vec(depth as usize, rep);
+            hashes.buckets_vec(depth as usize, rep, &mut buckets);
             let n_buckets = buckets.len();
 
             let tl_top = ThreadLocal::new();
@@ -276,17 +279,11 @@ pub fn motifs(
                     let tl_top = tl_top.get_or(|| RefCell::new(top.clone()));
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
                         let (hash_range, bucket) = &buckets[i];
-                        let mut bucket: Vec<(usize, usize)> = bucket
-                            .iter()
-                            .enumerate()
-                            .map(|(offset, (_, idx))| (*idx, offset))
-                            .collect();
-                        bucket.sort();
 
-                        for (a_idx, a_offset) in &bucket {
+                        for (a_offset, (_, a_idx)) in bucket.iter().enumerate() {
                             let a_already_checked = rep_bounds[*a_idx].clone();
                             let a_hash_idx = hash_range.start + a_offset;
-                            for (b_idx, b_offset) in &bucket {
+                            for (b_offset, (_, b_idx)) in bucket.iter().enumerate() {
                                 //// Here we handle trivial matches: we don't consider a pair if the difference between
                                 //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
                                 if *a_idx + exclusion_zone < *b_idx {

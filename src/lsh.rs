@@ -422,11 +422,12 @@ impl<'hasher> HashMatrix<'hasher> {
         &'hashes self,
         depth: usize,
         repetition: usize,
-    ) -> Vec<(Range<usize>, &'hashes [(HashValue, usize)])> {
+        output: &mut Vec<(Range<usize>, &'hashes [(HashValue, usize)])>
+    ) -> () {
         let timer = Instant::now();
         let column = &self.hashes[repetition];
 
-        let mut res = Vec::new();
+        output.clear();
 
         let mut idx = 0;
         while idx < column.len() {
@@ -435,15 +436,13 @@ impl<'hasher> HashMatrix<'hasher> {
             while idx < column.len() && column[idx].0.prefix_eq(current, depth) {
                 idx += 1;
             }
-            res.push((start..idx, &column[start..idx]));
+            output.push((start..idx, &column[start..idx]));
         }
         info!("computing bucket boundaries";
             "tag" => "profiling",
             "repetition" => repetition,
             "time_s" => timer.elapsed().as_secs_f64()
         );
-
-        res
     }
 
     /// Return the deepest level of the tree such that there
