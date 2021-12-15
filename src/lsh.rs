@@ -422,7 +422,7 @@ impl<'hasher> HashMatrix<'hasher> {
         &'hashes self,
         depth: usize,
         repetition: usize,
-        output: &mut Vec<(Range<usize>, &'hashes [(HashValue, usize)])>
+        output: &mut Vec<(Range<usize>, &'hashes [(HashValue, usize)])>,
     ) -> () {
         let timer = Instant::now();
         let column = &self.hashes[repetition];
@@ -550,7 +550,12 @@ impl Hasher {
     //// computations or requiring a large value of K, larger than the one hardcoded for simplicity in this module.
     ////
     //// By instead relying on the distribution, we select the width in a data-adaptive way.
-    pub fn estimate_width(ts: &WindowedTimeseries, samples: usize, seed: u64) -> f64 {
+    pub fn estimate_width(
+        ts: &WindowedTimeseries,
+        samples: usize,
+        repetitions: usize,
+        seed: u64,
+    ) -> f64 {
         let normal = NormalDistr::new(0.0, 1.0).unwrap();
 
         //// This function allows to compute the probability of collision at a given
@@ -588,26 +593,45 @@ impl Hasher {
             .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
             .unwrap();
 
-        let (rho, r, p1, p2) = (1..1000)
+        //// We set r to the smallest value such that with hashes of length K the probability
+        //// of collision in at least one repetition of the smallest distance found by sampling
+        //// above is at least 0.5
+        let r = (1..1000)
             .map(|x| x as f64 / 10.0)
-            .map(|r| {
+            .filter_map(|r| {
                 let p1 = cp(r, d1);
-                let p2 = cp(r, d2);
-                let rho = p1.ln() / p2.ln();
-                (rho, r, p1, p2)
+                let p_at_least_one_collision =
+                    1.0 - (1.0 - p1.powi(K as i32)).powi(repetitions as i32);
+                // println!("r={:.3} p1={:.3} p_one_collision={:.3}", r, p1, p_at_least_one_collision);
+                if p_at_least_one_collision > 0.5 {
+                    Some(r)
+                } else {
+                    None
+                }
             })
-            .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
+            .next()
             .unwrap();
-        println!(
-            "d1={:.2} d2={:.2} 1/c={:.3} rho={:.3} with r={}, p1={}, p2={}",
-            d1,
-            d2,
-            1.0 / c,
-            rho,
-            r,
-            p1,
-            p2
-        );
+
+        // let (rho, r, p1, p2) = (1..1000)
+        //     .map(|x| x as f64 / 10.0)
+        //     .map(|r| {
+        //         let p1 = cp(r, d1);
+        //         let p2 = cp(r, d2);
+        //         let rho = p1.ln() / p2.ln();
+        //         (rho, r, p1, p2)
+        //     })
+        //     .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
+        //     .unwrap();
+        // println!(
+        //     "d1={:.2} d2={:.2} 1/c={:.3} rho={:.3} with r={}, p1={}, p2={}",
+        //     d1,
+        //     d2,
+        //     1.0 / c,
+        //     rho,
+        //     r,
+        //     p1,
+        //     p2
+        // );
         r
     }
 

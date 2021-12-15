@@ -220,7 +220,7 @@ pub fn motifs(
         "exclusion_zone" => exclusion_zone
     );
 
-    let hasher_width = Hasher::estimate_width(&ts, 5, seed);
+    let hasher_width = Hasher::estimate_width(&ts, 5, repetitions, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
     let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
     let pools = Arc::new(HashCollection::from_ts(ts, Arc::clone(&hasher)));
