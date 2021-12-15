@@ -40,10 +40,11 @@ use std::{
     cell::{RefCell, UnsafeCell},
     cmp::Ordering,
     fmt::Debug,
+    iter::FromIterator,
     mem::size_of,
     ops::Range,
     sync::Arc,
-    time::Instant, iter::FromIterator,
+    time::Instant,
 };
 use thread_local::ThreadLocal;
 
@@ -578,8 +579,7 @@ impl Hasher {
             .into_par_iter()
             .map(|i| {
                 let dp = ts.distance_profile(i);
-                let mut dp: Vec<f64> = dp
-                    .into_iter()
+                dp.into_iter()
                     .enumerate()
                     .filter_map(|(j, d)| {
                         if (i as isize - j as isize).abs() < ts.w as isize {
@@ -588,10 +588,9 @@ impl Hasher {
                             Some(d)
                         }
                     })
-                    .collect();
-                dp.sort_by(|a, b| a.partial_cmp(&b).unwrap());
-                let d1 = dp[1];
-                d1
+                    .into_iter()
+                    .min_by(|a, b| a.partial_cmp(&b).unwrap())
+                    .unwrap()
             })
             .min_by(|a, b| a.partial_cmp(&b).unwrap())
             .unwrap();
@@ -615,6 +614,7 @@ impl Hasher {
             .next()
             .unwrap();
 
+        println!("quantization width {} for distance {}", r, d1);
         r
     }
 
