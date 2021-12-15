@@ -101,10 +101,12 @@ fn main() -> Result<()> {
     let w = config.window;
     let timer = Instant::now();
     let ts: Vec<f64> = loadts(path, config.prefix)?;
+    println!("Loaded raw data in {:?}", timer.elapsed());
+    let timer = Instant::now();
     let ts = WindowedTimeseries::new(ts, w);
     let input_elapsed = timer.elapsed();
     println!(
-        "Loaded time series in {:?}, taking {}",
+        "Create windowed time series in {:?}, taking {}",
         input_elapsed,
         ts.bytes_size()
     );

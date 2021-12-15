@@ -30,7 +30,6 @@ use crate::timeseries::WindowedTimeseries;
 use crate::{distance::zeucl, sort::*};
 use deepsize::DeepSizeOf;
 use rand::prelude::*;
-use rand_distr::uniform::{UniformInt, UniformSampler};
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
@@ -568,7 +567,7 @@ impl Hasher {
 
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
 
-        let (d1, d2, c) = Uniform::new(0usize, ts.num_subsequences())
+        let d1 = Uniform::new(0usize, ts.num_subsequences())
             .sample_iter(&mut rng)
             .take(samples)
             .map(|i| {
@@ -586,11 +585,9 @@ impl Hasher {
                     .collect();
                 dp.sort_by(|a, b| a.partial_cmp(&b).unwrap());
                 let d1 = dp[1];
-                let d2 = dp[2];
-                let c = d2 / d1;
-                (d1, d2, c)
+                d1
             })
-            .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
+            .min_by(|a, b| a.partial_cmp(&b).unwrap())
             .unwrap();
 
         //// We set r to the smallest value such that with hashes of length K the probability
@@ -612,26 +609,6 @@ impl Hasher {
             .next()
             .unwrap();
 
-        // let (rho, r, p1, p2) = (1..1000)
-        //     .map(|x| x as f64 / 10.0)
-        //     .map(|r| {
-        //         let p1 = cp(r, d1);
-        //         let p2 = cp(r, d2);
-        //         let rho = p1.ln() / p2.ln();
-        //         (rho, r, p1, p2)
-        //     })
-        //     .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
-        //     .unwrap();
-        // println!(
-        //     "d1={:.2} d2={:.2} 1/c={:.3} rho={:.3} with r={}, p1={}, p2={}",
-        //     d1,
-        //     d2,
-        //     1.0 / c,
-        //     rho,
-        //     r,
-        //     p1,
-        //     p2
-        // );
         r
     }
 

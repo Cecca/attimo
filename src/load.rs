@@ -27,12 +27,6 @@ pub fn loadts<P: AsRef<Path>>(path: P, prefix: Option<usize>) -> Result<Vec<f64>
         }
         cnt += 1;
     }
-    // for l in f.lines().take(to_take) {
-    //     let l = l.unwrap();
-    //     if !l.is_empty() {
-    //         res.push(fast_float::parse(l).unwrap());
-    //     }
-    // }
     slog_scope::info!("input reading"; "tag" => "profiling", "time_s" => start.elapsed().as_secs_f64());
     Ok(res)
 }

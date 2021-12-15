@@ -4,7 +4,6 @@ use attimo::{
     timeseries::WindowedTimeseries,
 };
 
-use rand_distr::{Distribution};
 
 use std::{sync::Arc};
 use std::{time::Instant};

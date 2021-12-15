@@ -2,8 +2,8 @@ use crate::distance::dot;
 use deepsize::DeepSizeOf;
 use rand_distr::num_traits::Zero;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
-use thread_local::ThreadLocal;
 use std::{cell::RefCell, convert::TryFrom, fmt::Display, mem::size_of, sync::Arc, time::Instant};
+use thread_local::ThreadLocal;
 
 pub struct WindowedTimeseries {
     pub data: Vec<f64>,
@@ -26,31 +26,15 @@ pub struct WindowedTimeseries {
 impl WindowedTimeseries {
     pub fn new(ts: Vec<f64>, w: usize) -> Self {
         assert!(w <= ts.len());
-        let n_subs = ts.len() - w;
-        let mut rolling_avg = Vec::with_capacity(n_subs);
-        let mut rolling_sd = Vec::with_capacity(n_subs);
-        let mut squared_norms = Vec::with_capacity(n_subs);
 
         let timer = Instant::now();
 
-        // FIXME: compute it using sliding window
-        let mut buffer = vec![0.0; w];
-        for i in 0..n_subs {
-            let mean = ts[i..i + w].iter().sum::<f64>() / w as f64;
-            // NOTE: Here we compute the standard deviation normalizing by w - 1. In stumpy and scamp,
-            // instead, the standard deviation is computed normalizing by w, which makes for slightly
-            // different results.
-            let sd = (ts[i..i+w].iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (w - 1) as f64).sqrt();
-            buffer.fill(0.0);
-            for (i, x) in ts[i..i + w].iter().enumerate() {
-                buffer[i] = (x - mean) / sd;
-            }
-            assert!(mean.is_finite());
-            assert!(sd.is_finite());
-            rolling_avg.push(mean);
-            rolling_sd.push(sd);
-            squared_norms.push(dot(&buffer, &buffer));
-        }
+        //// First we compute rolling statistics
+        let (rolling_avg, rolling_sd, squared_norms) = rolling_stat(&ts, w);
+        println!(
+            " . [{:?}] Computed mean and std and squared norms",
+            timer.elapsed()
+        );
 
         //// Now we pre-compute the FFT of the time series, which will be needed to compute
         //// dot products for the hash values faster.
@@ -79,6 +63,7 @@ impl WindowedTimeseries {
             //// since we need to compute all dot products
             begin += fft_length - w;
         }
+        println!(" . [{:?}] Computed fft", timer.elapsed());
 
         slog_scope::info!("stats computation";
             "tag" => "profiling",
@@ -155,8 +140,14 @@ impl WindowedTimeseries {
 
         //// Get local scratch vectors, to avoid allocations
         let fft_length = self.fft_length;
-        let mut vfft = self.buf_vfft.get_or(|| RefCell::new(vec![Complex::zero(); fft_length])).borrow_mut();
-        let mut ivfft = self.buf_ivfft.get_or(|| RefCell::new(vec![Complex::zero(); fft_length])).borrow_mut();
+        let mut vfft = self
+            .buf_vfft
+            .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
+            .borrow_mut();
+        let mut ivfft = self
+            .buf_ivfft
+            .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
+            .borrow_mut();
 
         //// Then compute the FFT of the reversed input vector, padded with zeros
         vfft.fill(Complex::zero());
@@ -215,7 +206,13 @@ impl WindowedTimeseries {
                 //// we just shift by the mean
                 output[i] = output[i] - sumv * m;
             }
-            assert!(output[i].is_finite(), "dotp={} where mean={} and sd={}", output[i], m, sd);
+            assert!(
+                output[i].is_finite(),
+                "dotp={} where mean={} and sd={}",
+                output[i],
+                m,
+                sd
+            );
         }
     }
 
@@ -292,6 +289,75 @@ impl TryFrom<String> for PrettyBytes {
     }
 }
 
+fn rolling_stat(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let n_subs = ts.len() - w;
+
+    let mut rolling_avg = Vec::with_capacity(n_subs);
+    let mut rolling_sd = Vec::with_capacity(n_subs);
+    let mut squared_norms = Vec::with_capacity(n_subs);
+
+    let mut sum = ts[0..w].iter().sum::<f64>();
+    let mut sq_sum = ts[0..w].iter().map(|x| x * x).sum::<f64>();
+
+    let mut mean = ts[0..w].iter().sum::<f64>() / w as f64;
+    let mut d_squared = ts[0..w].iter().map(|x| (x - mean).powi(2)).sum::<f64>();
+
+    let mut dotp_num = ts[0..w].iter().map(|x| (x - mean).powi(2)).sum::<f64>();
+
+    rolling_avg.push(mean);
+    rolling_sd.push((d_squared / (w - 1) as f64).sqrt());
+    squared_norms.push(dotp_num / (d_squared / (w - 1) as f64));
+
+    for i in 1..n_subs {
+        let old_mean = mean;
+        let new = ts[i + w - 1];
+        let old = ts[i - 1];
+        mean += (new - old) / w as f64;
+        d_squared += (new - old) * (new - mean + old - old_mean);
+
+        sum += new - old;
+        sq_sum += new * new - old * old;
+
+        dotp_num = sq_sum - 2.0 * mean * sum + w as f64 * mean * mean;
+
+        assert!(mean.is_finite());
+        rolling_avg.push(mean);
+        rolling_sd.push((d_squared / (w - 1) as f64).sqrt());
+        squared_norms.push(dotp_num / (d_squared / (w - 1) as f64));
+    }
+
+    (rolling_avg, rolling_sd, squared_norms)
+}
+
+#[cfg(test)]
+fn rolling_stat_slow(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let n_subs = ts.len() - w;
+    let mut rolling_avg = Vec::with_capacity(n_subs);
+    let mut rolling_sd = Vec::with_capacity(n_subs);
+    let mut squared_norms = Vec::with_capacity(n_subs);
+
+    let mut buffer = vec![0.0; w];
+    for i in 0..n_subs {
+        let mean = ts[i..i + w].iter().sum::<f64>() / w as f64;
+        // NOTE: Here we compute the standard deviation normalizing by w - 1. In stumpy and scamp,
+        // instead, the standard deviation is computed normalizing by w, which makes for slightly
+        // different results.
+        let sd =
+            (ts[i..i + w].iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (w - 1) as f64).sqrt();
+        buffer.fill(0.0);
+        for (i, x) in ts[i..i + w].iter().enumerate() {
+            buffer[i] = (x - mean) / sd;
+        }
+        assert!(mean.is_finite());
+        assert!(sd.is_finite());
+        rolling_avg.push(mean);
+        rolling_sd.push(sd);
+        squared_norms.push(dot(&buffer, &buffer));
+    }
+
+    (rolling_avg, rolling_sd, squared_norms)
+}
+
 pub trait BytesSize {
     fn bytes_size(&self) -> PrettyBytes;
 }
@@ -315,7 +381,7 @@ impl DeepSizeOf for WindowedTimeseries {
 
 #[cfg(test)]
 mod test {
-    use crate::{timeseries::WindowedTimeseries};
+    use crate::timeseries::*;
 
     #[test]
     fn test_sliding_dot_product() {
@@ -402,10 +468,47 @@ mod test {
             let a = ts.subsequence(i);
             let mean: f64 = a.iter().sum::<f64>() / a.len() as f64;
             let actual_mean = ts.mean(i);
-            let sd = ((a.iter().map(|x| (x - mean).powi(2)).sum::<f64>()) / (a.len() - 1) as f64).sqrt();
+            let sd =
+                ((a.iter().map(|x| (x - mean).powi(2)).sum::<f64>()) / (a.len() - 1) as f64).sqrt();
             let actual_sd = ts.sd(i);
-            assert_eq!(mean, actual_mean);
-            assert_eq!(sd, actual_sd);
+            assert!((mean - actual_mean).abs() < 0.0000000000001);
+            assert!((sd - actual_sd).abs() < 0.0000000000001);
+        }
+    }
+
+    #[test]
+    fn test_rolling_stats() {
+        let w = 10;
+        let ts = crate::load::loadts("data/ECG.csv", Some(100)).expect("problem loading data");
+
+        let (a_mean, a_std, a_norms) = rolling_stat(&ts, w);
+        let (e_mean, e_std, e_norms) = rolling_stat_slow(&ts, w);
+
+        assert_eq!(a_mean.len(), e_mean.len());
+        for (i, (a, e)) in a_mean.iter().zip(e_mean.iter()).enumerate() {
+            assert!(
+                (a - e).abs() < 0.0000000000000001,
+                "[{}] a = {} e = {}",
+                i,
+                a,
+                e
+            );
+        }
+
+        assert_eq!(a_std.len(), e_std.len());
+        for (i, (a, e)) in a_std.iter().zip(e_std.iter()).enumerate() {
+            assert!(
+                (a - e).abs() < 0.00000000000001,
+                "[{}] a = {} e = {}",
+                i,
+                a,
+                e
+            );
+        }
+
+        assert_eq!(a_norms.len(), e_norms.len());
+        for (i, (a, e)) in a_norms.iter().zip(e_norms.iter()).enumerate() {
+            assert!((a - e).abs() < 0.000000001, "[{}] a = {} e = {}", i, a, e);
         }
     }
 }
