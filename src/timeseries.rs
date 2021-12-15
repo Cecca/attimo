@@ -181,6 +181,7 @@ impl WindowedTimeseries {
 
     #[cfg(test)]
     pub fn sliding_dot_product_slow(&self, v: &[f64], output: &mut Vec<f64>) {
+        use crate::distance::dot;
         assert!(v.len() == self.w);
         //// Pre-allocate the output
         output.clear();
@@ -219,6 +220,7 @@ impl WindowedTimeseries {
 
     #[cfg(test)]
     pub fn znormalized_sliding_dot_product_slow(&self, v: &[f64], output: &mut Vec<f64>) {
+        use crate::distance::dot;
         assert!(v.len() == self.w);
         //// Pre-allocate the output
         output.clear();
@@ -241,10 +243,6 @@ impl WindowedTimeseries {
 
         dbg!(from);
         for i in 0..self.num_subsequences() {
-            dbg!(i);
-            dbg!(dp[i]);
-            dbg!(self.squared_norm(from));
-            dbg!(self.squared_norm(i));
             dp[i] = self.squared_norm(from) + self.squared_norm(i) - 2.0 * dp[i];
             // Due to floating point errors, it might be that the difference just
             // computed is slightly negative. If that's the case we replace it with 0
@@ -252,7 +250,13 @@ impl WindowedTimeseries {
                 dp[i] = 0.0;
             }
             dp[i] = dp[i].sqrt();
-            debug_assert!((dp[i] - zeucl(self, from, i)).abs() < 0.00000000001);
+            debug_assert!(
+                (dp[i] - zeucl(self, from, i)).abs() < 0.0001,
+                "dp[i]={} zeucl={} diff={}",
+                dp[i],
+                zeucl(self, from, i),
+                (dp[i] - zeucl(self, from, i))
+            );
         }
         dp
     }
@@ -359,6 +363,7 @@ fn rolling_stat(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
 
 #[cfg(test)]
 fn rolling_stat_slow(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    use crate::distance::dot;
     let n_subs = ts.len() - w;
     let mut rolling_avg = Vec::with_capacity(n_subs);
     let mut rolling_sd = Vec::with_capacity(n_subs);
