@@ -241,7 +241,6 @@ impl WindowedTimeseries {
         self.znormalized(from, &mut buf);
         self.znormalized_sliding_dot_product(&buf, &mut dp);
 
-        dbg!(from);
         for i in 0..self.num_subsequences() {
             dp[i] = self.squared_norm(from) + self.squared_norm(i) - 2.0 * dp[i];
             // Due to floating point errors, it might be that the difference just
