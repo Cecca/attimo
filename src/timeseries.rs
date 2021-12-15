@@ -1,4 +1,4 @@
-use crate::distance::dot;
+use crate::distance::zeucl;
 use deepsize::DeepSizeOf;
 use rand_distr::num_traits::Zero;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
@@ -179,6 +179,7 @@ impl WindowedTimeseries {
         }
     }
 
+    #[cfg(test)]
     pub fn sliding_dot_product_slow(&self, v: &[f64], output: &mut Vec<f64>) {
         assert!(v.len() == self.w);
         //// Pre-allocate the output
@@ -216,6 +217,7 @@ impl WindowedTimeseries {
         }
     }
 
+    #[cfg(test)]
     pub fn znormalized_sliding_dot_product_slow(&self, v: &[f64], output: &mut Vec<f64>) {
         assert!(v.len() == self.w);
         //// Pre-allocate the output
@@ -230,7 +232,33 @@ impl WindowedTimeseries {
         }
     }
 
-    pub fn distance_profile<D: Fn(&WindowedTimeseries, usize, usize) -> f64>(
+    pub fn distance_profile(&self, from: usize) -> Vec<f64> {
+        let mut dp = vec![0.0; self.num_subsequences()];
+        let mut buf = vec![0.0; self.w];
+
+        self.znormalized(from, &mut buf);
+        self.znormalized_sliding_dot_product(&buf, &mut dp);
+
+        dbg!(from);
+        for i in 0..self.num_subsequences() {
+            dbg!(i);
+            dbg!(dp[i]);
+            dbg!(self.squared_norm(from));
+            dbg!(self.squared_norm(i));
+            dp[i] = self.squared_norm(from) + self.squared_norm(i) - 2.0 * dp[i];
+            // Due to floating point errors, it might be that the difference just
+            // computed is slightly negative. If that's the case we replace it with 0
+            if dp[i] < 0.0 {
+                dp[i] = 0.0;
+            }
+            dp[i] = dp[i].sqrt();
+            debug_assert!((dp[i] - zeucl(self, from, i)).abs() < 0.00000000001);
+        }
+        dp
+    }
+
+    #[cfg(test)]
+    pub fn distance_profile_slow<D: Fn(&WindowedTimeseries, usize, usize) -> f64>(
         &self,
         from: usize,
         d: D,
@@ -381,7 +409,7 @@ impl DeepSizeOf for WindowedTimeseries {
 
 #[cfg(test)]
 mod test {
-    use crate::timeseries::*;
+    use crate::{distance::zeucl, timeseries::*};
 
     #[test]
     fn test_sliding_dot_product() {
@@ -509,6 +537,21 @@ mod test {
         assert_eq!(a_norms.len(), e_norms.len());
         for (i, (a, e)) in a_norms.iter().zip(e_norms.iter()).enumerate() {
             assert!((a - e).abs() < 0.000000001, "[{}] a = {} e = {}", i, a, e);
+        }
+    }
+
+    #[test]
+    fn test_distance_profile() {
+        let w = 1000;
+        let ts = crate::load::loadts("data/ECG.csv", Some(100000)).expect("problem loading data");
+        let ts = WindowedTimeseries::new(ts, w);
+
+        let actual = ts.distance_profile(0);
+        let expected = ts.distance_profile_slow(0, zeucl);
+
+        assert_eq!(actual.len(), expected.len());
+        for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
+            assert!((a - e).abs() < 0.00000000001, "[{}] a = {} e = {}", i, a, e);
         }
     }
 }

@@ -26,8 +26,9 @@
 //// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
+// TODO Remove this dependency
+use crate::sort::*;
 use crate::timeseries::WindowedTimeseries;
-use crate::{distance::zeucl, sort::*};
 use deepsize::DeepSizeOf;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
@@ -571,7 +572,7 @@ impl Hasher {
             .sample_iter(&mut rng)
             .take(samples)
             .map(|i| {
-                let dp = ts.distance_profile(i, zeucl);
+                let dp = ts.distance_profile(i);
                 let mut dp: Vec<f64> = dp
                     .into_iter()
                     .enumerate()

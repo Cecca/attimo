@@ -1,7 +1,6 @@
 use anyhow::Result;
 use argh::FromArgs;
 use attimo::allocator::{self, CountingAllocator};
-use attimo::distance::zeucl;
 use attimo::load::*;
 use attimo::motifs::{motifs, Motif};
 use attimo::timeseries::*;
@@ -188,7 +187,7 @@ fn find_occurences(ts: &WindowedTimeseries, motif: &Motif) -> Vec<usize> {
     let mdist = motif.distance;
     let w = ts.w;
     let mut idxs: Vec<usize> = ts
-        .distance_profile(motif.idx_a, zeucl)
+        .distance_profile(motif.idx_a)
         .iter()
         .enumerate()
         .filter(|&(i, _d)| i != motif.idx_a && i != motif.idx_b)
