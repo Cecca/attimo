@@ -7,3 +7,15 @@ bench.sqlite
 *.db
 *.png
 *.csv
+.ipynb_checkpoints/
+.vscode/
+*.pdf
+/SCAMP
+attimo-results.db*
+dists.jl
+*.html
+mp_columns_out
+mp_columns_out_index
+perf.data
+perf.data.old
+*.log
