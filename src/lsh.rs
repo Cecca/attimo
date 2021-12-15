@@ -43,7 +43,7 @@ use std::{
     mem::size_of,
     ops::Range,
     sync::Arc,
-    time::Instant,
+    time::Instant, iter::FromIterator,
 };
 use thread_local::ThreadLocal;
 
@@ -568,9 +568,14 @@ impl Hasher {
 
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
 
-        let d1 = Uniform::new(0usize, ts.num_subsequences())
-            .sample_iter(&mut rng)
-            .take(samples)
+        let starts = Vec::from_iter(
+            Uniform::new(0usize, ts.num_subsequences())
+                .sample_iter(&mut rng)
+                .take(samples),
+        );
+
+        let d1 = starts
+            .into_par_iter()
             .map(|i| {
                 let dp = ts.distance_profile(i);
                 let mut dp: Vec<f64> = dp
