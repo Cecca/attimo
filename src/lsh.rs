@@ -423,6 +423,7 @@ impl<'hasher> HashMatrix<'hasher> {
         &'hashes self,
         depth: usize,
         repetition: usize,
+        exclusion_zone: usize,
         output: &mut Vec<(Range<usize>, &'hashes [(HashValue, usize)])>,
     ) -> () {
         let timer = Instant::now();
@@ -434,10 +435,17 @@ impl<'hasher> HashMatrix<'hasher> {
         while idx < column.len() {
             let start = idx;
             let current = &column[idx].0;
+            let mut min_i = column[idx].1;
+            let mut max_i = column[idx].1;
             while idx < column.len() && column[idx].0.prefix_eq(current, depth) {
+                min_i = std::cmp::min(min_i, column[idx].1);
+                max_i = std::cmp::max(max_i, column[idx].1);
                 idx += 1;
             }
-            output.push((start..idx, &column[start..idx]));
+            //// We add only if the bucket is non-trivial
+            if idx - start > 1 && min_i + exclusion_zone < max_i {
+                output.push((start..idx, &column[start..idx]));
+            }
         }
         info!("computing bucket boundaries";
             "tag" => "profiling",
@@ -657,6 +665,12 @@ impl Hasher {
                 buffer[i] = h as i8;
             }
         });
+        assert!(
+            (cnt_oob as f64) < (0.01 * ts.num_subsequences() as f64),
+            "too many hash values are out of bounds, {} out of {}",
+            cnt_oob,
+            ts.num_subsequences()
+        );
     }
 }
 

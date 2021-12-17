@@ -269,10 +269,21 @@ pub fn motifs(
             let rep_cnt_dists = AtomicUsize::new(0);
             let rep_candidate_pairs = AtomicUsize::new(0);
             let rep_timer = Instant::now();
-            hashes.buckets_vec(depth as usize, rep, &mut buckets);
+            hashes.buckets_vec(depth as usize, rep, exclusion_zone, &mut buckets);
             let n_buckets = buckets.len();
+            let mut sizes: Vec<usize> = buckets.iter().filter_map(|b| {
+                let l = b.1.len();
+                if l > 1 {
+                    Some(l)
+                } else {
+                    None
+                }
+            }).collect();
+            sizes.sort();
+            dbg!(sizes);
 
             let tl_top = ThreadLocal::new();
+            // let active_threads = AtomicUsize::new(0);
 
             //// Each thread works on these many buckets at one time, to reduce the
             //// overhead of scheduling.
@@ -281,6 +292,7 @@ pub fn motifs(
             (0..n_buckets / chunk_size)
                 .into_par_iter()
                 .for_each(|chunk_i| {
+                    // pbar.println(format!("Active threads {}", 1 + active_threads.fetch_add(1, Ordering::SeqCst)));
                     let tl_top = tl_top.get_or(|| RefCell::new(top.clone()));
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
                         let (hash_range, bucket) = &buckets[i];
@@ -327,6 +339,7 @@ pub fn motifs(
                             }
                         }
                     }
+                    // pbar.println(format!("Active threads {}", active_threads.fetch_sub(1, Ordering::SeqCst) - 1));
                 });
 
             //// Now merge the information from the thread local tops
