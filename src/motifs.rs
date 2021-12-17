@@ -271,16 +271,6 @@ pub fn motifs(
             let rep_timer = Instant::now();
             hashes.buckets_vec(depth as usize, rep, exclusion_zone, &mut buckets);
             let n_buckets = buckets.len();
-            let mut sizes: Vec<usize> = buckets.iter().filter_map(|b| {
-                let l = b.1.len();
-                if l > 1 {
-                    Some(l)
-                } else {
-                    None
-                }
-            }).collect();
-            sizes.sort();
-            dbg!(sizes);
 
             let tl_top = ThreadLocal::new();
             // let active_threads = AtomicUsize::new(0);

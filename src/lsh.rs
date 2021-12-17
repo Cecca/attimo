@@ -643,34 +643,18 @@ impl Hasher {
         assert!(buffer.len() == ts.num_subsequences());
         let v = self.get_vector(repetition, k);
         let shift = self.shifts[repetition * K + k];
-        let mut cnt_oob = 0;
         DOTP_BUFFER.with(|dotp_buf| {
             ts.znormalized_sliding_dot_product(v, &mut dotp_buf.borrow_mut());
             for (i, dotp) in dotp_buf.borrow().iter().enumerate() {
                 let h = (dotp + shift) / self.width;
-                //// Handle the cases where the hash value is too large or too small to be stored
-                //// in a i8. These cases, due to our choice of the quantization width for
-                //// the hash function, should happen rather rarely.
-                let h = if h > 128.0 {
-                    cnt_oob += 1;
-                    128.0
-                } else if h < -127.0 {
-                    cnt_oob += 1;
-                    -127.0
-                } else {
-                    h
-                };
-                assert!(h <= 128.0, "h = {} > 128", h);
-                assert!(h >= -127.0, "h = {} < -127", h);
-                buffer[i] = h as i8;
+                //// We only use the 8 lowest-order bits of each hash value, in order to use a bit less space.
+                //// In most cases we don't lose information in this way, because we are
+                //// truncating zeros in all hash values. When we truncate other bit patters
+                //// we are just increasing the collision probability, which harms performance
+                //// but not correctness
+                buffer[i] = (h as i64 & 0xFFi64) as i8;
             }
         });
-        assert!(
-            (cnt_oob as f64) < (0.01 * ts.num_subsequences() as f64),
-            "too many hash values are out of bounds, {} out of {}",
-            cnt_oob,
-            ts.num_subsequences()
-        );
     }
 }
 
