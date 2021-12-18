@@ -12,6 +12,7 @@ bench.sqlite
 *.pdf
 /SCAMP
 attimo-results.db*
+attimo-results.sqlite*
 dists.jl
 *.html
 mp_columns_out
@@ -19,3 +20,4 @@ mp_columns_out_index
 perf.data
 perf.data.old
 *.log
+.DS_Store
