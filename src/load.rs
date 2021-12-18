@@ -19,8 +19,12 @@ pub fn loadts<P: AsRef<Path>>(path: P, prefix: Option<usize>) -> Result<Vec<f64>
         match f.read_line(&mut buf) {
             Ok(0) => break, // EOF reached
             Ok(_) => {
-                if !buf.trim_end().is_empty(){
-                    res.push(fast_float::parse_partial(&buf).with_context(|| format!("parsing `{}`", buf))?.0);
+                if !buf.trim_end().is_empty() {
+                    res.push(
+                        fast_float::parse_partial(&buf)
+                            .with_context(|| format!("parsing `{}`", buf))?
+                            .0,
+                    );
                 }
             }
             Err(e) => anyhow::bail!(e),

@@ -27,8 +27,8 @@
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
 // TODO Remove this dependency
-use crate::sort::*;
 use crate::timeseries::WindowedTimeseries;
+use crate::{distance::zeucl, sort::*};
 use deepsize::DeepSizeOf;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
@@ -559,71 +559,37 @@ impl Hasher {
     //// computations or requiring a large value of K, larger than the one hardcoded for simplicity in this module.
     ////
     //// By instead relying on the distribution, we select the width in a data-adaptive way.
-    pub fn estimate_width(
-        ts: &WindowedTimeseries,
-        samples: usize,
-        repetitions: usize,
-        seed: u64,
-    ) -> f64 {
-        let normal = NormalDistr::new(0.0, 1.0).unwrap();
+    pub fn estimate_width(ts: &WindowedTimeseries, seed: u64) -> f64 {
+        let timer = Instant::now();
+        let mut d_min: Option<f64> = None;
+        let mut r = 1.0;
+        while d_min.is_none() {
+            println!("Build probe buckets with r={}", r);
+            let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
+            let probe_collection = HashCollection::from_ts(&ts, probe_hasher);
+            let mut probe_matrix = probe_collection.get_hash_matrix();
+            probe_matrix.setup_hashes();
+            let mut probe_buckets = Vec::new();
+            probe_matrix.buckets_vec(K, 0, ts.w, &mut probe_buckets);
+            println!("  [{:?}] built required things", timer.elapsed());
 
-        //// This function allows to compute the probability of collision at a given
-        //// distance for a given quantization width.
-        let cp = |r: f64, d: f64| {
-            1.0 - 2.0 * normal.cdf(-r / d)
-                - (2.0 / ((std::f64::consts::PI * 2.0).sqrt() * (r / d)))
-                    * (1.0 - (-r * r / (2.0 * d * d)).exp())
-        };
-
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-
-        let starts = Vec::from_iter(
-            Uniform::new(0usize, ts.num_subsequences())
-                .sample_iter(&mut rng)
-                .take(samples),
-        );
-
-        let d1 = starts
-            .into_par_iter()
-            .map(|i| {
-                let dp = ts.distance_profile(i);
-                dp.into_iter()
-                    .enumerate()
-                    .filter_map(|(j, d)| {
-                        if (i as isize - j as isize).abs() < ts.w as isize {
-                            None
-                        } else {
-                            Some(d)
+            for (_, bucket) in probe_buckets {
+                for (_, a_idx) in bucket.iter() {
+                    for (_, b_idx) in bucket.iter() {
+                        if *a_idx + ts.w < *b_idx {
+                            let d = zeucl(ts, *a_idx, *b_idx);
+                            if d < d_min.unwrap_or(f64::INFINITY) {
+                                d_min.replace(d);
+                            }
                         }
-                    })
-                    .into_iter()
-                    .min_by(|a, b| a.partial_cmp(&b).unwrap())
-                    .unwrap()
-            })
-            .min_by(|a, b| a.partial_cmp(&b).unwrap())
-            .unwrap();
-
-        //// We set r to the smallest value such that with hashes of length K the probability
-        //// of collision in at least one repetition of the smallest distance found by sampling
-        //// above is at least 0.5
-        let r = (1..1000)
-            .map(|x| x as f64 / 10.0)
-            .filter_map(|r| {
-                let p1 = cp(r, d1);
-                let p_at_least_one_collision =
-                    1.0 - (1.0 - p1.powi(K as i32)).powi(repetitions as i32);
-                // println!("r={:.3} p1={:.3} p_one_collision={:.3}", r, p1, p_at_least_one_collision);
-                if p_at_least_one_collision > 0.5 {
-                    Some(r)
-                } else {
-                    None
+                    }
                 }
-            })
-            .next()
-            .unwrap();
+            }
+            r *= 2.0;
+        }
+        println!("Minimum distance found {} using r={}", d_min.unwrap(), r);
 
-        println!("quantization width {} for distance {}", r, d1);
-        r
+        return r;
     }
 
     fn get_vector(&self, repetition: usize, concat: usize) -> &'_ [f64] {

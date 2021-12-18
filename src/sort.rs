@@ -1,4 +1,4 @@
-use std::{fmt::Debug };
+use std::fmt::Debug;
 
 pub trait GetByte {
     fn num_bytes(&self) -> usize;

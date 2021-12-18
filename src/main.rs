@@ -84,6 +84,7 @@ fn default_log_path() -> String {
 }
 
 fn main() -> Result<()> {
+    let total_timer = Instant::now();
     if std::env::args().filter(|arg| arg == "--version").count() == 1 {
         println!("{}", VERSION);
         return Ok(());
@@ -126,6 +127,8 @@ fn main() -> Result<()> {
     monitor.join().unwrap();
 
     output_csv(&config.output, &motifs)?;
+
+    println!("Total time {:?}", total_timer.elapsed());
 
     if config.plot {
         let mut plot = Plot::new();

@@ -1,14 +1,14 @@
+use slog_scope::info;
 /// This module implements a thin wrapper around the system allocator
 /// that allows to count how many bytes are allocated.
 ///
 /// Taken from the [rust documentation](https://doc.rust-lang.org/std/alloc/struct.System.html)
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
-use slog_scope::info;
 
 pub struct CountingAllocator;
 

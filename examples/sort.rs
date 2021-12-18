@@ -4,9 +4,8 @@ use attimo::{
     timeseries::WindowedTimeseries,
 };
 
-
-use std::{sync::Arc};
-use std::{time::Instant};
+use std::sync::Arc;
+use std::time::Instant;
 
 fn main() {
     let n = std::env::args().nth(1).unwrap().parse::<usize>().unwrap();

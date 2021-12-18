@@ -240,13 +240,11 @@ pub fn bench_first_collision(c: &mut Criterion) {
     let mut hash_matrix = pools.get_hash_matrix();
     hash_matrix.setup_hashes();
 
-    let mut buckets  = hash_matrix.buckets_vec(depth, 0);
+    let mut buckets = hash_matrix.buckets_vec(depth, 0);
     buckets.sort_by_key(|bucket| Reverse(bucket.0.len()));
     // Take the largest bucket
     let bucket = &buckets[0];
-    let bucket: Vec<usize> = bucket.1.iter().map(|(_, i)| {
-        *i + bucket.0.start
-    }).collect();
+    let bucket: Vec<usize> = bucket.1.iter().map(|(_, i)| *i + bucket.0.start).collect();
     println!("Bucket with {} elements", bucket.len());
 
     c.bench_function("first collision", move |bencher| {
