@@ -1,8 +1,7 @@
 use crate::distance::zeucl;
-use deepsize::DeepSizeOf;
 use rand_distr::num_traits::Zero;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
-use std::{cell::RefCell, convert::TryFrom, fmt::Display, mem::size_of, sync::Arc, time::Instant};
+use std::{cell::RefCell, convert::TryFrom, fmt::Display, sync::Arc, time::Instant};
 use thread_local::ThreadLocal;
 
 pub struct WindowedTimeseries {
@@ -388,27 +387,6 @@ fn rolling_stat_slow(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     }
 
     (rolling_avg, rolling_sd, squared_norms)
-}
-
-pub trait BytesSize {
-    fn bytes_size(&self) -> PrettyBytes;
-}
-
-impl<T: DeepSizeOf> BytesSize for T {
-    fn bytes_size(&self) -> PrettyBytes {
-        PrettyBytes(self.deep_size_of())
-    }
-}
-
-impl DeepSizeOf for WindowedTimeseries {
-    fn deep_size_of_children(&self, context: &mut deepsize::Context) -> usize {
-        self.w.deep_size_of()
-            + self.data.deep_size_of_children(context)
-            + self.rolling_avg.deep_size_of_children(context)
-            + self.rolling_sd.deep_size_of_children(context)
-            + self.squared_norms.deep_size_of_children(context)
-            + size_of::<Complex<f64>>() * self.fft_length * self.fft_chunks.len()
-    }
 }
 
 #[cfg(test)]

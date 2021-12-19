@@ -5,6 +5,7 @@
 //// The data structure used for the task is adaptive to the data, and is configured
 //// to respect the limits of the system in terms of memory.
 
+use crate::allocator::allocated;
 use crate::distance::*;
 use crate::lsh::*;
 use crate::timeseries::*;
@@ -223,15 +224,23 @@ pub fn motifs(
     let hasher_width = Hasher::estimate_width(&ts, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
     let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
+    let mem_before = allocated();
     let pools = Arc::new(HashCollection::from_ts(ts, Arc::clone(&hasher)));
+    let pools_size = allocated() - mem_before;
     println!(
         "[{:?}] Computed hash pools, taking {}",
         start.elapsed(),
-        pools.bytes_size()
+        PrettyBytes(pools_size)
     );
+    let mem_before = allocated();
     let mut hashes = pools.get_hash_matrix();
     hashes.setup_hashes();
-    println!("[{:?}] Computed hash matrix columns", start.elapsed());
+    let hashes_size = allocated() - mem_before;
+    println!(
+        "[{:?}] Computed hash matrix columns, {} bytes",
+        start.elapsed(),
+        PrettyBytes(hashes_size)
+    );
 
     //// Define upper and lower bounds, to avoid repeating already-done comparisons
     //// We have a range of already examined hash indices for each element and repetition
@@ -415,11 +424,6 @@ pub fn motifs(
             }
         }
     }
-    println!(
-        "[{:?}] hash matrix matrix used {}",
-        start.elapsed(),
-        hashes.bytes_size()
-    );
     let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
     let cnt_dist = cnt_dist.load(Ordering::SeqCst);
     info!("motifs completed";

@@ -29,7 +29,6 @@
 // TODO Remove this dependency
 use crate::timeseries::WindowedTimeseries;
 use crate::{distance::zeucl, sort::*};
-use deepsize::DeepSizeOf;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -40,7 +39,6 @@ use std::{
     cell::{RefCell, UnsafeCell},
     cmp::Ordering,
     fmt::Debug,
-    mem::size_of,
     ops::Range,
     sync::Arc,
     time::Instant,
@@ -80,12 +78,6 @@ impl GetByte for HashValue {
 impl Debug for HashValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.hashes)
-    }
-}
-
-impl DeepSizeOf for HashValue {
-    fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
-        size_of::<i8>() * self.hashes.len()
     }
 }
 
@@ -359,15 +351,8 @@ impl HashCollection {
     }
 }
 
-impl DeepSizeOf for HashCollection {
-    fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
-        self.left_pools.deep_size_of() + self.right_pools.deep_size_of()
-    }
-}
-
 //// From the collection defined above we can generate a matrix of hash values.
 
-#[derive(DeepSizeOf)]
 pub struct HashMatrix<'hasher> {
     /// Outer vector has one entry per repetition, inner vector has one entry per subsequence,
     /// and items are hash values and indices into the timeseries
@@ -492,7 +477,6 @@ impl<'hasher> HashMatrix<'hasher> {
 }
 
 /// Data structure to do LSH of subsequences.
-#[derive(DeepSizeOf)]
 pub struct Hasher {
     pub dimension: usize,
     pub tensor_repetitions: usize,

@@ -1,11 +1,9 @@
 use anyhow::Result;
 use argh::FromArgs;
-use attimo::allocator::{self, CountingAllocator};
+use attimo::allocator::{self, allocated, CountingAllocator};
 use attimo::load::*;
 use attimo::motifs::{motifs, Motif};
 use attimo::timeseries::*;
-use plotly::common::{Line, Mode};
-use plotly::{Layout, Plot, Scatter};
 use slog::*;
 use slog_scope::GlobalLoggerGuard;
 use std::fs::OpenOptions;
@@ -37,10 +35,6 @@ struct Config {
     #[argh(option)]
     /// the number of repetitions to perform
     pub repetitions: usize,
-
-    #[argh(switch)]
-    /// open a browser window with a plot of the approximate matrix profile
-    pub plot: bool,
 
     #[argh(option)]
     /// consider only the given number of points from the input
@@ -103,12 +97,14 @@ fn main() -> Result<()> {
     let ts: Vec<f64> = loadts(path, config.prefix)?;
     println!("Loaded raw data in {:?}", timer.elapsed());
     let timer = Instant::now();
+    let mem_before = allocated();
     let ts = WindowedTimeseries::new(ts, w);
+    let ts_bytes = allocated() - mem_before;
     let input_elapsed = timer.elapsed();
     println!(
         "Create windowed time series in {:?}, taking {}",
         input_elapsed,
-        ts.bytes_size()
+        PrettyBytes(ts_bytes)
     );
     slog_scope::info!("input reading";
         "tag" => "profiling",
@@ -130,50 +126,6 @@ fn main() -> Result<()> {
 
     println!("Total time {:?}", total_timer.elapsed());
 
-    if config.plot {
-        let mut plot = Plot::new();
-        let layout = Layout::default().height(500);
-        plot.set_layout(layout);
-
-        let motif_range = 0..ts.w;
-        // Provide some context time series
-        let n_context = 50;
-        let stride = ts.num_subsequences() / n_context;
-        let mut idx = 0;
-        while idx < ts.num_subsequences() {
-            let mut vals = vec![0.0; ts.w];
-            ts.znormalized(idx, &mut vals);
-            let l = Scatter::new(motif_range.clone(), vals)
-                .line(Line::new().color("#a0a0a0").width(0.5))
-                .show_legend(false)
-                .hover_info(plotly::common::HoverInfo::Skip)
-                .mode(Mode::Lines);
-            plot.add_trace(l);
-            idx += stride;
-        }
-
-        let occs = find_occurences(&ts, &motifs[0]);
-        for i in occs {
-            let mut vals = vec![0.0; ts.w];
-            ts.znormalized(i, &mut vals);
-            let l = Scatter::new(motif_range.clone(), vals)
-                .line(Line::new().color("#f7a61b").width(1.5))
-                .show_legend(false)
-                .mode(Mode::Lines);
-            plot.add_trace(l);
-        }
-        for i in [motifs[0].idx_a, motifs[0].idx_b] {
-            let mut vals = vec![0.0; ts.w];
-            ts.znormalized(i, &mut vals);
-            let l = Scatter::new(motif_range.clone(), vals)
-                .line(Line::new().color("#db4620").width(3.0))
-                .show_legend(false)
-                .mode(Mode::Lines);
-            plot.add_trace(l);
-        }
-        plot.use_local_plotly();
-        plot.show();
-    }
     Ok(())
 }
 
@@ -184,31 +136,6 @@ fn output_csv<P: AsRef<Path>>(path: P, motifs: &[Motif]) -> Result<()> {
         writeln!(f, "{}, {}, {}", m.idx_a, m.idx_b, m.distance)?;
     }
     Ok(())
-}
-
-fn find_occurences(ts: &WindowedTimeseries, motif: &Motif) -> Vec<usize> {
-    let mdist = motif.distance;
-    let w = ts.w;
-    let mut idxs: Vec<usize> = ts
-        .distance_profile(motif.idx_a)
-        .iter()
-        .enumerate()
-        .filter(|&(i, _d)| i != motif.idx_a && i != motif.idx_b)
-        .filter_map(|(i, d)| if *d <= 2.0 * mdist { Some(i) } else { None })
-        .collect();
-
-    idxs.sort();
-    let mut output_idxs = Vec::new();
-    if !idxs.is_empty() {
-        output_idxs.push(idxs[0]);
-        for &i in &idxs[1..] {
-            if output_idxs.last().unwrap() + w < i {
-                output_idxs.push(i);
-            }
-        }
-    }
-
-    output_idxs
 }
 
 fn setup_logger(log_path: &str) -> Result<GlobalLoggerGuard> {
