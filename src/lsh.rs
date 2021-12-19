@@ -40,7 +40,6 @@ use std::{
     cell::{RefCell, UnsafeCell},
     cmp::Ordering,
     fmt::Debug,
-    iter::FromIterator,
     mem::size_of,
     ops::Range,
     sync::Arc,
@@ -544,21 +543,6 @@ impl Hasher {
     //// the LSH function. While the precise value of this parameter is not so important (since
     //// the effects on the collision probability of a misconfiguration can be counterbalanced by
     //// using a larger or smaller `k`), setting a sensible value can help a great deal.
-    ////
-    //// To this end, we use the following heuristic. We compute dot products between a number
-    //// `sample` of random normal vectors and all the subsequences of the time series. This is basically
-    //// simulating what happens during the LSH computation prior to the bucketing.
-    //// Then, we compute a histogram of the values of the dot products, to approximate their
-    //// probability distribution. The idea is that since there are dot product values which are more
-    //// likely than others, we want to split the highest density probability range (such that 3/4 of the mass
-    //// falls within it) into a
-    //// sensible number of buckets, say 8, so that the collision probability is moderate.
-    //// If we adopted a similar approach using the maximum and minimum sampled dot product values,
-    //// we would be tricked by long-tailed distributions. The consequence would be that a large number
-    //// of subsequences would collide on the same few values, either leading to a large number of distance
-    //// computations or requiring a large value of K, larger than the one hardcoded for simplicity in this module.
-    ////
-    //// By instead relying on the distribution, we select the width in a data-adaptive way.
     pub fn estimate_width(ts: &WindowedTimeseries, seed: u64) -> f64 {
         let timer = Instant::now();
         let mut d_min: Option<f64> = None;
