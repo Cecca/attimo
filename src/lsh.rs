@@ -191,6 +191,7 @@ impl HashCollection {
     //// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
     //// and a `Hasher`.
     pub fn from_ts(ts: &WindowedTimeseries, hasher: Arc<Hasher>) -> Self {
+        assert!(ts.num_subsequences() < u32::MAX as usize, "We use 32 bit integers as pointers into subsequences, this timeseries has too many subsequences.");
         println!(
             "Number of tensor repetitions: {}",
             hasher.tensor_repetitions
@@ -356,7 +357,7 @@ impl HashCollection {
 pub struct HashMatrix<'hasher> {
     /// Outer vector has one entry per repetition, inner vector has one entry per subsequence,
     /// and items are hash values and indices into the timeseries
-    hashes: Vec<Vec<(HashValue, usize)>>,
+    hashes: Vec<Vec<(HashValue, u32)>>,
     coll: &'hasher HashCollection,
 }
 
@@ -378,7 +379,7 @@ impl<'hasher> HashMatrix<'hasher> {
                 let mut rephashes = Vec::with_capacity(ns);
                 let start = Instant::now();
                 for i in 0..ns {
-                    rephashes.push((coll.hash_value(i, rep), i));
+                    rephashes.push((coll.hash_value(i, rep), i as u32));
                 }
                 let elapsed_hashes = start.elapsed();
                 let start = Instant::now();
@@ -408,7 +409,7 @@ impl<'hasher> HashMatrix<'hasher> {
         depth: usize,
         repetition: usize,
         exclusion_zone: usize,
-        output: &mut Vec<(Range<usize>, &'hashes [(HashValue, usize)])>,
+        output: &mut Vec<(Range<usize>, &'hashes [(HashValue, u32)])>,
     ) -> () {
         let timer = Instant::now();
         let column = &self.hashes[repetition];
@@ -419,11 +420,11 @@ impl<'hasher> HashMatrix<'hasher> {
         while idx < column.len() {
             let start = idx;
             let current = &column[idx].0;
-            let mut min_i = column[idx].1;
-            let mut max_i = column[idx].1;
+            let mut min_i = column[idx].1 as usize;
+            let mut max_i = column[idx].1 as usize;
             while idx < column.len() && column[idx].0.prefix_eq(current, depth) {
-                min_i = std::cmp::min(min_i, column[idx].1);
-                max_i = std::cmp::max(max_i, column[idx].1);
+                min_i = std::cmp::min(min_i, column[idx].1 as usize);
+                max_i = std::cmp::max(max_i, column[idx].1 as usize);
                 idx += 1;
             }
             //// We add only if the bucket is non-trivial
@@ -451,11 +452,11 @@ impl<'hasher> HashMatrix<'hasher> {
             while idx < column.len() {
                 let start = idx;
                 let current = &column[idx].0;
-                let mut min_i = column[idx].1;
-                let mut max_i = column[idx].1;
+                let mut min_i = column[idx].1 as usize;
+                let mut max_i = column[idx].1 as usize;
                 while idx < column.len() && column[idx].0.prefix_eq(current, depth) {
-                    min_i = std::cmp::min(min_i, column[idx].1);
-                    max_i = std::cmp::max(max_i, column[idx].1);
+                    min_i = std::cmp::min(min_i, column[idx].1 as usize);
+                    max_i = std::cmp::max(max_i, column[idx].1 as usize);
                     idx += 1;
                 }
                 //// We return only if the bucket contains a non-trivial match
@@ -544,8 +545,8 @@ impl Hasher {
             for (_, bucket) in probe_buckets {
                 for (_, a_idx) in bucket.iter() {
                     for (_, b_idx) in bucket.iter() {
-                        if *a_idx + ts.w < *b_idx {
-                            let d = zeucl(ts, *a_idx, *b_idx);
+                        if *a_idx + (ts.w as u32) < *b_idx {
+                            let d = zeucl(ts, *a_idx as usize, *b_idx as usize);
                             if d < d_min.unwrap_or(f64::INFINITY) {
                                 d_min.replace(d);
                             }
