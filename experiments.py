@@ -144,94 +144,94 @@ def run_attimo():
     db = get_db()
     datasets = get_datasets()
     threads = NUM_CPUS
-    motifs = 1
     repetitions = 50
     delta = 0.001
     seed = 14514
-    for dataset, window in datasets:
-        # Check if already run
-        execid = db.execute("""
-            select rowid from attimo
-            where hostname=:hostname
-              and version=:version
-              and dataset=:dataset
-              and threads=:threads
-              and repetitions=:repetitions
-              and delta=:delta
-              and seed=:seed
-              and window=:window
-              and motifs=:motifs
-            """,
-            {
-                "hostname": HOSTNAME,
-                "version": version,
-                "dataset": dataset,
-                "threads": threads,
-                "repetitions": repetitions,
-                "delta": delta,
-                "seed": seed,
-                "window": window,
-                "motifs":motifs,
-            }
-        ).fetchone()
-        if execid is not None:
-            print("experiment already executed (attimo id={})".format(execid[0]))
-            continue
+    for motifs in [1, 5, 10]:
+        for dataset, window in datasets:
+            # Check if already run
+            execid = db.execute("""
+                select rowid from attimo
+                where hostname=:hostname
+                and version=:version
+                and dataset=:dataset
+                and threads=:threads
+                and repetitions=:repetitions
+                and delta=:delta
+                and seed=:seed
+                and window=:window
+                and motifs=:motifs
+                """,
+                {
+                    "hostname": HOSTNAME,
+                    "version": version,
+                    "dataset": dataset,
+                    "threads": threads,
+                    "repetitions": repetitions,
+                    "delta": delta,
+                    "seed": seed,
+                    "window": window,
+                    "motifs":motifs,
+                }
+            ).fetchone()
+            if execid is not None:
+                print("experiment already executed (attimo id={})".format(execid[0]))
+                continue
 
-        start = time.time()
-        sp.run([
-            "attimo",
-            "--window", str(window),
-            "--motifs", str(motifs),
-            "--repetitions", str(repetitions),
-            "--delta", str(delta),
-            "--seed", str(seed),
-            "--log-path", "/tmp/attimo.json",
-            "--output", "/tmp/motifs.csv",
-            dataset
-        ]).check_returncode()
-        end = time.time()
-        elapsed = end - start
-        motif_pairs = pd.read_csv('/tmp/motifs.csv', names=['a', 'b','dist']).to_json(orient='records')
-        with open("/tmp/attimo.json") as fp:
-            log = json.dumps([json.loads(l) for l in fp.readlines()])
+            start = time.time()
+            sp.run([
+                "attimo",
+                "--window", str(window),
+                "--motifs", str(motifs),
+                "--repetitions", str(repetitions),
+                "--delta", str(delta),
+                "--seed", str(seed),
+                "--log-path", "/tmp/attimo.json",
+                "--output", "/tmp/motifs.csv",
+                dataset
+            ]).check_returncode()
+            end = time.time()
+            elapsed = end - start
+            motif_pairs = pd.read_csv('/tmp/motifs.csv', names=['a', 'b','dist']).to_json(orient='records')
+            with open("/tmp/attimo.json") as fp:
+                log = json.dumps([json.loads(l) for l in fp.readlines()])
 
-        os.remove("/tmp/attimo.json")
-        os.remove("/tmp/motifs.csv")
+            os.remove("/tmp/attimo.json")
+            os.remove("/tmp/motifs.csv")
 
-        db.execute("""
-            INSERT INTO attimo VALUES (
-                :hostname,
-                :gitsha,
-                :version,
-                :dataset,
-                :threads,
-                :repetitions,
-                :delta,
-                :seed,
-                :window,
-                :motifs,
-                :time_s,
-                :log,
-                :motif_pairs
-            );
-            """,
-            {
-                "hostname": HOSTNAME,
-                "gitsha": gitsha,
-                "version": version,
-                "dataset": dataset,
-                "threads": threads,
-                "repetitions": repetitions,
-                "delta": delta,
-                "seed": seed,
-                "window": window,
-                "motifs":motifs,
-                "time_s": elapsed,
-                "log": log,
-                "motif_pairs": motif_pairs
-            }
-        )
+            db.execute("""
+                INSERT INTO attimo VALUES (
+                    :hostname,
+                    :gitsha,
+                    :version,
+                    :dataset,
+                    :threads,
+                    :repetitions,
+                    :delta,
+                    :seed,
+                    :window,
+                    :motifs,
+                    :time_s,
+                    :log,
+                    :motif_pairs
+                );
+                """,
+                {
+                    "hostname": HOSTNAME,
+                    "gitsha": gitsha,
+                    "version": version,
+                    "dataset": dataset,
+                    "threads": threads,
+                    "repetitions": repetitions,
+                    "delta": delta,
+                    "seed": seed,
+                    "window": window,
+                    "motifs":motifs,
+                    "time_s": elapsed,
+                    "log": log,
+                    "motif_pairs": motif_pairs
+                }
+            )
 
 
 def run_scamp():
