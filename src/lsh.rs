@@ -27,7 +27,7 @@
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
 // TODO Remove this dependency
-use crate::timeseries::WindowedTimeseries;
+use crate::timeseries::{WindowedTimeseries, FFTData};
 use crate::{distance::zeucl, sort::*};
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
@@ -198,6 +198,11 @@ impl HashCollection {
         );
         let ns = ts.num_subsequences();
 
+        println!("Computing FFT data");
+        let timer = Instant::now();
+        let fft_data = ts.fft_data();
+        println!("Computed FFT data in {:?}", timer.elapsed());
+
         let mut left_pools = vec![0i8; hasher.tensor_repetitions * K_HALF * ns];
         let mut right_pools = vec![0i8; hasher.tensor_repetitions * K_HALF * ns];
         let uns_left_pools = UnsafeSlice::new(&mut left_pools);
@@ -223,7 +228,7 @@ impl HashCollection {
                     (&uns_right_pools, k - K_HALF)
                 };
 
-                hasher.hash_all(&ts, k, repetition, &mut buffer);
+                hasher.hash_all(&ts, &fft_data, k, repetition, &mut buffer);
                 for (i, h) in buffer.iter().enumerate() {
                     let idx = K_HALF * ns * repetition + i * K_HALF + offset;
                     //// This operation is `unsafe` but each index is accessed only once,
@@ -571,6 +576,7 @@ impl Hasher {
     pub fn hash_all(
         &self,
         ts: &WindowedTimeseries,
+        fft_data: &FFTData,
         k: usize,
         repetition: usize,
         buffer: &mut [i8],
@@ -579,7 +585,7 @@ impl Hasher {
         let v = self.get_vector(repetition, k);
         let shift = self.shifts[repetition * K + k];
         DOTP_BUFFER.with(|dotp_buf| {
-            ts.znormalized_sliding_dot_product(v, &mut dotp_buf.borrow_mut());
+            ts.znormalized_sliding_dot_product(v, fft_data, &mut dotp_buf.borrow_mut());
             for (i, dotp) in dotp_buf.borrow().iter().enumerate() {
                 let h = (dotp + shift) / self.width;
                 //// We only use the 8 lowest-order bits of each hash value, in order to use a bit less space.

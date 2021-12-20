@@ -58,11 +58,12 @@ pub fn bench_sliding_dot_product(c: &mut Criterion) {
             &n,
             |b, n| {
                 let ts = WindowedTimeseries::gen_randomwalk(*n, w, 12345);
+                let fft_data = ts.fft_data();
 
                 let rng = Xoroshiro128Plus::seed_from_u64(12344);
                 let v: Vec<f64> = rng.sample_iter(StandardNormal).take(w).collect();
                 let mut output = vec![0.0; ts.num_subsequences()];
-                b.iter(|| ts.sliding_dot_product(&v, &mut output))
+                b.iter(|| ts.sliding_dot_product(&v, &fft_data, &mut output))
             },
         );
     }
