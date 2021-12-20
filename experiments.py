@@ -113,6 +113,8 @@ def get_datasets():
         (prefix("data/ASTRO.csv", 800000), 100),
         (prefix("data/ASTRO.csv", 900000), 100),
         (prefix("data/ASTRO.csv", 1000000), 100),
+
+        ("data/HumanY.txt", 18000)
     ]
 
 def remove_trivial(df, w):
