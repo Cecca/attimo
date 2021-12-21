@@ -1,15 +1,16 @@
 theme_paper <- function() {
-    theme_classic()
+    theme_classic() +
+        theme(strip.background = element_blank())
 }
 
 dataset_info <- function() {
     tribble(
         ~dataset, ~n,
-        "data/ASTRO.csv", 1151349,
-        "data/ECG.csv", 7871870,
-        "data/EEG.csv", 543893,
-        "data/HumanY.txt", 26415045,
-        "data/GAP.csv", 2049279
+        "ASTRO", 1151349,
+        "ECG", 7871870,
+        "EMG", 543893,
+        "HumanY", 26415045,
+        "GAP", 2049279
     )
 }
 
@@ -18,7 +19,12 @@ load_attimo <- function() {
     tbl <- tbl(conn, "attimo") %>%
         filter(version == max(version)) %>%
         collect() %>%
-        mutate(algorithm = "attimo")
+        mutate(
+            algorithm = "attimo",
+            dataset = str_remove(dataset, "data/") %>%
+                str_remove("-\\d+") %>%
+                str_remove(".(csv|txt)")
+        )
     DBI::dbDisconnect(conn)
     tbl
 }
@@ -27,9 +33,24 @@ load_scamp <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "scamp") %>%
         collect() %>%
-        mutate(algorithm = "scamp")
+        mutate(
+            algorithm = "scamp",
+            dataset = str_remove(dataset, "data/") %>%
+                str_remove("-\\d+") %>%
+                str_remove(".(csv|txt)")
+        )
     DBI::dbDisconnect(conn)
     tbl
+}
+
+load_measures <- function() {
+    bind_rows(
+        read_csv("data/ASTRO.csv.measures") %>% mutate(dataset = "ASTRO"),
+        read_csv("data/ECG.csv.measures") %>% mutate(dataset = "ECG"),
+        read_csv("data/EMG.csv.measures") %>% mutate(dataset = "EMG"),
+        read_csv("data/GAP.csv.measures") %>% mutate(dataset = "GAP"),
+        read_csv("data/HumanY.txt.measures") %>% mutate(dataset = "HumanY")
+    ) %>% rename(window = w)
 }
 
 plot_scalability_n <- function(plotdata) {
@@ -94,4 +115,31 @@ plot_profile <- function(data_attimo) {
             linetype = "dashed"
         ) +
         theme_classic()
+}
+
+plot_measures <- function(data_measures) {
+    data_measures <- data_measures %>%
+        mutate(dataset = str_c(dataset, " (", window, ")"))
+    motif <- data_measures %>%
+        group_by(dataset, window) %>%
+        slice(1)
+
+    ggplot(data_measures) +
+        geom_density(aes(rc1), fill = "lightgray", alpha = 0.5) +
+        scale_x_log10(labels = scales::number_format(accuracy = 1)) +
+        labs(
+            x = "Nearest neighbor relative Contrast",
+            y = "Density"
+        ) +
+        facet_wrap(vars(dataset), scales = "free", nrow = 1) +
+        theme_paper()
+}
+
+latex_info <- function(data_motif_measures) {
+    inner_join(data_motif_measures, dataset_info()) %>%
+        select(dataset, n, window, rc1) %>%
+        arrange(n) %>%
+        mutate_if(is.numeric, scales::number_format(big.mark = "\\\\,")) %>%
+        kbl(format = "latex", booktabs = T, align = "lrrr", escape = F) %>%
+        write_file("imgs/dataset-info.tex")
 }

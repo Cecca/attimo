@@ -7,7 +7,8 @@ tar_option_set(packages = c(
     "tidyverse",
     "tidyjson",
     "lubridate",
-    "ggrepel"
+    "ggrepel",
+    "kableExtra"
 ))
 
 # Here we have the list of targets
@@ -24,6 +25,17 @@ list(
     tar_target(
         data_gpucluster,
         read_csv("gpucluster.csv") %>% mutate(algorithm = "scamp", hostname = "gpucluster")
+    ),
+    tar_target(
+        data_measures,
+        load_measures()
+    ),
+    # The measures for the motif in each data
+    tar_target(
+        data_motif_measures,
+        data_measures %>%
+            group_by(dataset, window) %>%
+            slice(1)
     ),
 
     # Figure scalability -------------------------------------------------------
@@ -51,20 +63,40 @@ list(
     ),
 
     # Figure profile -------------------------------------------------------
+    # tar_target(
+    #     fig_profile,
+    #     data_attimo %>%
+    #         filter(dataset == "data/HumanY.txt", motifs == 1) %>%
+    #         plot_profile()
+    # ),
+    # tar_target(
+    #     img_profile,
+    #     ggsave(
+    #         "imgs/profile.png",
+    #         plot = fig_profile,
+    #         width = 8,
+    #         height = 4,
+    #         dpi = 300
+    #     )
+    # ),
+
+    # Figure measures -------------------------------------------------------
     tar_target(
-        fig_profile,
-        data_attimo %>%
-            filter(dataset == "data/HumanY.txt", motifs == 1) %>%
-            plot_profile()
+        fig_measures,
+        plot_measures(data_measures)
     ),
     tar_target(
-        img_profile,
+        img_measures,
         ggsave(
-            "imgs/profile.png",
-            plot = fig_profile,
-            width = 8,
-            height = 4,
+            "imgs/measures.png",
+            plot = fig_measures,
+            width = 9,
+            height = 1.5,
             dpi = 300
         )
+    ),
+    tar_target(
+        table_info,
+        latex_info(data_motif_measures)
     )
 )
