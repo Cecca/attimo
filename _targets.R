@@ -21,6 +21,10 @@ list(
         data_scamp,
         load_scamp()
     ),
+    tar_target(
+        data_gpucluster,
+        read_csv("gpucluster.csv") %>% mutate(algorithm = "scamp", hostname = "gpucluster")
+    ),
 
     # Figure scalability -------------------------------------------------------
     tar_target(
