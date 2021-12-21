@@ -21,3 +21,4 @@ perf.data
 perf.data.old
 *.log
 .DS_Store
+/_targets
