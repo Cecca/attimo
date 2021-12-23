@@ -10,7 +10,8 @@ dataset_info <- function() {
         "ECG", 7871870,
         "EMG", 543893,
         "HumanY", 26415045,
-        "GAP", 2049279
+        "GAP", 2049279,
+        "freezer", 7430755
     )
 }
 
@@ -21,6 +22,7 @@ load_attimo <- function() {
         collect() %>%
         mutate(
             algorithm = "attimo",
+            path = dataset,
             dataset = str_remove(dataset, "data/") %>%
                 str_remove("-\\d+") %>%
                 str_remove(".(csv|txt)")
@@ -35,6 +37,7 @@ load_scamp <- function() {
         collect() %>%
         mutate(
             algorithm = "scamp",
+            path = dataset,
             dataset = str_remove(dataset, "data/") %>%
                 str_remove("-\\d+") %>%
                 str_remove(".(csv|txt)")
@@ -49,8 +52,20 @@ load_measures <- function() {
         read_csv("data/ECG.csv.measures") %>% mutate(dataset = "ECG"),
         read_csv("data/EMG.csv.measures") %>% mutate(dataset = "EMG"),
         read_csv("data/GAP.csv.measures") %>% mutate(dataset = "GAP"),
-        read_csv("data/HumanY.txt.measures") %>% mutate(dataset = "HumanY")
+        read_csv("data/HumanY.txt.measures") %>% mutate(dataset = "HumanY"),
+        read_csv("data/freezer.txt.measures") %>% mutate(dataset = "freezer")
     ) %>% rename(window = w)
+}
+
+get_motif_instances <- function(data_attimo) {
+    data_attimo %>%
+        filter(!str_detect(path, "-\\d+")) %>%
+        as_tbl_json(json.column = "motif_pairs") %>%
+        gather_array() %>%
+        filter(array.index == 1) %>%
+        spread_all() %>%
+        as_tibble() %>%
+        distinct(path, dataset, window, a, b, dist)
 }
 
 plot_scalability_n <- function(plotdata) {
@@ -133,6 +148,50 @@ plot_measures <- function(data_measures) {
         ) +
         facet_wrap(vars(dataset), scales = "free", nrow = 1) +
         theme_paper()
+}
+
+plot_motifs <- function(data_motif_occurences) {
+    dat <- data_motif_occurences %>%
+        arrange(dataset, window) %>%
+        group_by(dataset, path, window) %>%
+        slice(1) %>%
+        ungroup()
+    for (i in seq_len(nrow(dat))) {
+        # print(paste("Plotting motifs for", row$dataset, "with window", row$window))
+        row <- as.list(dat[i, ])
+        print(str(row))
+        corr <- 1 - row$dist^2 / (2 * row$window)
+        ts <- read_csv(row$path, col_names = "y") %>% pull()
+        a <- ts[row$a:(row$a + row$window - 1)]
+        b <- ts[row$b:(row$b + row$window - 1)]
+        # a <- (a - mean(a)) / sd(a)
+        # b <- (b - mean(b)) / sd(b)
+        plotdata <- tibble(
+            a = a,
+            b = b,
+            xs = 1:row$window
+        )
+
+        ggplot(plotdata, aes(xs)) +
+            geom_line(aes(y = a), color = "#f78a36") +
+            geom_line(aes(y = b), color = "#1788f9") +
+            labs(
+                title = str_c(
+                    row$dataset, " distance ", row$dist,
+                    " correlation ", corr
+                )
+            ) +
+            theme_paper() +
+            theme(
+                plot.title = element_text(size = 8),
+                axis.line.y = element_blank(),
+                axis.ticks.y = element_blank(),
+                axis.text.y = element_blank(),
+                axis.title = element_blank()
+            )
+        fname <- str_c("imgs/motifs-", row$dataset, "-", row$window, ".png")
+        ggsave(fname, width = 9, height = 1.2, dpi = 300)
+    }
 }
 
 latex_info <- function(data_motif_measures) {

@@ -37,6 +37,17 @@ list(
             group_by(dataset, window) %>%
             slice(1)
     ),
+    # The motif occurences
+    tar_target(
+        data_motif_occurences,
+        get_motif_instances(data_attimo)
+    ),
+
+    # Figure motifs ------------------------------------------------------------
+    tar_target(
+        imgs_motifs,
+        plot_motifs(data_motif_occurences)
+    ),
 
     # Figure scalability -------------------------------------------------------
     tar_target(
