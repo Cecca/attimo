@@ -234,7 +234,7 @@ pub fn motifs(
     );
     let mem_before = allocated();
     let mut hashes = pools.get_hash_matrix();
-    hashes.setup_hashes();
+    hashes.reset_hashes(K);
     let hashes_size = allocated() - mem_before;
     println!(
         "[{:?}] Computed hash matrix columns, {} bytes",
@@ -252,9 +252,6 @@ pub fn motifs(
 
     let mut stop = false;
 
-    //// This vector holds the boundaries between buckets. We reuse the allocations
-    let mut buckets = Vec::new();
-
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
     // let mut depth = crate::lsh::K as isize;
     let mut depth = hashes.non_trivial_depth(exclusion_zone) as isize;
@@ -267,13 +264,19 @@ pub fn motifs(
                 .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
         );
         pbar.set_message(format!("depth {}", depth));
+        hashes.reset_hashes(depth as usize);
+
+        // FIXME: Move this outside of the loop. You will have to fix lifetime issues
+        //// This vector holds the boundaries between buckets. We reuse the allocations
+        let mut buckets = Vec::new();
 
         for rep in 0..repetitions {
             let rep_bounds = &bounds[rep];
             let rep_cnt_dists = AtomicUsize::new(0);
+            let spurious_collisions_cnt = AtomicUsize::new(0);
             let rep_candidate_pairs = AtomicUsize::new(0);
             let rep_timer = Instant::now();
-            hashes.buckets_vec(depth as usize, rep, exclusion_zone, &mut buckets);
+            hashes.buckets_vec(rep, exclusion_zone, &mut buckets);
             let n_buckets = buckets.len();
 
             let tl_top = ThreadLocal::new();
@@ -309,26 +312,29 @@ pub fn motifs(
                                         //// We only process the pair if this is the first repetition in which
                                         //// they collide. We get this information from the pool of bits
                                         //// from which hash values for all repetitions are extracted.
-                                        let first_colliding_repetition: usize = pools
-                                            .first_collision(a_idx, b_idx, depth as usize)
-                                            .expect("hashes must collide in buckets");
-                                        if first_colliding_repetition == rep {
-                                            //// After computing the distance between the two subsequences,
-                                            //// we try to insert the pair in the top data structure
-                                            let d = zeucl(&ts, a_idx, b_idx);
-                                            rep_cnt_dists.fetch_add(1, Ordering::SeqCst);
+                                        if let Some(first_colliding_repetition) =
+                                            pools.first_collision(a_idx, b_idx, depth as usize)
+                                        {
+                                            if first_colliding_repetition == rep {
+                                                //// After computing the distance between the two subsequences,
+                                                //// we try to insert the pair in the top data structure
+                                                let d = zeucl(&ts, a_idx, b_idx);
+                                                rep_cnt_dists.fetch_add(1, Ordering::SeqCst);
 
-                                            //// This is the collision probability for this distance
-                                            let p = hasher.collision_probability_at(d);
+                                                //// This is the collision probability for this distance
+                                                let p = hasher.collision_probability_at(d);
 
-                                            let m = Motif {
-                                                idx_a: a_idx,
-                                                idx_b: b_idx,
-                                                distance: d,
-                                                elapsed: start.elapsed(),
-                                                collision_probability: p,
-                                            };
-                                            tl_top.borrow_mut().insert(m);
+                                                let m = Motif {
+                                                    idx_a: a_idx,
+                                                    idx_b: b_idx,
+                                                    distance: d,
+                                                    elapsed: start.elapsed(),
+                                                    collision_probability: p,
+                                                };
+                                                tl_top.borrow_mut().insert(m);
+                                            }
+                                        } else {
+                                            spurious_collisions_cnt.fetch_add(1, Ordering::SeqCst);
                                         }
                                     }
                                 }
@@ -342,6 +348,7 @@ pub fn motifs(
             for tl_top in tl_top.into_iter() {
                 top.merge(&tl_top.borrow());
             }
+            
 
             //// Now we update the bounds that have already been explored in this repetition
             //// for each node. This works and can be done here instead of the loop above
@@ -362,6 +369,7 @@ pub fn motifs(
                 "tag" => "profiling",
                 "computed_distances" => rep_cnt_dists.load(Ordering::SeqCst),
                 "candidate_pairs" => rep_candidate_pairs.load(Ordering::SeqCst),
+                "spurious_collisions" => spurious_collisions_cnt.load(Ordering::SeqCst),
                 "depth" => depth,
                 "repetition" => rep,
                 "time_s" => rep_elapsed.as_secs_f64()

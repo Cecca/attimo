@@ -27,8 +27,9 @@
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
 // TODO Remove this dependency
-use crate::timeseries::{WindowedTimeseries, FFTData};
+use crate::timeseries::{FFTData, WindowedTimeseries};
 use crate::{distance::zeucl, sort::*};
+use fxhash::FxHasher;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -37,8 +38,6 @@ use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
 use std::{
     cell::{RefCell, UnsafeCell},
-    cmp::Ordering,
-    fmt::Debug,
     ops::Range,
     sync::Arc,
     time::Instant,
@@ -60,59 +59,16 @@ pub const K_HALF: usize = K / 2;
 
 //// That said, here is the definition of a hash value, with several
 //// utility implementations following.
-#[derive(Clone, Eq, PartialEq)]
-pub struct HashValue {
-    pub hashes: [i8; K],
-}
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
+pub struct HashValue(u32);
 
 impl GetByte for HashValue {
     fn num_bytes(&self) -> usize {
-        self.hashes.len()
+        4
     }
     #[inline(always)]
     fn get_byte(&self, i: usize) -> u8 {
-        unsafe { *self.hashes.get_unchecked(i) as u8 }
-    }
-}
-
-impl Debug for HashValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.hashes)
-    }
-}
-
-//// We also use a custom implementation of the ordering, that sorts lexicographically the
-//// hash values from the first value, so that hashes _with the same prefix_ are all
-//// grouped together, for any prefix length.
-impl Ord for HashValue {
-    fn cmp(&self, other: &Self) -> Ordering {
-        debug_assert!(self.hashes.len() == other.hashes.len());
-        for (x, y) in self.hashes.iter().zip(other.hashes.iter()) {
-            if x < y {
-                return Ordering::Less;
-            } else if x > y {
-                return Ordering::Greater;
-            }
-        }
-        return Ordering::Equal;
-    }
-}
-
-impl PartialOrd for HashValue {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl HashValue {
-    //// Furthermore, we need a way to compare for equality on prefixes.
-    //// This method checks if two hash values have the same
-    //// prefix of a given length.
-    #[inline]
-    fn prefix_eq(&self, other: &Self, l: usize) -> bool {
-        debug_assert!(self.hashes.len() == other.hashes.len());
-        debug_assert!(l <= self.hashes.len());
-        self.hashes[..l] == other.hashes[..l]
+        (self.0 >> (8 * (std::mem::size_of::<u32>() - i - 1)) & 0xFF) as u8
     }
 }
 
@@ -168,8 +124,8 @@ pub struct HashCollection {
     // Both pools are organized as three dimensional matrices, in C order.
     // The stride in the first dimenson is `K_HALF*n_subsequences`, and the stride in the second
     // dimension is `K_HALF`.
-    left_pools: Vec<i8>,
-    right_pools: Vec<i8>,
+    left_pools: Vec<u8>,
+    right_pools: Vec<u8>,
 }
 
 impl HashCollection {
@@ -203,8 +159,8 @@ impl HashCollection {
         let fft_data = ts.fft_data();
         println!("Computed FFT data in {:?}", timer.elapsed());
 
-        let mut left_pools = vec![0i8; hasher.tensor_repetitions * K_HALF * ns];
-        let mut right_pools = vec![0i8; hasher.tensor_repetitions * K_HALF * ns];
+        let mut left_pools = vec![0u8; hasher.tensor_repetitions * K_HALF * ns];
+        let mut right_pools = vec![0u8; hasher.tensor_repetitions * K_HALF * ns];
         let uns_left_pools = UnsafeSlice::new(&mut left_pools);
         let uns_right_pools = UnsafeSlice::new(&mut right_pools);
 
@@ -251,34 +207,38 @@ impl HashCollection {
         }
     }
 
-    fn left(&self, i: usize, repetition: usize) -> &[i8] {
+    fn left(&self, i: usize, repetition: usize) -> &[u8] {
         let trep = repetition % self.hasher.tensor_repetitions;
         let idx = K_HALF * self.n_subsequences * trep + i * K_HALF;
         &self.left_pools[idx..idx + K_HALF]
     }
 
-    fn right(&self, i: usize, repetition: usize) -> &[i8] {
+    fn right(&self, i: usize, repetition: usize) -> &[u8] {
         let trep = repetition / self.hasher.tensor_repetitions;
         let idx = K_HALF * self.n_subsequences * trep + i * K_HALF;
         &self.right_pools[idx..idx + K_HALF]
     }
 
-    pub fn hash_value(&self, i: usize, repetition: usize) -> HashValue {
-        let mut output = [0; K];
-        output[0..K_HALF].copy_from_slice(self.left(i, repetition));
-        output[K_HALF..K].copy_from_slice(self.right(i, repetition));
-        HashValue { hashes: output }
+    pub fn hash_value(&self, i: usize, depth: usize, repetition: usize) -> HashValue {
+        use std::hash::Hasher;
+        let mut fx = FxHasher::default();
+        fx.write(&self.left(i, repetition)[0..std::cmp::min(K_HALF, depth)]);
+        if depth > K_HALF {
+            fx.write(&self.right(i, repetition)[0..(depth - K_HALF)]);
+        }
+        HashValue(fx.finish() as u32)
     }
 
-    #[cfg(test)]
-    pub fn first_collision_baseline(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
-        (0..self.hasher.repetitions)
-            .filter(|&rep| {
-                self.hash_value(i, rep)
-                    .prefix_eq(&self.hash_value(j, rep), depth)
-            })
-            .next()
-    }
+    // TODO: Reimplement this test
+    // #[cfg(test)]
+    // pub fn first_collision_baseline(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
+    //     (0..self.hasher.repetitions)
+    //         .filter(|&rep| {
+    //             self.hash_value(i, rep)
+    //                 .prefix_eq(&self.hash_value(j, rep), depth)
+    //         })
+    //         .next()
+    // }
 
     pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
         let jump = K_HALF * self.n_subsequences;
@@ -374,7 +334,9 @@ impl<'hasher> HashMatrix<'hasher> {
         Self { hashes, coll }
     }
 
-    pub fn setup_hashes(&mut self) {
+    pub fn reset_hashes(&mut self, depth: usize) {
+        // TODO: Re-use allocated memory
+        self.hashes.clear();
         let ns = self.coll.n_subsequences;
         let coll = &self.coll;
         let timer = Instant::now();
@@ -384,7 +346,7 @@ impl<'hasher> HashMatrix<'hasher> {
                 let mut rephashes = Vec::with_capacity(ns);
                 let start = Instant::now();
                 for i in 0..ns {
-                    rephashes.push((coll.hash_value(i, rep), i as u32));
+                    rephashes.push((coll.hash_value(i, depth, rep), i as u32));
                 }
                 let elapsed_hashes = start.elapsed();
                 let start = Instant::now();
@@ -411,7 +373,6 @@ impl<'hasher> HashMatrix<'hasher> {
 
     pub fn buckets_vec<'hashes>(
         &'hashes self,
-        depth: usize,
         repetition: usize,
         exclusion_zone: usize,
         output: &mut Vec<(Range<usize>, &'hashes [(HashValue, u32)])>,
@@ -424,10 +385,10 @@ impl<'hasher> HashMatrix<'hasher> {
         let mut idx = 0;
         while idx < column.len() {
             let start = idx;
-            let current = &column[idx].0;
+            let current: HashValue = column[idx].0;
             let mut min_i = column[idx].1 as usize;
             let mut max_i = column[idx].1 as usize;
-            while idx < column.len() && column[idx].0.prefix_eq(current, depth) {
+            while idx < column.len() && column[idx].0 == current {
                 min_i = std::cmp::min(min_i, column[idx].1 as usize);
                 max_i = std::cmp::max(max_i, column[idx].1 as usize);
                 idx += 1;
@@ -456,10 +417,10 @@ impl<'hasher> HashMatrix<'hasher> {
             let mut idx = 0;
             while idx < column.len() {
                 let start = idx;
-                let current = &column[idx].0;
+                let current: HashValue = column[idx].0;
                 let mut min_i = column[idx].1 as usize;
                 let mut max_i = column[idx].1 as usize;
-                while idx < column.len() && column[idx].0.prefix_eq(current, depth) {
+                while idx < column.len() && column[idx].0 == current {
                     min_i = std::cmp::min(min_i, column[idx].1 as usize);
                     max_i = std::cmp::max(max_i, column[idx].1 as usize);
                     idx += 1;
@@ -542,9 +503,9 @@ impl Hasher {
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
             let probe_collection = HashCollection::from_ts(&ts, probe_hasher);
             let mut probe_matrix = probe_collection.get_hash_matrix();
-            probe_matrix.setup_hashes();
+            probe_matrix.reset_hashes(K);
             let mut probe_buckets = Vec::new();
-            probe_matrix.buckets_vec(K, 0, ts.w, &mut probe_buckets);
+            probe_matrix.buckets_vec(0, ts.w, &mut probe_buckets);
             println!("  [{:?}] built required things", timer.elapsed());
 
             for (_, bucket) in probe_buckets {
@@ -579,7 +540,7 @@ impl Hasher {
         fft_data: &FFTData,
         k: usize,
         repetition: usize,
-        buffer: &mut [i8],
+        buffer: &mut [u8],
     ) {
         assert!(buffer.len() == ts.num_subsequences());
         let v = self.get_vector(repetition, k);
@@ -593,7 +554,7 @@ impl Hasher {
                 //// truncating zeros in all hash values. When we truncate other bit patters
                 //// we are just increasing the collision probability, which harms performance
                 //// but not correctness
-                buffer[i] = (h as i64 & 0xFFi64) as i8;
+                buffer[i] = ((h as i64 & 0xFFi64) as i8) as u8;
             }
         });
     }
@@ -622,10 +583,11 @@ mod test {
             for i in 0..ts.num_subsequences() {
                 for j in 0..ts.num_subsequences() {
                     // println!("i={} j={}", i, j);
-                    assert_eq!(
-                        pools.first_collision(i, j, depth),
-                        pools.first_collision_baseline(i, j, depth)
-                    );
+                    // assert_eq!(
+                    //     pools.first_collision(i, j, depth),
+                    //     pools.first_collision_baseline(i, j, depth)
+                    // );
+                    todo!()
                 }
             }
         }

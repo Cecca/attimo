@@ -174,39 +174,39 @@ pub fn bench_sort_hashes(c: &mut Criterion) {
     group.finish()
 }
 
-pub fn bench_sort_uniform_hashes(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sorting hashes uniform");
-    let n = 1000000;
-    let mut rng = Xoroshiro128PlusPlus::seed_from_u64(1234);
-    let uniform = Uniform::new(i8::MIN, i8::MAX);
-    let hashes: Vec<HashValue> = (0..n)
-        .map(|_| {
-            let mut hashes: [i8; 32] = [0; 32];
-            for (i, x) in uniform.sample_iter(&mut rng).take(32).enumerate() {
-                hashes[i] = x;
-            }
-            HashValue { hashes }
-        })
-        .collect(); // uniform.sample_iter(&mut rng).take(n).collect();
+// pub fn bench_sort_uniform_hashes(c: &mut Criterion) {
+//     let mut group = c.benchmark_group("sorting hashes uniform");
+//     let n = 1000000;
+//     let mut rng = Xoroshiro128PlusPlus::seed_from_u64(1234);
+//     let uniform = Uniform::new(i8::MIN, i8::MAX);
+//     let hashes: Vec<HashValue> = (0..n)
+//         .map(|_| {
+//             let mut hashes: [i8; 32] = [0; 32];
+//             for (i, x) in uniform.sample_iter(&mut rng).take(32).enumerate() {
+//                 hashes[i] = x;
+//             }
+//             HashValue { hashes }
+//         })
+//         .collect(); // uniform.sample_iter(&mut rng).take(n).collect();
 
-    group.bench_function("rust unstable sort", |b| {
-        b.iter_batched(
-            || hashes.clone(),
-            |mut hashes| hashes.sort_unstable(),
-            criterion::BatchSize::LargeInput,
-        )
-    });
+//     group.bench_function("rust unstable sort", |b| {
+//         b.iter_batched(
+//             || hashes.clone(),
+//             |mut hashes| hashes.sort_unstable(),
+//             criterion::BatchSize::LargeInput,
+//         )
+//     });
 
-    group.bench_function("radix sort", |b| {
-        b.iter_batched(
-            || hashes.clone(),
-            |mut hashes| hashes.radix_sort(),
-            criterion::BatchSize::LargeInput,
-        )
-    });
+//     group.bench_function("radix sort", |b| {
+//         b.iter_batched(
+//             || hashes.clone(),
+//             |mut hashes| hashes.radix_sort(),
+//             criterion::BatchSize::LargeInput,
+//         )
+//     });
 
-    group.finish()
-}
+//     group.finish()
+// }
 
 pub fn bench_zdot(c: &mut Criterion) {
     let n = 3000;
@@ -239,7 +239,7 @@ pub fn bench_first_collision(c: &mut Criterion) {
     let h = Hasher::new(w, repetitions, 10.0, 12345);
     let pools = HashCollection::from_ts(&ts, &h);
     let mut hash_matrix = pools.get_hash_matrix();
-    hash_matrix.setup_hashes();
+    hash_matrix.reset_hashes();
 
     let mut buckets = hash_matrix.buckets_vec(depth, 0);
     buckets.sort_by_key(|bucket| Reverse(bucket.0.len()));
