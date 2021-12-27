@@ -38,7 +38,6 @@ use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
 use std::{
     cell::{RefCell, UnsafeCell},
-    ops::Range,
     sync::Arc,
     time::Instant,
 };

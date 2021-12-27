@@ -14,7 +14,6 @@ use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
 use std::cell::RefCell;
-use std::ops::Range;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -282,11 +281,11 @@ pub fn motifs(
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
                         let bucket = &buckets[i];
 
-                        for (a_offset, (_, a_idx)) in bucket.iter().enumerate() {
+                        for (_, a_idx) in bucket.iter() {
                             let a_idx = *a_idx as usize;
                             // let a_already_checked = rep_bounds[a_idx].clone();
                             // let a_hash_idx = hash_range.start + a_offset;
-                            for (b_offset, (_, b_idx)) in bucket.iter().enumerate() {
+                            for (_, b_idx) in bucket.iter() {
                                 let b_idx = *b_idx as usize;
                                 //// Here we handle trivial matches: we don't consider a pair if the difference between
                                 //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
