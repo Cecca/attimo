@@ -404,43 +404,6 @@ impl<'hasher> HashMatrix<'hasher> {
             "time_s" => timer.elapsed().as_secs_f64()
         );
     }
-
-    /// Return the deepest level of the tree such that there
-    /// is at least one subtree with more than two leaves
-    pub fn non_trivial_depth(&self, exclusion_zone: usize) -> usize {
-        let timer = Instant::now();
-        let repetition = 0;
-        let column = &self.hashes[repetition];
-
-        let mut depth = K;
-        while depth > 0 {
-            let mut idx = 0;
-            while idx < column.len() {
-                let start = idx;
-                let current: HashValue = column[idx].0;
-                let mut min_i = column[idx].1 as usize;
-                let mut max_i = column[idx].1 as usize;
-                while idx < column.len() && column[idx].0 == current {
-                    min_i = std::cmp::min(min_i, column[idx].1 as usize);
-                    max_i = std::cmp::max(max_i, column[idx].1 as usize);
-                    idx += 1;
-                }
-                //// We return only if the bucket contains a non-trivial match
-                if idx - start > 1 && min_i + exclusion_zone < max_i {
-                    return depth;
-                }
-            }
-
-            depth -= 1;
-        }
-
-        info!("finding non-trivial depth";
-            "tag" => "profiling",
-            "time_s" => timer.elapsed().as_secs_f64()
-        );
-
-        0
-    }
 }
 
 /// Data structure to do LSH of subsequences.

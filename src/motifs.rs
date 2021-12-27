@@ -232,14 +232,10 @@ pub fn motifs(
         start.elapsed(),
         PrettyBytes(pools_size)
     );
-    let mem_before = allocated();
     let mut hashes = pools.get_hash_matrix();
-    hashes.reset_hashes(K);
-    let hashes_size = allocated() - mem_before;
     println!(
-        "[{:?}] Computed hash matrix columns, {} bytes",
-        start.elapsed(),
-        PrettyBytes(hashes_size)
+        "[{:?}] Computed hash matrix columns",
+        start.elapsed()
     );
 
     //// Define upper and lower bounds, to avoid repeating already-done comparisons
@@ -253,8 +249,7 @@ pub fn motifs(
     let mut stop = false;
 
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
-    // let mut depth = crate::lsh::K as isize;
-    let mut depth = hashes.non_trivial_depth(exclusion_zone) as isize;
+    let mut depth = crate::lsh::K as isize;
     while depth >= 0 && !stop {
         let depth_timer = Instant::now();
         let pbar = ProgressBar::new(repetitions as u64);

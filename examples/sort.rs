@@ -32,7 +32,6 @@ fn main() {
     let hasher = Arc::new(Hasher::new(300, 200, 2.0, 123));
     let hc = HashCollection::from_ts(&ts, hasher);
     let v: Vec<(HashValue, usize)> = (0..n).map(|i| (hc.hash_value(i, attimo::lsh::K, 0), i)).collect();
-    // let v: Vec<HashValue> = (0..n).map(|i| hc.hash_value(i, 0)).collect();
     println!("...{:?}", start.elapsed());
 
     println!("Radix sort");
