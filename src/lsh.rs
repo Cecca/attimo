@@ -375,7 +375,7 @@ impl<'hasher> HashMatrix<'hasher> {
         &'hashes self,
         repetition: usize,
         exclusion_zone: usize,
-        output: &mut Vec<(Range<usize>, &'hashes [(HashValue, u32)])>,
+        output: &mut Vec<&'hashes [(HashValue, u32)]>,
     ) -> () {
         let timer = Instant::now();
         let column = &self.hashes[repetition];
@@ -395,7 +395,7 @@ impl<'hasher> HashMatrix<'hasher> {
             }
             //// We add only if the bucket is non-trivial
             if idx - start > 1 && min_i + exclusion_zone < max_i {
-                output.push((start..idx, &column[start..idx]));
+                output.push(&column[start..idx]);
             }
         }
         info!("computing bucket boundaries";
@@ -471,7 +471,7 @@ impl Hasher {
             probe_matrix.buckets_vec(0, ts.w, &mut probe_buckets);
             println!("  [{:?}] built required things", timer.elapsed());
 
-            for (_, bucket) in probe_buckets {
+            for bucket in probe_buckets {
                 for (_, a_idx) in bucket.iter() {
                     for (_, b_idx) in bucket.iter() {
                         if *a_idx + (ts.w as u32) < *b_idx {

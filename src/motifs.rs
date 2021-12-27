@@ -233,14 +233,7 @@ pub fn motifs(
         PrettyBytes(pools_size)
     );
     let mut hashes = pools.get_hash_matrix();
-    println!(
-        "[{:?}] Computed hash matrix columns",
-        start.elapsed()
-    );
-
-    //// Define upper and lower bounds, to avoid repeating already-done comparisons
-    //// We have a range of already examined hash indices for each element and repetition
-    let mut bounds: Vec<Vec<Range<usize>>> = vec![vec![0..0; ts.num_subsequences()]; repetitions];
+    println!("[{:?}] Computed hash matrix columns", start.elapsed());
 
     let cnt_dist = AtomicUsize::new(0);
 
@@ -250,6 +243,7 @@ pub fn motifs(
 
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
     let mut depth = crate::lsh::K as isize;
+    let mut previous_depth = None;
     while depth >= 0 && !stop {
         let depth_timer = Instant::now();
         let pbar = ProgressBar::new(repetitions as u64);
@@ -266,7 +260,6 @@ pub fn motifs(
         let mut buckets = Vec::new();
 
         for rep in 0..repetitions {
-            let rep_bounds = &bounds[rep];
             let rep_cnt_dists = AtomicUsize::new(0);
             let spurious_collisions_cnt = AtomicUsize::new(0);
             let rep_candidate_pairs = AtomicUsize::new(0);
@@ -287,50 +280,55 @@ pub fn motifs(
                     // pbar.println(format!("Active threads {}", 1 + active_threads.fetch_add(1, Ordering::SeqCst)));
                     let tl_top = tl_top.get_or(|| RefCell::new(top.clone()));
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
-                        let (hash_range, bucket) = &buckets[i];
+                        let bucket = &buckets[i];
 
                         for (a_offset, (_, a_idx)) in bucket.iter().enumerate() {
                             let a_idx = *a_idx as usize;
-                            let a_already_checked = rep_bounds[a_idx].clone();
-                            let a_hash_idx = hash_range.start + a_offset;
+                            // let a_already_checked = rep_bounds[a_idx].clone();
+                            // let a_hash_idx = hash_range.start + a_offset;
                             for (b_offset, (_, b_idx)) in bucket.iter().enumerate() {
                                 let b_idx = *b_idx as usize;
                                 //// Here we handle trivial matches: we don't consider a pair if the difference between
                                 //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
                                 if a_idx + exclusion_zone < b_idx {
-                                    let b_hash_idx = hash_range.start + b_offset;
-                                    let b_already_checked = rep_bounds[b_idx].clone();
-                                    let check_a = !a_already_checked.contains(&b_hash_idx);
-                                    let check_b = !b_already_checked.contains(&a_hash_idx);
-                                    if check_a || check_b {
-                                        rep_candidate_pairs.fetch_add(1, Ordering::SeqCst);
-                                        //// We only process the pair if this is the first repetition in which
-                                        //// they collide. We get this information from the pool of bits
-                                        //// from which hash values for all repetitions are extracted.
-                                        if let Some(first_colliding_repetition) =
-                                            pools.first_collision(a_idx, b_idx, depth as usize)
+                                    // let b_hash_idx = hash_range.start + b_offset;
+                                    // let b_already_checked = rep_bounds[b_idx].clone();
+                                    // let check_a = !a_already_checked.contains(&b_hash_idx);
+                                    // let check_b = !b_already_checked.contains(&a_hash_idx);
+                                    // if check_a || check_b {
+                                    rep_candidate_pairs.fetch_add(1, Ordering::SeqCst);
+                                    //// We only process the pair if this is the first repetition in which
+                                    //// they collide. We get this information from the pool of bits
+                                    //// from which hash values for all repetitions are extracted.
+                                    if let Some(first_colliding_repetition) =
+                                        pools.first_collision(a_idx, b_idx, depth as usize)
+                                    {
+                                        //// This is the first collision in this iteration, _and_ the pair didn't collide
+                                        //// at a deeper level.
+                                        if first_colliding_repetition == rep
+                                            && previous_depth
+                                                .map(|d| pools.first_collision(a_idx, b_idx, d).is_none())
+                                                .unwrap_or(true)
                                         {
-                                            if first_colliding_repetition == rep {
-                                                //// After computing the distance between the two subsequences,
-                                                //// we try to insert the pair in the top data structure
-                                                let d = zeucl(&ts, a_idx, b_idx);
-                                                rep_cnt_dists.fetch_add(1, Ordering::SeqCst);
+                                            //// After computing the distance between the two subsequences,
+                                            //// we try to insert the pair in the top data structure
+                                            let d = zeucl(&ts, a_idx, b_idx);
+                                            rep_cnt_dists.fetch_add(1, Ordering::SeqCst);
 
-                                                //// This is the collision probability for this distance
-                                                let p = hasher.collision_probability_at(d);
+                                            //// This is the collision probability for this distance
+                                            let p = hasher.collision_probability_at(d);
 
-                                                let m = Motif {
-                                                    idx_a: a_idx,
-                                                    idx_b: b_idx,
-                                                    distance: d,
-                                                    elapsed: start.elapsed(),
-                                                    collision_probability: p,
-                                                };
-                                                tl_top.borrow_mut().insert(m);
-                                            }
-                                        } else {
-                                            spurious_collisions_cnt.fetch_add(1, Ordering::SeqCst);
+                                            let m = Motif {
+                                                idx_a: a_idx,
+                                                idx_b: b_idx,
+                                                distance: d,
+                                                elapsed: start.elapsed(),
+                                                collision_probability: p,
+                                            };
+                                            tl_top.borrow_mut().insert(m);
                                         }
+                                    } else {
+                                        spurious_collisions_cnt.fetch_add(1, Ordering::SeqCst);
                                     }
                                 }
                             }
@@ -342,21 +340,6 @@ pub fn motifs(
             //// Now merge the information from the thread local tops
             for tl_top in tl_top.into_iter() {
                 top.merge(&tl_top.borrow());
-            }
-            
-
-            //// Now we update the bounds that have already been explored in this repetition
-            //// for each node. This works and can be done here instead of the loop above
-            //// because each subsequence falls into a single bucket in any given
-            //// repetition.
-            let rep_bounds = &mut bounds[rep];
-            for (hash_range, bucket) in buckets.iter() {
-                for &(_, idx) in bucket.iter() {
-                    //// Mark the bucket as seen for the ref_idx subsequence. All the points in the
-                    //// bucket go through here, irrespective of how they were processed in
-                    //// the loop above.
-                    rep_bounds[idx as usize] = hash_range.clone();
-                }
             }
 
             let rep_elapsed = rep_timer.elapsed();
@@ -412,6 +395,7 @@ pub fn motifs(
         //// are going to evaluate more pairs, but we will not miss any pair that would have been evaluated at
         //// deeper levels.
         if !stop {
+            previous_depth.replace(depth as usize);
             if let Some(kth) = top.k_th() {
                 let orig_depth = depth;
                 while depth >= 0 {
