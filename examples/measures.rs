@@ -9,8 +9,10 @@ use rand_distr::Uniform;
 use rand_xoshiro::Xoshiro256StarStar;
 use rayon::prelude::*;
 use std::fs::File;
+use std::fs::OpenOptions;
 use std::io::{prelude::*, BufWriter};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 #[derive(FromArgs)]
 /// Compute the Local Intrinsic Dimensionality of datasets
@@ -104,10 +106,17 @@ fn main() -> Result<()> {
 
     pbar.finish_and_clear();
 
-    let output_path = format!("{}.measures", args.path.to_str().unwrap());
-    let mut output_file =
-        BufWriter::new(File::create(output_path).context("creating output file")?);
-    writeln!(output_file, "id,w,lid,rc1,rc10")?;
+    let output_path = PathBuf::from_str(&format!("{}.measures", args.path.to_str().unwrap()))?;
+    let write_header = !output_path.is_file();
+    let mut output_file = BufWriter::new(
+        OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(output_path)?,
+    );
+    if write_header {
+        writeln!(output_file, "id,w,lid,rc1,rc10")?;
+    }
     for (i, m) in lids {
         writeln!(output_file, "{},{},{},{},{}", i, ts.w, m.lid, m.rc1, m.rc10)?;
     }
