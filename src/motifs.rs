@@ -231,14 +231,14 @@ pub fn motifs(
         start.elapsed(),
         PrettyBytes(pools_size)
     );
-    let mut hashes = pools.get_hash_matrix();
-    println!("[{:?}] Computed hash matrix columns", start.elapsed());
 
     let cnt_dist = AtomicUsize::new(0);
 
     let mut top = TopK::new(topk, exclusion_zone);
 
     let mut stop = false;
+
+    let mut column_buffer = Vec::new();
 
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
     let mut depth = crate::lsh::K as isize;
@@ -252,18 +252,17 @@ pub fn motifs(
                 .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
         );
         pbar.set_message(format!("depth {}", depth));
-        hashes.reset_hashes(depth as usize);
 
-        // FIXME: Move this outside of the loop. You will have to fix lifetime issues
-        //// This vector holds the boundaries between buckets. We reuse the allocations
-        let mut buckets = Vec::new();
 
         for rep in 0..repetitions {
+            // FIXME: Move this outside of the loop. You will have to fix lifetime issues
+            //// This vector holds the boundaries between buckets. We reuse the allocations
+            let mut buckets = Vec::new();
             let rep_cnt_dists = AtomicUsize::new(0);
             let spurious_collisions_cnt = AtomicUsize::new(0);
             let rep_candidate_pairs = AtomicUsize::new(0);
             let rep_timer = Instant::now();
-            hashes.buckets_vec(rep, exclusion_zone, &mut buckets);
+            pools.group_subsequences(depth as usize, rep, exclusion_zone, &mut column_buffer, &mut buckets);
             let n_buckets = buckets.len();
 
             let tl_top = ThreadLocal::new();

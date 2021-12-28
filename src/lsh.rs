@@ -314,6 +314,61 @@ impl HashCollection {
     pub fn get_hash_matrix(&self) -> HashMatrix {
         HashMatrix::new(self)
     }
+
+    pub fn group_subsequences<'buf>(
+        &self,
+        depth: usize,
+        repetition: usize,
+        exclusion_zone: usize,
+        // This buffer emulates the column of the hash matrix
+        buffer: &'buf mut Vec<(HashValue, u32)>,
+        output: &mut Vec<&'buf [(HashValue, u32)]>,
+    ) -> () {
+        let ns = self.n_subsequences;
+
+        buffer.clear();
+        output.clear();
+
+        let start = Instant::now();
+        buffer.par_extend((0..ns).into_par_iter().map(|i|
+            (self.hash_value(i, depth, repetition), i as u32)
+        ));
+        let elapsed_hashes = start.elapsed();
+        let start = Instant::now();
+        buffer.par_sort_unstable();
+        let elapsed_sort = start.elapsed();
+        debug_assert!(buffer.is_sorted_by_key(|pair| pair.0.clone()));
+        info!("column building";
+            "tag" => "profiling",
+            "repetition" => repetition,
+            "time_hashes_s" => elapsed_hashes.as_secs_f64(),
+            "time_sort_s" => elapsed_sort.as_secs_f64(),
+            "time_s" => (elapsed_hashes + elapsed_sort).as_secs_f64()
+        );
+
+        let timer = Instant::now();
+        let mut idx = 0;
+        while idx < buffer.len() {
+            let start = idx;
+            let current: HashValue = buffer[idx].0;
+            let mut min_i = buffer[idx].1 as usize;
+            let mut max_i = buffer[idx].1 as usize;
+            while idx < buffer.len() && buffer[idx].0 == current {
+                min_i = std::cmp::min(min_i, buffer[idx].1 as usize);
+                max_i = std::cmp::max(max_i, buffer[idx].1 as usize);
+                idx += 1;
+            }
+            //// We add only if the bucket is non-trivial
+            if idx - start > 1 && min_i + exclusion_zone < max_i {
+                output.push(&buffer[start..idx]);
+            }
+        }
+        info!("computing bucket boundaries";
+            "tag" => "profiling",
+            "repetition" => repetition,
+            "time_s" => timer.elapsed().as_secs_f64()
+        );
+    }
 }
 
 //// From the collection defined above we can generate a matrix of hash values.
