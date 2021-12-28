@@ -238,7 +238,11 @@ pub fn motifs(
 
     let mut stop = false;
 
+    //// This vector holds the (sorted) hashed subsequences, and their index
     let mut column_buffer = Vec::new();
+    //// This vector holds the boundaries between buckets. We reuse the allocations
+    let mut buckets = Vec::new();
+
 
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
     let mut depth = crate::lsh::K as isize;
@@ -255,9 +259,6 @@ pub fn motifs(
 
 
         for rep in 0..repetitions {
-            // FIXME: Move this outside of the loop. You will have to fix lifetime issues
-            //// This vector holds the boundaries between buckets. We reuse the allocations
-            let mut buckets = Vec::new();
             let rep_cnt_dists = AtomicUsize::new(0);
             let spurious_collisions_cnt = AtomicUsize::new(0);
             let rep_candidate_pairs = AtomicUsize::new(0);
@@ -278,7 +279,7 @@ pub fn motifs(
                     // pbar.println(format!("Active threads {}", 1 + active_threads.fetch_add(1, Ordering::SeqCst)));
                     let tl_top = tl_top.get_or(|| RefCell::new(top.clone()));
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
-                        let bucket = &buckets[i];
+                        let bucket = &column_buffer[buckets[i].clone()];
 
                         for (_, a_idx) in bucket.iter() {
                             let a_idx = *a_idx as usize;

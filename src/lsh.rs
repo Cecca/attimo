@@ -36,6 +36,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
+use std::ops::Range;
 use std::{
     cell::{RefCell, UnsafeCell},
     sync::Arc,
@@ -315,14 +316,14 @@ impl HashCollection {
         HashMatrix::new(self)
     }
 
-    pub fn group_subsequences<'buf>(
+    pub fn group_subsequences(
         &self,
         depth: usize,
         repetition: usize,
         exclusion_zone: usize,
         // This buffer emulates the column of the hash matrix
-        buffer: &'buf mut Vec<(HashValue, u32)>,
-        output: &mut Vec<&'buf [(HashValue, u32)]>,
+        buffer: &mut Vec<(HashValue, u32)>,
+        output: &mut Vec<Range<usize>>,
     ) -> () {
         let ns = self.n_subsequences;
 
@@ -360,7 +361,7 @@ impl HashCollection {
             }
             //// We add only if the bucket is non-trivial
             if idx - start > 1 && min_i + exclusion_zone < max_i {
-                output.push(&buffer[start..idx]);
+                output.push(start..idx);
             }
         }
         info!("computing bucket boundaries";
