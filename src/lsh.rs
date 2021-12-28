@@ -312,10 +312,6 @@ impl HashCollection {
         n_collisions as f64 / (2 * K_HALF * self.hasher.tensor_repetitions) as f64
     }
 
-    pub fn get_hash_matrix(&self) -> HashMatrix {
-        HashMatrix::new(self)
-    }
-
     pub fn group_subsequences(
         &self,
         depth: usize,
@@ -331,9 +327,11 @@ impl HashCollection {
         output.clear();
 
         let start = Instant::now();
-        buffer.par_extend((0..ns).into_par_iter().map(|i|
-            (self.hash_value(i, depth, repetition), i as u32)
-        ));
+        buffer.par_extend(
+            (0..ns)
+                .into_par_iter()
+                .map(|i| (self.hash_value(i, depth, repetition), i as u32)),
+        );
         let elapsed_hashes = start.elapsed();
         let start = Instant::now();
         buffer.par_sort_unstable();
@@ -362,95 +360,6 @@ impl HashCollection {
             //// We add only if the bucket is non-trivial
             if idx - start > 1 && min_i + exclusion_zone < max_i {
                 output.push(start..idx);
-            }
-        }
-        info!("computing bucket boundaries";
-            "tag" => "profiling",
-            "repetition" => repetition,
-            "time_s" => timer.elapsed().as_secs_f64()
-        );
-    }
-}
-
-//// From the collection defined above we can generate a matrix of hash values.
-
-pub struct HashMatrix<'hasher> {
-    /// Outer vector has one entry per repetition, inner vector has one entry per subsequence,
-    /// and items are hash values and indices into the timeseries
-    hashes: Vec<Vec<(HashValue, u32)>>,
-    coll: &'hasher HashCollection,
-}
-
-impl<'hasher> HashMatrix<'hasher> {
-    fn new(coll: &'hasher HashCollection) -> Self {
-        //// We just initialize the vector, which we keep empty at this point. It will
-        //// be lazily populated if/when needed.
-        let hashes = Vec::with_capacity(coll.hasher.repetitions);
-        Self { hashes, coll }
-    }
-
-    pub fn reset_hashes(&mut self, depth: usize) {
-        // TODO: Re-use allocated memory
-        self.hashes.clear();
-        let ns = self.coll.n_subsequences;
-        let coll = &self.coll;
-        let timer = Instant::now();
-        let it = (0..self.coll.hasher.repetitions)
-            .into_par_iter()
-            .map(|rep| {
-                let mut rephashes = Vec::with_capacity(ns);
-                let start = Instant::now();
-                for i in 0..ns {
-                    rephashes.push((coll.hash_value(i, depth, rep), i as u32));
-                }
-                let elapsed_hashes = start.elapsed();
-                let start = Instant::now();
-                rephashes.sort_unstable();
-                let elapsed_sort = start.elapsed();
-                debug_assert!(rephashes.is_sorted_by_key(|pair| pair.0.clone()));
-                info!("column building";
-                    "tag" => "profiling",
-                    "repetition" => rep,
-                    "time_hashes_s" => elapsed_hashes.as_secs_f64(),
-                    "time_sort_s" => elapsed_sort.as_secs_f64(),
-                    "time_s" => (elapsed_hashes + elapsed_sort).as_secs_f64()
-                );
-                rephashes
-            });
-        self.hashes.par_extend(it);
-
-        let elapsed = timer.elapsed();
-        info!("matrix building";
-            "tag" => "profiling",
-            "time_s" => elapsed.as_secs_f64()
-        );
-    }
-
-    pub fn buckets_vec<'hashes>(
-        &'hashes self,
-        repetition: usize,
-        exclusion_zone: usize,
-        output: &mut Vec<&'hashes [(HashValue, u32)]>,
-    ) -> () {
-        let timer = Instant::now();
-        let column = &self.hashes[repetition];
-
-        output.clear();
-
-        let mut idx = 0;
-        while idx < column.len() {
-            let start = idx;
-            let current: HashValue = column[idx].0;
-            let mut min_i = column[idx].1 as usize;
-            let mut max_i = column[idx].1 as usize;
-            while idx < column.len() && column[idx].0 == current {
-                min_i = std::cmp::min(min_i, column[idx].1 as usize);
-                max_i = std::cmp::max(max_i, column[idx].1 as usize);
-                idx += 1;
-            }
-            //// We add only if the bucket is non-trivial
-            if idx - start > 1 && min_i + exclusion_zone < max_i {
-                output.push(&column[start..idx]);
             }
         }
         info!("computing bucket boundaries";
@@ -520,13 +429,13 @@ impl Hasher {
             println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
             let probe_collection = HashCollection::from_ts(&ts, probe_hasher);
-            let mut probe_matrix = probe_collection.get_hash_matrix();
-            probe_matrix.reset_hashes(K);
+            let mut probe_column = Vec::new();
             let mut probe_buckets = Vec::new();
-            probe_matrix.buckets_vec(0, ts.w, &mut probe_buckets);
+            probe_collection.group_subsequences(K, 0, ts.w, &mut probe_column, &mut probe_buckets);
             println!("  [{:?}] built required things", timer.elapsed());
 
             for bucket in probe_buckets {
+                let bucket = &probe_column[bucket];
                 for (_, a_idx) in bucket.iter() {
                     for (_, b_idx) in bucket.iter() {
                         if *a_idx + (ts.w as u32) < *b_idx {
