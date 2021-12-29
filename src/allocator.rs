@@ -42,3 +42,21 @@ pub fn monitor(period: Duration, flag: Arc<AtomicBool>) -> JoinHandle<()> {
         ()
     })
 }
+
+#[macro_export]
+macro_rules! alloc_cnt {
+    ($what:literal; $body:block) => {
+        {
+            let __mem_before = allocated();
+            let r = $body;
+            let __mem_after = allocated();
+            info!(
+                "allocated";
+                "what" => $what,
+                "memory_bytes" => __mem_after - __mem_before,
+                "memory_gb" => (__mem_after - __mem_before) as f64 / (1024.0 * 1024.0 * 1024.0),
+            );
+            r
+        }
+    };
+}

@@ -26,6 +26,7 @@
 //// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
+use crate::{allocator::*, alloc_cnt};
 // TODO Remove this dependency
 use crate::timeseries::{FFTData, WindowedTimeseries};
 use crate::sort::*;
@@ -157,8 +158,8 @@ impl HashCollection {
         );
         let ns = ts.num_subsequences();
 
-        let mut left_pools = vec![0u8; hasher.tensor_repetitions * K_HALF * ns];
-        let mut right_pools = vec![0u8; hasher.tensor_repetitions * K_HALF * ns];
+        let mut left_pools = alloc_cnt!("left_pools"; {vec![0u8; hasher.tensor_repetitions * K_HALF * ns]});
+        let mut right_pools = alloc_cnt!("right_pools"; {vec![0u8; hasher.tensor_repetitions * K_HALF * ns]});
         let uns_left_pools = UnsafeSlice::new(&mut left_pools);
         let uns_right_pools = UnsafeSlice::new(&mut right_pools);
 
@@ -192,6 +193,9 @@ impl HashCollection {
                 oob
             })
             .sum::<usize>();
+
+        // Free resurces
+        tl_buffer.into_iter().for_each(|buf| drop(buf));
 
         let elapsed = timer.elapsed();
         let total_hashes = left_pools.len() + right_pools.len();
@@ -428,6 +432,10 @@ impl Hasher {
     //// the LSH function. While the precise value of this parameter is not so important (since
     //// the effects on the collision probability of a misconfiguration can be counterbalanced by
     //// using a larger or smaller `k`), setting a sensible value can help a great deal.
+    //// 
+    //// The procedure takes into account two things: that we have at least one collision at
+    //// the deepest level, and that we have at most 1% of the hashes falling out of the range [-128, 128],
+    //// i.e. that 99% of the hash values can be represented with 8 bits.
     pub fn estimate_width(ts: &WindowedTimeseries, fft_data: &FFTData, seed: u64) -> f64 {
         let timer = Instant::now();
         let mut at_least_one_collision = false;
