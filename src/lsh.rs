@@ -434,9 +434,12 @@ impl Hasher {
                 for (_, a_idx) in bucket.iter() {
                     for (_, b_idx) in bucket.iter() {
                         if *a_idx + (ts.w as u32) < *b_idx {
-                            let d = zeucl(ts, *a_idx as usize, *b_idx as usize);
-                            if d < d_min.unwrap_or(f64::INFINITY) {
-                                d_min.replace(d);
+                            // Ignore spurious collisions due to the hash function mapping of LSH values
+                            if probe_collection.first_collision(*a_idx as usize, *b_idx as usize, K).is_some() {
+                                let d = zeucl(ts, *a_idx as usize, *b_idx as usize);
+                                if d < d_min.unwrap_or(f64::INFINITY) {
+                                    d_min.replace(d);
+                                }
                             }
                         }
                     }

@@ -94,7 +94,7 @@ def get_datasets():
         # (prefix("data/GAP.csv", 1500000), 60),
         # (prefix("data/GAP.csv", 2000000), 60),
         ("data/GAP.csv", 60),
-        ("data/GAP.csv", 600),
+        # ("data/GAP.csv", 600),
 
         # (prefix("data/EMG.csv",  500000), 100),
         # (prefix("data/EMG.csv", 1000000), 100),
@@ -103,7 +103,7 @@ def get_datasets():
         # (prefix("data/EMG.csv", 2500000), 100),
         # (prefix("data/EMG.csv", 3000000), 100),
         ("data/EMG.csv", 100),
-        ("data/EMG.csv", 1000),
+        # ("data/EMG.csv", 1000),
 
         # (prefix("data/ECG.csv", 1000000), 1000),
         # (prefix("data/ECG.csv", 2000000), 1000),
@@ -121,7 +121,7 @@ def get_datasets():
 #         (prefix("data/ECG.csv", 5000000), 5000),
 #         (prefix("data/ECG.csv", 6000000), 5000),
 #         (prefix("data/ECG.csv", 7000000), 5000),
-        ("data/ECG.csv", 5000),
+        # ("data/ECG.csv", 5000),
 
         # (prefix("data/freezer.txt", 1000000), 5000),
         # (prefix("data/freezer.txt", 2000000), 5000),
