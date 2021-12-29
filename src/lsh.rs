@@ -434,7 +434,10 @@ impl Hasher {
                     for (_, b_idx) in bucket.iter() {
                         if *a_idx + (ts.w as u32) < *b_idx {
                             // Ignore spurious collisions due to the hash function mapping of LSH values
-                            if probe_collection.first_collision(*a_idx as usize, *b_idx as usize, K).is_some() {
+                            if probe_collection
+                                .first_collision(*a_idx as usize, *b_idx as usize, K)
+                                .is_some()
+                            {
                                 let d = zeucl(ts, *a_idx as usize, *b_idx as usize);
                                 if d < d_min.unwrap_or(f64::INFINITY) {
                                     d_min.replace(d);
@@ -444,7 +447,9 @@ impl Hasher {
                     }
                 }
             }
-            r *= 2.0;
+            if d_min.is_none() {
+                r *= 2.0
+            };
         }
         println!("Minimum distance found {} using r={}", d_min.unwrap(), r);
 
