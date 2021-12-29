@@ -439,14 +439,12 @@ impl Hasher {
     //// i.e. that 99% of the hash values can be represented with 8 bits.
     pub fn estimate_width(ts: &WindowedTimeseries, fft_data: &FFTData, seed: u64) -> f64 {
         let timer = Instant::now();
-        let mut at_least_one_collision = false;
-        let mut fraction_oob = f64::INFINITY;
         let mut r = 1.0;
-        while !at_least_one_collision || fraction_oob > 0.01 {
+        loop {
             println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
             let (probe_collection, oob, total) = HashCollection::from_ts(&ts, probe_hasher, fft_data);
-            fraction_oob = oob as f64 / total as f64;
+            let fraction_oob = oob as f64 / total as f64;
             let probe_collection = Arc::new(probe_collection);
             info!(
                 "built probe collection"; 
@@ -458,8 +456,10 @@ impl Hasher {
             let mut probe_buckets = Vec::new();
             probe_collection.group_subsequences(K, 0, ts.w, &mut probe_column, &mut probe_buckets);
             info!("grouped subsequences");
-            at_least_one_collision = probe_buckets.iter().find(|b| b.len() > 1).is_some();
-            if !at_least_one_collision || fraction_oob > 0.01 {
+            let at_least_one_collision = probe_buckets.iter().find(|b| b.len() > 1).is_some();
+            if at_least_one_collision && fraction_oob < 0.01 {
+                break;
+            } else {
                 r *= 2.0;
             }
         }
