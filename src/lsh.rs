@@ -28,7 +28,7 @@
 
 // TODO Remove this dependency
 use crate::timeseries::{FFTData, WindowedTimeseries};
-use crate::{distance::zeucl, sort::*};
+use crate::sort::*;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -145,7 +145,11 @@ impl HashCollection {
 
     //// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
     //// and a `Hasher`.
-    pub fn from_ts(ts: &WindowedTimeseries, hasher: Arc<Hasher>, fft_data: &FFTData) -> Self {
+    pub fn from_ts(
+        ts: &WindowedTimeseries,
+        hasher: Arc<Hasher>,
+        fft_data: &FFTData,
+    ) -> (Self, usize, usize) {
         assert!(ts.num_subsequences() < u32::MAX as usize, "We use 32 bit integers as pointers into subsequences, this timeseries has too many subsequences.");
         println!(
             "Number of tensor repetitions: {}",
@@ -165,9 +169,9 @@ impl HashCollection {
         let timer = Instant::now();
         //// Instead of doing a double nested loop over the repetitions and K, we flatten all
         //// the iterations (which are independent) so to expose more parallelism
-        (0..(hasher.tensor_repetitions * K))
+        let oob = (0..(hasher.tensor_repetitions * K))
             .into_par_iter()
-            .for_each(|hash_idx| {
+            .map(|hash_idx| {
                 let repetition = hash_idx / K;
                 let k = hash_idx % K;
 
@@ -178,27 +182,36 @@ impl HashCollection {
                     (&uns_right_pools, k - K_HALF)
                 };
 
-                hasher.hash_all(&ts, &fft_data, k, repetition, &mut buffer);
+                let oob = hasher.hash_all(&ts, &fft_data, k, repetition, &mut buffer);
                 for (i, h) in buffer.iter().enumerate() {
                     let idx = K_HALF * ns * repetition + i * K_HALF + offset;
                     //// This operation is `unsafe` but each index is accessed only once,
                     //// so there are no data races, despite not using synchronization.
                     unsafe { pools.write(idx, *h) };
                 }
-            });
+                oob
+            })
+            .sum::<usize>();
 
         let elapsed = timer.elapsed();
+        let total_hashes = left_pools.len() + right_pools.len();
         info!("tensor pool building";
             "tag" => "profiling",
             "time_s" => elapsed.as_secs_f64(),
+            "out of bounds" => oob,
+            "total hashes" => total_hashes
         );
 
-        Self {
-            hasher,
-            n_subsequences: ns,
-            left_pools,
-            right_pools,
-        }
+        (
+            Self {
+                hasher,
+                n_subsequences: ns,
+                left_pools,
+                right_pools,
+            },
+            oob,
+            total_hashes
+        )
     }
 
     fn left(&self, i: usize, repetition: usize) -> &[u8] {
@@ -417,19 +430,27 @@ impl Hasher {
     //// using a larger or smaller `k`), setting a sensible value can help a great deal.
     pub fn estimate_width(ts: &WindowedTimeseries, fft_data: &FFTData, seed: u64) -> f64 {
         let timer = Instant::now();
-        let mut stop = false;
+        let mut at_least_one_collision = false;
+        let mut fraction_oob = f64::INFINITY;
         let mut r = 1.0;
-        while !stop {
+        while !at_least_one_collision || fraction_oob > 0.01 {
             println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
-            let probe_collection = HashCollection::from_ts(&ts, probe_hasher, fft_data);
-            info!("built probe collection");
+            let (probe_collection, oob, total) = HashCollection::from_ts(&ts, probe_hasher, fft_data);
+            fraction_oob = oob as f64 / total as f64;
+            let probe_collection = Arc::new(probe_collection);
+            info!(
+                "built probe collection"; 
+                "oob" => oob,
+                "total" => total,
+                "fraction_oob" => fraction_oob
+            );
             let mut probe_column = Vec::new();
             let mut probe_buckets = Vec::new();
             probe_collection.group_subsequences(K, 0, ts.w, &mut probe_column, &mut probe_buckets);
             info!("grouped subsequences");
-            stop = probe_buckets.iter().find(|b| b.len() > 1).is_some();
-            if !stop {
+            at_least_one_collision = probe_buckets.iter().find(|b| b.len() > 1).is_some();
+            if !at_least_one_collision || fraction_oob > 0.01 {
                 r *= 2.0;
             }
         }
@@ -452,14 +473,19 @@ impl Hasher {
         k: usize,
         repetition: usize,
         buffer: &mut [u8],
-    ) {
+    ) -> usize {
         assert!(buffer.len() == ts.num_subsequences());
         let v = self.get_vector(repetition, k);
         let shift = self.shifts[repetition * K + k];
+        let mut oob = 0; // count how many out of bounds we have
         DOTP_BUFFER.with(|dotp_buf| {
             ts.znormalized_sliding_dot_product(v, fft_data, &mut dotp_buf.borrow_mut());
             for (i, dotp) in dotp_buf.borrow().iter().enumerate() {
                 let h = (dotp + shift) / self.width;
+                //// Count if the value is out of bounds to be repre
+                if h.abs() > 128.0 {
+                    oob += 1;
+                }
                 //// We only use the 8 lowest-order bits of each hash value, in order to use a bit less space.
                 //// In most cases we don't lose information in this way, because we are
                 //// truncating zeros in all hash values. When we truncate other bit patters
@@ -468,6 +494,7 @@ impl Hasher {
                 buffer[i] = ((h as i64 & 0xFFi64) as i8) as u8;
             }
         });
+        oob
     }
 }
 
