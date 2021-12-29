@@ -29,7 +29,6 @@
 // TODO Remove this dependency
 use crate::timeseries::{FFTData, WindowedTimeseries};
 use crate::{distance::zeucl, sort::*};
-use fxhash::FxHasher;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -216,12 +215,12 @@ impl HashCollection {
 
     pub fn hash_value(&self, i: usize, depth: usize, repetition: usize) -> HashValue {
         use std::hash::Hasher;
-        let mut fx = FxHasher::default();
-        fx.write(&self.left(i, repetition)[0..std::cmp::min(K_HALF, depth)]);
+        let mut hasher = std::collections::hash_map::DefaultHasher::default();
+        hasher.write(&self.left(i, repetition)[0..std::cmp::min(K_HALF, depth)]);
         if depth > K_HALF {
-            fx.write(&self.right(i, repetition)[0..(depth - K_HALF)]);
+            hasher.write(&self.right(i, repetition)[0..(depth - K_HALF)]);
         }
-        HashValue(fx.finish() as u32)
+        HashValue(hasher.finish() as u32)
     }
 
     // TODO: Reimplement this test
