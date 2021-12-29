@@ -220,17 +220,24 @@ pub fn motifs(
         "exclusion_zone" => exclusion_zone
     );
 
-    let hasher_width = Hasher::estimate_width(&ts, seed);
+    println!("Computing FFT data");
+    let timer = Instant::now();
+    let fft_data = ts.fft_data();
+    println!("Computed FFT data in {:?}", timer.elapsed());
+
+    let hasher_width = Hasher::estimate_width(&ts, &fft_data, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
     let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
     let mem_before = allocated();
-    let pools = Arc::new(HashCollection::from_ts(ts, Arc::clone(&hasher)));
+    let pools = Arc::new(HashCollection::from_ts(ts, Arc::clone(&hasher), &fft_data));
     let pools_size = allocated() - mem_before;
     println!(
         "[{:?}] Computed hash pools, taking {}",
         start.elapsed(),
         PrettyBytes(pools_size)
     );
+    //// Drop the fft, which we don't need from now on.
+    drop(fft_data);
 
     let cnt_dist = AtomicUsize::new(0);
 

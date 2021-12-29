@@ -146,18 +146,13 @@ impl HashCollection {
 
     //// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
     //// and a `Hasher`.
-    pub fn from_ts(ts: &WindowedTimeseries, hasher: Arc<Hasher>) -> Self {
+    pub fn from_ts(ts: &WindowedTimeseries, hasher: Arc<Hasher>, fft_data: &FFTData) -> Self {
         assert!(ts.num_subsequences() < u32::MAX as usize, "We use 32 bit integers as pointers into subsequences, this timeseries has too many subsequences.");
         println!(
             "Number of tensor repetitions: {}",
             hasher.tensor_repetitions
         );
         let ns = ts.num_subsequences();
-
-        println!("Computing FFT data");
-        let timer = Instant::now();
-        let fft_data = ts.fft_data();
-        println!("Computed FFT data in {:?}", timer.elapsed());
 
         let mut left_pools = vec![0u8; hasher.tensor_repetitions * K_HALF * ns];
         let mut right_pools = vec![0u8; hasher.tensor_repetitions * K_HALF * ns];
@@ -421,14 +416,14 @@ impl Hasher {
     //// the LSH function. While the precise value of this parameter is not so important (since
     //// the effects on the collision probability of a misconfiguration can be counterbalanced by
     //// using a larger or smaller `k`), setting a sensible value can help a great deal.
-    pub fn estimate_width(ts: &WindowedTimeseries, seed: u64) -> f64 {
+    pub fn estimate_width(ts: &WindowedTimeseries, fft_data: &FFTData, seed: u64) -> f64 {
         let timer = Instant::now();
         let mut d_min: Option<f64> = None;
         let mut r = 1.0;
         while d_min.is_none() {
             println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
-            let probe_collection = HashCollection::from_ts(&ts, probe_hasher);
+            let probe_collection = HashCollection::from_ts(&ts, probe_hasher, fft_data);
             let mut probe_column = Vec::new();
             let mut probe_buckets = Vec::new();
             probe_collection.group_subsequences(K, 0, ts.w, &mut probe_column, &mut probe_buckets);
@@ -504,7 +499,8 @@ mod test {
         let repetitions = 200;
 
         let hasher = Arc::new(Hasher::new(w, repetitions, 5.0, 1245));
-        let pools = HashCollection::from_ts(&ts, Arc::clone(&hasher));
+        let fft_data = ts.fft_data();
+        let pools = HashCollection::from_ts(&ts, Arc::clone(&hasher), &fft_data);
 
         for &depth in &[32usize, 20, 10] {
             for i in 0..ts.num_subsequences() {
