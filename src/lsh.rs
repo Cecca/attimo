@@ -283,7 +283,6 @@ impl HashCollection {
         } else {
             None
         }
-
     }
 
     pub fn group_subsequences(
@@ -419,8 +418,26 @@ impl Hasher {
             let mut probe_buckets = Vec::new();
             probe_collection.group_subsequences(K, 0, ts.w, &mut probe_column, &mut probe_buckets);
             info!("grouped subsequences");
-            let at_least_one_collision = probe_buckets.iter().find(|b| b.len() > 1).is_some();
-            if at_least_one_collision && fraction_oob < 0.01 {
+
+            let has_collision = || {
+                for bucket in probe_buckets.iter() {
+                    let bucket = &probe_column[bucket.clone()];
+                    for (_, a_idx) in bucket.iter() {
+                        let a_idx = *a_idx as usize;
+                        for (_, b_idx) in bucket.iter() {
+                            let b_idx = *b_idx as usize;
+                            if a_idx + ts.w < b_idx {
+                                if probe_collection.first_collision(a_idx, b_idx, K).is_some() {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                return false;
+            };
+
+            if has_collision() && fraction_oob < 0.01 {
                 break;
             } else {
                 r *= 2.0;
