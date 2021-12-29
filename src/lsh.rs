@@ -26,10 +26,10 @@
 //// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
-use crate::{allocator::*, alloc_cnt};
+use crate::{alloc_cnt, allocator::*};
 // TODO Remove this dependency
-use crate::timeseries::{FFTData, WindowedTimeseries};
 use crate::sort::*;
+use crate::timeseries::{FFTData, WindowedTimeseries};
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -121,11 +121,11 @@ impl<'a, T> UnsafeSlice<'a, T> {
 pub struct HashCollection {
     hasher: Arc<Hasher>,
     n_subsequences: usize,
-    // Both pools are organized as three dimensional matrices, in C order.
-    // The stride in the first dimenson is `K_HALF*n_subsequences`, and the stride in the second
-    // dimension is `K_HALF`.
-    left_pools: Vec<u8>,
-    right_pools: Vec<u8>,
+    // Pools are organized as three dimensional matrices, in C order.
+    // The stride in the first dimension is `K * n_subsequences`, and the stride in the
+    // second dimension is `K`. In the third dimension, the first `K_HALF` elements
+    // are the left pool, the second are the right pool
+    pools: Vec<u8>,
 }
 
 impl HashCollection {
@@ -158,14 +158,11 @@ impl HashCollection {
         );
         let ns = ts.num_subsequences();
 
-        let mut left_pools = alloc_cnt!("left_pools"; {vec![0u8; hasher.tensor_repetitions * K_HALF * ns]});
-        let mut right_pools = alloc_cnt!("right_pools"; {vec![0u8; hasher.tensor_repetitions * K_HALF * ns]});
-        let uns_left_pools = UnsafeSlice::new(&mut left_pools);
-        let uns_right_pools = UnsafeSlice::new(&mut right_pools);
+        let mut pools = alloc_cnt!("pools"; {vec![0u8; hasher.tensor_repetitions * K * ns]});
+        let nhashes = pools.len();
+        let uns_pools = UnsafeSlice::new(&mut pools);
 
         let tl_buffer = ThreadLocal::new();
-        // let tl_left_pools = ThreadLocal::new();
-        // let tl_right_pools = ThreadLocal::new();
 
         let timer = Instant::now();
         //// Instead of doing a double nested loop over the repetitions and K, we flatten all
@@ -178,18 +175,14 @@ impl HashCollection {
                 info!("hashing"; "repetition" => repetition, "k" => k);
 
                 let mut buffer = tl_buffer.get_or(|| RefCell::new(vec![0; ns])).borrow_mut();
-                let (pools, offset) = if k < K_HALF {
-                    (&uns_left_pools, k)
-                } else {
-                    (&uns_right_pools, k - K_HALF)
-                };
 
                 let oob = hasher.hash_all(&ts, &fft_data, k, repetition, &mut buffer);
                 for (i, h) in buffer.iter().enumerate() {
-                    let idx = K_HALF * ns * repetition + i * K_HALF + offset;
+                    let idx = K * ns * repetition + i * K + k;
+                    assert!(idx < nhashes);
                     //// This operation is `unsafe` but each index is accessed only once,
                     //// so there are no data races, despite not using synchronization.
-                    unsafe { pools.write(idx, *h) };
+                    unsafe { uns_pools.write(idx, *h) };
                 }
                 oob
             })
@@ -199,36 +192,34 @@ impl HashCollection {
         tl_buffer.into_iter().for_each(|buf| drop(buf));
 
         let elapsed = timer.elapsed();
-        let total_hashes = left_pools.len() + right_pools.len();
         info!("tensor pool building";
             "tag" => "profiling",
             "time_s" => elapsed.as_secs_f64(),
             "out of bounds" => oob,
-            "total hashes" => total_hashes
+            "total hashes" => nhashes
         );
 
         (
             Self {
                 hasher,
                 n_subsequences: ns,
-                left_pools,
-                right_pools,
+                pools,
             },
             oob,
-            total_hashes
+            nhashes,
         )
     }
 
     fn left(&self, i: usize, repetition: usize) -> &[u8] {
         let trep = repetition % self.hasher.tensor_repetitions;
-        let idx = K_HALF * self.n_subsequences * trep + i * K_HALF;
-        &self.left_pools[idx..idx + K_HALF]
+        let idx = K * self.n_subsequences * trep + i * K;
+        &self.pools[idx..idx + K_HALF]
     }
 
     fn right(&self, i: usize, repetition: usize) -> &[u8] {
         let trep = repetition / self.hasher.tensor_repetitions;
-        let idx = K_HALF * self.n_subsequences * trep + i * K_HALF;
-        &self.right_pools[idx..idx + K_HALF]
+        let idx = K * self.n_subsequences * trep + i * K + K_HALF;
+        &self.pools[idx..idx + K_HALF]
     }
 
     pub fn hash_value(&self, i: usize, depth: usize, repetition: usize) -> HashValue {
@@ -253,75 +244,46 @@ impl HashCollection {
     // }
 
     pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
-        let jump = K_HALF * self.n_subsequences;
-
         let depth_l = std::cmp::min(depth, K_HALF);
         let mut lindex = None;
-        let mut iidx = i * K_HALF;
-        let mut jidx = j * K_HALF;
+        let (depth_r, mut rindex) = if depth > K_HALF {
+            (Some(depth - K_HALF), None)
+        } else {
+            (None, Some(0))
+        };
+        let jump = K * self.n_subsequences;
+        let mut iidx = i * K;
+        let mut jidx = j * K;
         for rep in 0..self.hasher.tensor_repetitions {
-            if unsafe {
-                let hi = &self.left_pools.get_unchecked(iidx..iidx + depth_l);
-                let hj = &self.left_pools.get_unchecked(jidx..jidx + depth_l);
-                hi == hj
-            } {
-                lindex = Some(rep);
-                break;
+            let ipool = &self.pools[iidx..iidx + K];
+            let jpool = &self.pools[jidx..jidx + K];
+            // check left
+            if lindex.is_none() {
+                let hi = &ipool[0..depth_l];
+                let hj = &jpool[0..depth_l];
+                if hi == hj {
+                    lindex = Some(rep);
+                }
+            }
+            // check right
+            if rindex.is_none() {
+                let hi = &ipool[K_HALF..K_HALF + depth_r.unwrap()];
+                let hj = &jpool[K_HALF..K_HALF + depth_r.unwrap()];
+                if hi == hj {
+                    rindex = Some(rep);
+                }
             }
             iidx += jump;
             jidx += jump;
         }
 
-        let lindex = lindex?;
-
-        if depth < K_HALF {
-            return Some(lindex);
-        }
-
-        let depth_r = depth - K_HALF;
-        let mut rindex = None;
-        let mut iidx = i * K_HALF;
-        let mut jidx = j * K_HALF;
-        for rep in 0..self.hasher.tensor_repetitions {
-            if unsafe {
-                let hi = &self.right_pools.get_unchecked(iidx..iidx + depth_r);
-                let hj = &self.right_pools.get_unchecked(jidx..jidx + depth_r);
-                hi == hj
-            } {
-                rindex = Some(rep);
-                break;
-            }
-            iidx += jump;
-            jidx += jump;
-        }
-        let rindex = rindex?;
-
-        let idx = rindex * self.hasher.tensor_repetitions + lindex;
+        let idx = rindex? * self.hasher.tensor_repetitions + lindex?;
         if idx < self.hasher.repetitions {
             Some(idx)
         } else {
             None
         }
-    }
 
-    pub fn collision_probability(&self, i: usize, j: usize) -> f64 {
-        let mut n_collisions = 0;
-        for rep in 0..self.hasher.tensor_repetitions {
-            let idx_i = rep / self.n_subsequences + i * K_HALF;
-            let idx_j = rep / self.n_subsequences + j * K_HALF;
-            n_collisions += self.left_pools[idx_i..idx_i + K_HALF]
-                .iter()
-                .zip(&self.left_pools[idx_j..idx_j + K_HALF])
-                .filter(|(hi, hj)| hi == hj)
-                .count();
-            n_collisions += self.right_pools[idx_i..idx_i + K_HALF]
-                .iter()
-                .zip(&self.right_pools[idx_j..idx_j + K_HALF])
-                .filter(|(hi, hj)| hi == hj)
-                .count();
-        }
-
-        n_collisions as f64 / (2 * K_HALF * self.hasher.tensor_repetitions) as f64
     }
 
     pub fn group_subsequences(
@@ -433,7 +395,7 @@ impl Hasher {
     //// the LSH function. While the precise value of this parameter is not so important (since
     //// the effects on the collision probability of a misconfiguration can be counterbalanced by
     //// using a larger or smaller `k`), setting a sensible value can help a great deal.
-    //// 
+    ////
     //// The procedure takes into account two things: that we have at least one collision at
     //// the deepest level, and that we have at most 1% of the hashes falling out of the range [-128, 128],
     //// i.e. that 99% of the hash values can be represented with 8 bits.
@@ -443,11 +405,12 @@ impl Hasher {
         loop {
             println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
-            let (probe_collection, oob, total) = HashCollection::from_ts(&ts, probe_hasher, fft_data);
+            let (probe_collection, oob, total) =
+                HashCollection::from_ts(&ts, probe_hasher, fft_data);
             let fraction_oob = oob as f64 / total as f64;
             let probe_collection = Arc::new(probe_collection);
             info!(
-                "built probe collection"; 
+                "built probe collection";
                 "oob" => oob,
                 "total" => total,
                 "fraction_oob" => fraction_oob
