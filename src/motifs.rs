@@ -5,6 +5,7 @@
 //// The data structure used for the task is adaptive to the data, and is configured
 //// to respect the limits of the system in terms of memory.
 
+use crate::alloc_cnt;
 use crate::allocator::allocated;
 use crate::distance::*;
 use crate::lsh::*;
@@ -271,7 +272,9 @@ pub fn motifs(
             let spurious_collisions_cnt = AtomicUsize::new(0);
             let rep_candidate_pairs = AtomicUsize::new(0);
             let rep_timer = Instant::now();
-            pools.group_subsequences(depth as usize, rep, exclusion_zone, &mut column_buffer, &mut buckets);
+            alloc_cnt!("column_buffer"; {
+                pools.group_subsequences(depth as usize, rep, exclusion_zone, &mut column_buffer, &mut buckets);
+            });
             let n_buckets = buckets.len();
 
             let tl_top = ThreadLocal::new();

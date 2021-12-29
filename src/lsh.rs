@@ -175,6 +175,7 @@ impl HashCollection {
             .map(|hash_idx| {
                 let repetition = hash_idx / K;
                 let k = hash_idx % K;
+                info!("hashing"; "repetition" => repetition, "k" => k);
 
                 let mut buffer = tl_buffer.get_or(|| RefCell::new(vec![0; ns])).borrow_mut();
                 let (pools, offset) = if k < K_HALF {
