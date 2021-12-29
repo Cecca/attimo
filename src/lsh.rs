@@ -417,41 +417,23 @@ impl Hasher {
     //// using a larger or smaller `k`), setting a sensible value can help a great deal.
     pub fn estimate_width(ts: &WindowedTimeseries, fft_data: &FFTData, seed: u64) -> f64 {
         let timer = Instant::now();
-        let mut d_min: Option<f64> = None;
+        let mut stop = false;
         let mut r = 1.0;
-        while d_min.is_none() {
+        while !stop {
             println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
             let probe_collection = HashCollection::from_ts(&ts, probe_hasher, fft_data);
+            info!("built probe collection");
             let mut probe_column = Vec::new();
             let mut probe_buckets = Vec::new();
             probe_collection.group_subsequences(K, 0, ts.w, &mut probe_column, &mut probe_buckets);
-            println!("  [{:?}] built required things", timer.elapsed());
-
-            for bucket in probe_buckets {
-                let bucket = &probe_column[bucket];
-                for (_, a_idx) in bucket.iter() {
-                    for (_, b_idx) in bucket.iter() {
-                        if *a_idx + (ts.w as u32) < *b_idx {
-                            // Ignore spurious collisions due to the hash function mapping of LSH values
-                            if probe_collection
-                                .first_collision(*a_idx as usize, *b_idx as usize, K)
-                                .is_some()
-                            {
-                                let d = zeucl(ts, *a_idx as usize, *b_idx as usize);
-                                if d < d_min.unwrap_or(f64::INFINITY) {
-                                    d_min.replace(d);
-                                }
-                            }
-                        }
-                    }
-                }
+            info!("grouped subsequences");
+            stop = probe_buckets.iter().find(|b| b.len() > 1).is_some();
+            if !stop {
+                r *= 2.0;
             }
-            if d_min.is_none() {
-                r *= 2.0
-            };
         }
-        println!("Minimum distance found {} using r={}", d_min.unwrap(), r);
+        info!("width estimation"; "time_s" => timer.elapsed().as_secs_f64(), "width" => r, "tag" => "profiling");
 
         return r;
     }
