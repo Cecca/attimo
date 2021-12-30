@@ -20,7 +20,7 @@ impl WindowedTimeseries {
         let timer = Instant::now();
 
         //// First we compute rolling statistics
-        let (rolling_avg, rolling_sd, squared_norms) = rolling_stat(&ts, w);
+        let (rolling_avg, rolling_sd, squared_norms) = rolling_stat_slow(&ts, w);
         println!(
             " . [{:?}] Computed mean and std and squared norms",
             timer.elapsed()
@@ -337,6 +337,7 @@ fn rolling_stat(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         let old = ts[i - 1];
         mean += (new - old) / w as f64;
         d_squared += (new - old) * (new - mean + old - old_mean);
+        assert!(d_squared > 0.0);
 
         sum += new - old;
         sq_sum += new * new - old * old;
@@ -344,15 +345,31 @@ fn rolling_stat(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         dotp_num = sq_sum - 2.0 * mean * sum + w as f64 * mean * mean;
 
         assert!(mean.is_finite());
+        assert!((mean - average(&ts[i..(i+w)]).abs()) < 0.00000001);
         rolling_avg.push(mean);
-        rolling_sd.push((d_squared / (w - 1) as f64).sqrt());
-        squared_norms.push(dotp_num / (d_squared / (w - 1) as f64));
+
+        let sd = (d_squared / (w - 1) as f64).sqrt();
+        // assert!((sd - standard_deviation(&ts[i..(i+w)], mean).abs()) < 0.00000001);
+        assert!(sd.is_finite(), "standard deviation is {}, d_squared {}\n{:?}", sd, d_squared, &ts[i..(i+w)]);
+        rolling_sd.push(sd);
+
+        let sqnorm = dotp_num / (d_squared / (w - 1) as f64);
+        assert!(sqnorm.is_finite());
+        squared_norms.push(sqnorm);
     }
 
     (rolling_avg, rolling_sd, squared_norms)
 }
 
-#[cfg(test)]
+fn average(v: &[f64]) -> f64 {
+    v.iter().sum::<f64>() / v.len() as f64
+}
+
+fn standard_deviation(v: &[f64], mean: f64) -> f64 {
+    (v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (v.len() - 1) as f64).sqrt()
+}
+
+// #[cfg(test)]
 fn rolling_stat_slow(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     use crate::distance::dot;
     let n_subs = ts.len() - w;

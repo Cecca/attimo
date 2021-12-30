@@ -60,7 +60,7 @@ pub const K_HALF: usize = K / 2;
 //// That said, here is the definition of a hash value, with several
 //// utility implementations following.
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
-pub struct HashValue(u32);
+pub struct HashValue(u64);
 
 impl GetByte for HashValue {
     fn num_bytes(&self) -> usize {
@@ -173,7 +173,7 @@ impl HashCollection {
             .map(|hash_idx| {
                 let repetition = hash_idx / K;
                 let k = hash_idx % K;
-                info!("hashing"; "repetition" => repetition, "k" => k);
+                // info!("hashing"; "repetition" => repetition, "k" => k);
 
                 let mut buffer = tl_buffer.get_or(|| RefCell::new(vec![0; ns])).borrow_mut();
 
@@ -227,7 +227,7 @@ impl HashCollection {
         if depth > K_HALF {
             hasher.write(&self.right(i, repetition)[0..(depth - K_HALF)]);
         }
-        HashValue(hasher.finish() as u32)
+        HashValue(hasher.finish())
     }
 
     pub fn fraction_oob(&self) -> f64 {
@@ -312,14 +312,8 @@ impl HashCollection {
         buffer.par_sort_unstable();
         let elapsed_sort = start.elapsed();
         debug_assert!(buffer.is_sorted_by_key(|pair| pair.0.clone()));
-        info!("column building";
-            "tag" => "profiling",
-            "repetition" => repetition,
-            "time_hashes_s" => elapsed_hashes.as_secs_f64(),
-            "time_sort_s" => elapsed_sort.as_secs_f64(),
-            "time_s" => (elapsed_hashes + elapsed_sort).as_secs_f64()
-        );
 
+        let mut largest_bucket = 0;
         let timer = Instant::now();
         let mut idx = 0;
         while idx < buffer.len() {
@@ -334,13 +328,23 @@ impl HashCollection {
             }
             //// We add only if the bucket is non-trivial
             if idx - start > 1 && min_i + exclusion_zone < max_i {
+                if idx - start > largest_bucket {
+                    largest_bucket = idx - start;
+                }
                 output.push(start..idx);
             }
         }
-        info!("computing bucket boundaries";
+        let elapsed_boundaries = timer.elapsed();
+        info!("grouping subsequences";
             "tag" => "profiling",
             "repetition" => repetition,
-            "time_s" => timer.elapsed().as_secs_f64()
+            "depth" => depth,
+            "largest_bucket" => largest_bucket,
+            "n_buckets" => output.len(),
+            "time_bounds_s" => elapsed_boundaries.as_secs_f64(),
+            "time_hashes_s" => elapsed_hashes.as_secs_f64(),
+            "time_sort_s" => elapsed_sort.as_secs_f64(),
+            "time_s" => (elapsed_hashes + elapsed_sort + elapsed_boundaries).as_secs_f64()
         );
     }
 }

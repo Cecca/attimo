@@ -275,10 +275,10 @@ pub fn motifs(
             alloc_cnt!("column_buffer"; {
                 pools.group_subsequences(depth as usize, rep, exclusion_zone, &mut column_buffer, &mut buckets);
             });
+            let snap_subsequences = rep_timer.elapsed();
             let n_buckets = buckets.len();
 
             let tl_top = ThreadLocal::new();
-            // let active_threads = AtomicUsize::new(0);
 
             //// Each thread works on these many buckets at one time, to reduce the
             //// overhead of scheduling.
@@ -287,10 +287,17 @@ pub fn motifs(
             (0..n_buckets / chunk_size)
                 .into_par_iter()
                 .for_each(|chunk_i| {
-                    // pbar.println(format!("Active threads {}", 1 + active_threads.fetch_add(1, Ordering::SeqCst)));
                     let tl_top = tl_top.get_or(|| RefCell::new(top.clone()));
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
                         let bucket = &column_buffer[buckets[i].clone()];
+                        let bpbar = if bucket.len() > 1000000 {
+                            Some(ProgressBar::new(bucket.len() as u64).with_style(
+                                ProgressStyle::default_bar()
+                                    .template("  [{elapsed_precise}] {msg} {bar:40.white/red} {pos:>7}/{len:7}")
+                            ))
+                        } else {
+                            None
+                        };
 
                         for (_, a_idx) in bucket.iter() {
                             let a_idx = *a_idx as usize;
@@ -301,11 +308,6 @@ pub fn motifs(
                                 //// Here we handle trivial matches: we don't consider a pair if the difference between
                                 //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
                                 if a_idx + exclusion_zone < b_idx {
-                                    // let b_hash_idx = hash_range.start + b_offset;
-                                    // let b_already_checked = rep_bounds[b_idx].clone();
-                                    // let check_a = !a_already_checked.contains(&b_hash_idx);
-                                    // let check_b = !b_already_checked.contains(&a_hash_idx);
-                                    // if check_a || check_b {
                                     rep_candidate_pairs.fetch_add(1, Ordering::SeqCst);
                                     //// We only process the pair if this is the first repetition in which
                                     //// they collide. We get this information from the pool of bits
@@ -342,10 +344,17 @@ pub fn motifs(
                                     }
                                 }
                             }
+                            bpbar.iter().for_each(|b| {
+                                let top_d = tl_top.borrow().k_th().map(|m| m.distance);
+                                b.inc(1);
+                                b.set_message(format!("spurious {}/{} d={:?}", spurious_collisions_cnt.load(Ordering::SeqCst), rep_candidate_pairs.load(Ordering::SeqCst), top_d));
+                            });
                         }
+                        bpbar.iter().for_each(|b| b.finish_and_clear());
                     }
-                    // pbar.println(format!("Active threads {}", active_threads.fetch_sub(1, Ordering::SeqCst) - 1));
                 });
+
+            let snap_bucket_solve = rep_timer.elapsed();
 
             //// Now merge the information from the thread local tops
             for tl_top in tl_top.into_iter() {
@@ -360,7 +369,9 @@ pub fn motifs(
                 "spurious_collisions" => spurious_collisions_cnt.load(Ordering::SeqCst),
                 "depth" => depth,
                 "repetition" => rep,
-                "time_s" => rep_elapsed.as_secs_f64()
+                "time_s" => rep_elapsed.as_secs_f64(),
+                "time_hash_grouping_s" => snap_subsequences.as_secs_f64(),
+                "time_solve_buckets_s" => (snap_bucket_solve - snap_subsequences).as_secs_f64()
             );
             cnt_dist.fetch_add(rep_cnt_dists.load(Ordering::SeqCst), Ordering::SeqCst);
             pbar.inc(1);
@@ -390,9 +401,10 @@ pub fn motifs(
                     break;
                 }
             }
+
         }
 
-        pbar.finish();
+        pbar.finish_and_clear();
         info!("level completed";
             "tag" => "profiling",
             "depth" => depth,
