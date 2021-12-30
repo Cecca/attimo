@@ -20,7 +20,7 @@ impl WindowedTimeseries {
         let timer = Instant::now();
 
         //// First we compute rolling statistics
-        let (rolling_avg, rolling_sd, squared_norms) = rolling_stat(&ts, w);
+        let (rolling_avg, rolling_sd, squared_norms) = rolling_stat_slow(&ts, w);
         println!(
             " . [{:?}] Computed mean and std and squared norms",
             timer.elapsed()
@@ -415,7 +415,7 @@ fn variance(v: &[f64], mean: f64) -> f64 {
     v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (v.len() - 1) as f64
 }
 
-#[cfg(test)]
+// #[cfg(test)]
 fn rolling_stat_slow(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     use crate::distance::dot;
     let n_subs = ts.len() - w;
