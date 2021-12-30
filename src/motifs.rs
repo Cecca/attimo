@@ -230,7 +230,7 @@ pub fn motifs(
     info!("Computed hasher width"; "hasher_width" => hasher_width);
     let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
     let mem_before = allocated();
-    let (pools, _oob, _total) = HashCollection::from_ts(ts, Arc::clone(&hasher), &fft_data);
+    let pools = HashCollection::from_ts(ts, Arc::clone(&hasher), &fft_data);
     let pools = Arc::new(pools);
     let pools_size = allocated() - mem_before;
     println!(

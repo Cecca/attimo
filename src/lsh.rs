@@ -121,6 +121,7 @@ impl<'a, T> UnsafeSlice<'a, T> {
 pub struct HashCollection {
     hasher: Arc<Hasher>,
     n_subsequences: usize,
+    oob: usize,
     // Pools are organized as three dimensional matrices, in C order.
     // The stride in the first dimension is `K * n_subsequences`, and the stride in the
     // second dimension is `K`. In the third dimension, the first `K_HALF` elements
@@ -150,7 +151,7 @@ impl HashCollection {
         ts: &WindowedTimeseries,
         hasher: Arc<Hasher>,
         fft_data: &FFTData,
-    ) -> (Self, usize, usize) {
+    ) -> Self {
         assert!(ts.num_subsequences() < u32::MAX as usize, "We use 32 bit integers as pointers into subsequences, this timeseries has too many subsequences.");
         println!(
             "Number of tensor repetitions: {}",
@@ -199,15 +200,12 @@ impl HashCollection {
             "total hashes" => nhashes
         );
 
-        (
-            Self {
-                hasher,
-                n_subsequences: ns,
-                pools,
-            },
+        Self {
+            hasher,
             oob,
-            nhashes,
-        )
+            n_subsequences: ns,
+            pools,
+        }
     }
 
     fn left(&self, i: usize, repetition: usize) -> &[u8] {
@@ -230,6 +228,10 @@ impl HashCollection {
             hasher.write(&self.right(i, repetition)[0..(depth - K_HALF)]);
         }
         HashValue(hasher.finish() as u32)
+    }
+
+    pub fn fraction_oob(&self) -> f64 {
+        self.oob as f64 / self.pools.len() as f64
     }
 
     // TODO: Reimplement this test
@@ -404,14 +406,12 @@ impl Hasher {
         loop {
             println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
-            let (probe_collection, oob, total) =
+            let probe_collection =
                 HashCollection::from_ts(&ts, probe_hasher, fft_data);
-            let fraction_oob = oob as f64 / total as f64;
+            let fraction_oob = probe_collection.fraction_oob();
             let probe_collection = Arc::new(probe_collection);
             info!(
                 "built probe collection";
-                "oob" => oob,
-                "total" => total,
                 "fraction_oob" => fraction_oob
             );
             let mut probe_column = Vec::new();
