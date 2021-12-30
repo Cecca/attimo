@@ -437,7 +437,7 @@ impl Hasher {
                 return false;
             };
 
-            if has_collision() && fraction_oob < 0.01 {
+            if has_collision() && fraction_oob < 0.1 {
                 break;
             } else {
                 r *= 2.0;
