@@ -1,4 +1,4 @@
-use crate::{distance::zeucl};
+use crate::distance::zeucl;
 use rand_distr::num_traits::Zero;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::{cell::RefCell, convert::TryFrom, fmt::Display, sync::Arc, time::Instant};
@@ -20,7 +20,7 @@ impl WindowedTimeseries {
         let timer = Instant::now();
 
         //// First we compute rolling statistics
-        let (rolling_avg, rolling_sd, squared_norms) = rolling_stat_slow(&ts, w);
+        let (rolling_avg, rolling_sd, squared_norms) = rolling_stat(&ts, w);
         println!(
             " . [{:?}] Computed mean and std and squared norms",
             timer.elapsed()
@@ -164,8 +164,8 @@ impl WindowedTimeseries {
             let offset = chunk_idx * stride;
             for i in 0..(fft_data.fft_length - self.w) {
                 if i + offset < self.num_subsequences() {
-                    output[i + offset] =
-                        ivfft[(i + v.len() - 1) % fft_data.fft_length].re / fft_data.fft_length as f64
+                    output[i + offset] = ivfft[(i + v.len() - 1) % fft_data.fft_length].re
+                        / fft_data.fft_length as f64
                 }
             }
         }
@@ -187,7 +187,12 @@ impl WindowedTimeseries {
     //// This function allows to compute the sliding dot product between the input vector
     //// and the z-normalized subsequences of the time series. Note that the input
     //// is not z-normalized by this function.
-    pub fn znormalized_sliding_dot_product(&self, v: &[f64], fft_data: &FFTData, output: &mut Vec<f64>) {
+    pub fn znormalized_sliding_dot_product(
+        &self,
+        v: &[f64],
+        fft_data: &FFTData,
+        output: &mut Vec<f64>,
+    ) {
         self.sliding_dot_product(v, fft_data, output);
         let sumv: f64 = v.iter().sum();
         for i in 0..self.num_subsequences() {
@@ -315,9 +320,46 @@ impl TryFrom<String> for PrettyBytes {
 fn rolling_stat(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let n_subs = ts.len() - w;
 
-    let mut rolling_avg = Vec::with_capacity(n_subs);
-    let mut rolling_sd = Vec::with_capacity(n_subs);
-    let mut squared_norms = Vec::with_capacity(n_subs);
+    let mut rolling_avg = vec![0.0; n_subs];
+    let mut rolling_sd = vec![0.0; n_subs];
+    let mut squared_norms = vec![0.0; n_subs];
+
+    let chunk_size = 100_000;
+    let chunks = n_subs / chunk_size;
+    for i in 0..chunks {
+        let start = i * chunk_size;
+        let end = (i + 1) * chunk_size;
+        _rolling_stat(
+            &ts[start..(end + w)],
+            w,
+            &mut rolling_avg[start..end],
+            &mut rolling_sd[start..end],
+            &mut squared_norms[start..end],
+        );
+    }
+    if n_subs % chunk_size > 0 {
+        let start = chunks * chunk_size;
+        let end = n_subs;
+        _rolling_stat(
+            &ts[start..(end + w)],
+            w,
+            &mut rolling_avg[start..end],
+            &mut rolling_sd[start..end],
+            &mut squared_norms[start..end],
+        );
+    }
+
+    (rolling_avg, rolling_sd, squared_norms)
+}
+
+fn _rolling_stat(
+    ts: &[f64],
+    w: usize,
+    rolling_avg: &mut [f64],
+    rolling_sd: &mut [f64],
+    squared_norms: &mut [f64],
+) {
+    let n_subs = ts.len() - w;
 
     let mut sum = ts[0..w].iter().sum::<f64>();
     let mut sq_sum = ts[0..w].iter().map(|x| x * x).sum::<f64>();
@@ -327,9 +369,9 @@ fn rolling_stat(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
 
     let mut dotp_num = ts[0..w].iter().map(|x| (x - mean).powi(2)).sum::<f64>();
 
-    rolling_avg.push(mean);
-    rolling_sd.push((d_squared / (w - 1) as f64).sqrt());
-    squared_norms.push(dotp_num / (d_squared / (w - 1) as f64));
+    rolling_avg[0] = mean;
+    rolling_sd[0] = (d_squared / (w - 1) as f64).sqrt();
+    squared_norms[0] = dotp_num / (d_squared / (w - 1) as f64);
 
     for i in 1..n_subs {
         let old_mean = mean;
@@ -337,7 +379,7 @@ fn rolling_stat(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         let old = ts[i - 1];
         mean += (new - old) / w as f64;
         d_squared += (new - old) * (new - mean + old - old_mean);
-        assert!(d_squared > 0.0);
+        assert!(d_squared > 0.0, "d_squared is {} at i {} variance should be {}", d_squared, i, variance(&ts[i..i+w], mean));
 
         sum += new - old;
         sq_sum += new * new - old * old;
@@ -345,31 +387,35 @@ fn rolling_stat(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
         dotp_num = sq_sum - 2.0 * mean * sum + w as f64 * mean * mean;
 
         assert!(mean.is_finite());
-        assert!((mean - average(&ts[i..(i+w)]).abs()) < 0.00000001);
-        rolling_avg.push(mean);
+        assert!((mean - average(&ts[i..(i + w)]).abs()) < 0.00000001);
+        rolling_avg[i] = mean;
 
         let sd = (d_squared / (w - 1) as f64).sqrt();
         // assert!((sd - standard_deviation(&ts[i..(i+w)], mean).abs()) < 0.00000001);
-        assert!(sd.is_finite(), "standard deviation is {}, d_squared {}\n{:?}", sd, d_squared, &ts[i..(i+w)]);
-        rolling_sd.push(sd);
+        assert!(
+            sd.is_finite(),
+            "standard deviation is {}, d_squared {}\n{:?}",
+            sd,
+            d_squared,
+            &ts[i..(i + w)]
+        );
+        rolling_sd[i] = sd;
 
         let sqnorm = dotp_num / (d_squared / (w - 1) as f64);
         assert!(sqnorm.is_finite());
-        squared_norms.push(sqnorm);
+        squared_norms[i] = sqnorm;
     }
-
-    (rolling_avg, rolling_sd, squared_norms)
 }
 
 fn average(v: &[f64]) -> f64 {
     v.iter().sum::<f64>() / v.len() as f64
 }
 
-fn standard_deviation(v: &[f64], mean: f64) -> f64 {
-    (v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (v.len() - 1) as f64).sqrt()
+fn variance(v: &[f64], mean: f64) -> f64 {
+    v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (v.len() - 1) as f64
 }
 
-// #[cfg(test)]
+#[cfg(test)]
 fn rolling_stat_slow(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     use crate::distance::dot;
     let n_subs = ts.len() - w;
@@ -512,8 +558,8 @@ mod test {
 
     #[test]
     fn test_rolling_stats() {
-        let w = 10;
-        let ts = crate::load::loadts("data/ECG.csv", Some(100)).expect("problem loading data");
+        let w = 1000;
+        let ts = crate::load::loadts("data/ECG.csv", Some(1_000_000)).expect("problem loading data");
 
         let (a_mean, a_std, a_norms) = rolling_stat(&ts, w);
         let (e_mean, e_std, e_norms) = rolling_stat_slow(&ts, w);
@@ -521,7 +567,7 @@ mod test {
         assert_eq!(a_mean.len(), e_mean.len());
         for (i, (a, e)) in a_mean.iter().zip(e_mean.iter()).enumerate() {
             assert!(
-                (a - e).abs() < 0.0000000000000001,
+                (a - e).abs() < 0.000000000001,
                 "[{}] a = {} e = {}",
                 i,
                 a,
@@ -532,7 +578,7 @@ mod test {
         assert_eq!(a_std.len(), e_std.len());
         for (i, (a, e)) in a_std.iter().zip(e_std.iter()).enumerate() {
             assert!(
-                (a - e).abs() < 0.00000000000001,
+                (a - e).abs() < 0.000000000001,
                 "[{}] a = {} e = {}",
                 i,
                 a,
