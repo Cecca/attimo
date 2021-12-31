@@ -481,4 +481,28 @@ mod test {
             assert!((motif.distance - d).abs() < 0.0000001);
         }
     }
+
+    #[test]
+    fn test_ecg_full() {
+        // The indices and distances in this test have been computed
+        // using SCAMP: https://github.com/zpzim/SCAMP
+        // The distances are slightly different, due to numerical approximation
+        // and a different normalization in their computation of the standard deviation
+        for (w, a, b, d) in [
+            (1000, 7137168, 7414108, 0.3013925657),
+        ] {
+            let ts: Vec<f64> = loadts("data/ECG.csv", None).unwrap();
+            let ts = WindowedTimeseries::new(ts, w);
+            assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
+
+            let motif = *motifs(&ts, 1, 20, 0.001, 12435).first().unwrap();
+            println!("Motif distance {}", motif.distance);
+            // We consider the test passed if we find a distance smaller than the one found by SCAMP,
+            // and the motif instances are located within w steps from the ones found by SCAMP.
+            // These differences are due to differences in floating point computations
+            assert!(motif.distance <= d);
+            assert!((motif.idx_a as isize - a as isize).abs() < w as isize);
+            assert!((motif.idx_b as isize - b as isize).abs() < w as isize);
+        }
+    }
 }
