@@ -45,7 +45,7 @@ fn main() -> Result<()> {
     let rng = Xoshiro256StarStar::seed_from_u64(seed);
 
     // Find the top motif, and estimate its dimensionality measures along with the samples
-    let motif = *motifs(&ts, 1, args.repetitions, 0.01, seed)
+    let motif = *motifs(&ts, 1, args.repetitions, 0.01, None, seed)
         .first()
         .unwrap();
 

@@ -207,6 +207,7 @@ pub fn motifs(
     topk: usize,
     repetitions: usize,
     delta: f64,
+    min_correlation: Option<f64>,
     seed: u64,
 ) -> Vec<Motif> {
     let start = Instant::now();
@@ -218,6 +219,7 @@ pub fn motifs(
         "repetitions" => repetitions,
         "delta" => delta,
         "seed" => seed,
+        "min_correlation" => min_correlation,
         "exclusion_zone" => exclusion_zone
     );
 
@@ -241,6 +243,27 @@ pub fn motifs(
     //// Drop the fft, which we don't need from now on.
     drop(fft_data);
 
+    let max_dist = min_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
+
+    //// This function is used in the stopping condition
+    let threshold_fn = |d: f64, depth: isize| {
+        let p = hasher.collision_probability_at(d);
+        ((1.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize
+    };
+
+    //// Find the level for which the given distance has a good probability of being
+    //// found withing the allowed number of repetitions
+    let level_for_distance = |d: f64, mut depth: isize| {
+        while depth >= 0 {
+            let threshold = threshold_fn(d, depth);
+            if threshold < repetitions {
+                break;
+            }
+            depth -= 1;
+        }
+        depth
+    };
+
     let cnt_dist = AtomicUsize::new(0);
 
     let mut top = TopK::new(topk, exclusion_zone);
@@ -254,7 +277,7 @@ pub fn motifs(
 
 
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
-    let mut depth = crate::lsh::K as isize;
+    let mut depth = K as isize;
     let mut previous_depth = None;
     while depth >= 0 && !stop {
         let depth_timer = Instant::now();
@@ -384,8 +407,10 @@ pub fn motifs(
             //// We check the condition even if no update happened, because there is
             //// one more repetition that could have made us pass the threshold.
             if let Some(kth) = top.k_th() {
-                let threshold = ((1.0 / delta).ln() / kth.collision_probability.powi(depth as i32))
-                    .ceil() as usize;
+                let threshold = std::cmp::min(
+                    threshold_fn(kth.distance, depth),
+                    max_dist.map(|d| threshold_fn(d, depth)).unwrap_or(usize::MAX)
+                );
                 pbar.println(format!(
                     "Rep {}, threshold {} - d={:.3} ({:?}, {} dists {} cands)",
                     rep,
@@ -400,8 +425,7 @@ pub fn motifs(
                     stop = true;
                     break;
                 }
-            }
-
+            } 
         }
 
         pbar.finish_and_clear();
@@ -420,15 +444,7 @@ pub fn motifs(
             previous_depth.replace(depth as usize);
             if let Some(kth) = top.k_th() {
                 let orig_depth = depth;
-                while depth >= 0 {
-                    let threshold = ((1.0 / delta).ln()
-                        / kth.collision_probability.powi(depth as i32))
-                    .ceil() as usize;
-                    if threshold < repetitions {
-                        break;
-                    }
-                    depth -= 1;
-                }
+                depth = level_for_distance(kth.distance, depth);
                 assert!(depth < orig_depth, "we are not making progress in depth");
             } else {
                 depth -= 1;
@@ -474,7 +490,7 @@ mod test {
             let ts: Vec<f64> = loadts("data/ECG-10000.csv", None).unwrap();
             let ts = WindowedTimeseries::new(ts, w);
 
-            let motif = *motifs(&ts, 1, 20, 0.001, 12435).first().unwrap();
+            let motif = *motifs(&ts, 1, 20, 0.001, None, 12435).first().unwrap();
             assert_eq!(motif.idx_a, a);
             assert_eq!(motif.idx_b, b);
             println!("{}", motif.distance);
@@ -495,7 +511,7 @@ mod test {
             let ts = WindowedTimeseries::new(ts, w);
             assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
 
-            let motif = *motifs(&ts, 1, 20, 0.001, 12435).first().unwrap();
+            let motif = *motifs(&ts, 1, 20, 0.001, None, 12435).first().unwrap();
             println!("Motif distance {}", motif.distance);
             // We consider the test passed if we find a distance smaller than the one found by SCAMP,
             // and the motif instances are located within w steps from the ones found by SCAMP.

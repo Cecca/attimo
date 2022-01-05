@@ -24,11 +24,15 @@ struct Config {
     /// subsequcence length
     pub window: usize,
 
-    #[argh(option, default = "default_motifs()")]
+    #[argh(option, default = "1")]
     /// the number of motifs to look for
     pub motifs: usize,
 
-    #[argh(option, default = "default_delta()")]
+    #[argh(option)]
+    /// the minimum allowed correlation between motifs pairs
+    pub min_correlation: Option<f64>,
+
+    #[argh(option, default = "0.001")]
     /// failure probability of the LSH scheme
     pub delta: f64,
 
@@ -40,7 +44,7 @@ struct Config {
     /// consider only the given number of points from the input
     pub prefix: Option<usize>,
 
-    #[argh(option, default = "default_seed()")]
+    #[argh(option, default = "12453")]
     /// seed for the psudorandom number generator
     pub seed: u64,
 
@@ -55,18 +59,6 @@ struct Config {
     #[argh(positional)]
     /// path to the data file
     pub path: String,
-}
-
-fn default_seed() -> u64 {
-    12453
-}
-
-fn default_delta() -> f64 {
-    0.001
-}
-
-fn default_motifs() -> usize {
-    1
 }
 
 fn default_output() -> String {
@@ -116,6 +108,7 @@ fn main() -> Result<()> {
         config.motifs,
         config.repetitions,
         config.delta,
+        config.min_correlation,
         config.seed,
     );
 
