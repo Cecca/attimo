@@ -32,6 +32,10 @@ struct Config {
     /// the minimum allowed correlation between motifs pairs
     pub min_correlation: Option<f64>,
 
+    #[argh(option)]
+    /// the maximum allowed correlation between motifs pairs, to filter out trivial matches
+    pub max_correlation: Option<f64>,
+
     #[argh(option, default = "0.001")]
     /// failure probability of the LSH scheme
     pub delta: f64,
@@ -112,6 +116,7 @@ fn main() -> Result<()> {
         config.motifs,
         config.repetitions,
         config.delta,
+        config.max_correlation,
         config.min_correlation,
         config.seed,
     );

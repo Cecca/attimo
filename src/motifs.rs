@@ -207,6 +207,7 @@ pub fn motifs(
     topk: usize,
     repetitions: usize,
     delta: f64,
+    max_correlation: Option<f64>,
     min_correlation: Option<f64>,
     seed: u64,
 ) -> Vec<Motif> {
@@ -219,6 +220,7 @@ pub fn motifs(
         "repetitions" => repetitions,
         "delta" => delta,
         "seed" => seed,
+        "max_correlation" => max_correlation,
         "min_correlation" => min_correlation,
         "exclusion_zone" => exclusion_zone
     );
@@ -244,6 +246,8 @@ pub fn motifs(
     drop(fft_data);
 
     let max_dist = min_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
+    let min_dist = max_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
+    println!("Distance constrained between {:?} and {:?}", min_dist, max_dist);
 
     //// This function is used in the stopping condition
     let threshold_fn = |d: f64, depth: isize| {
@@ -277,7 +281,12 @@ pub fn motifs(
 
 
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
-    let mut depth = K as isize;
+    // let mut depth = K as isize;
+    let mut depth = if let Some(min_dist) = min_dist {
+        level_for_distance(min_dist, K as isize)
+    } else {
+        K as isize
+    };
     let mut previous_depth = None;
     while depth >= 0 && !stop {
         let depth_timer = Instant::now();
@@ -348,19 +357,21 @@ pub fn motifs(
                                             //// After computing the distance between the two subsequences,
                                             //// we try to insert the pair in the top data structure
                                             let d = zeucl(&ts, a_idx, b_idx);
-                                            rep_cnt_dists.fetch_add(1, Ordering::SeqCst);
+                                            if d > min_dist.unwrap_or(-1.0) {
+                                                rep_cnt_dists.fetch_add(1, Ordering::SeqCst);
 
-                                            //// This is the collision probability for this distance
-                                            let p = hasher.collision_probability_at(d);
+                                                //// This is the collision probability for this distance
+                                                let p = hasher.collision_probability_at(d);
 
-                                            let m = Motif {
-                                                idx_a: a_idx,
-                                                idx_b: b_idx,
-                                                distance: d,
-                                                elapsed: start.elapsed(),
-                                                collision_probability: p,
-                                            };
-                                            tl_top.borrow_mut().insert(m);
+                                                let m = Motif {
+                                                    idx_a: a_idx,
+                                                    idx_b: b_idx,
+                                                    distance: d,
+                                                    elapsed: start.elapsed(),
+                                                    collision_probability: p,
+                                                };
+                                                tl_top.borrow_mut().insert(m);
+                                            }
                                         }
                                     } else {
                                         spurious_collisions_cnt.fetch_add(1, Ordering::SeqCst);
