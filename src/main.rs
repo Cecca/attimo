@@ -48,6 +48,10 @@ struct Config {
     /// seed for the psudorandom number generator
     pub seed: u64,
 
+    #[argh(switch)]
+    /// wether meand and std computations should be at the best precision, at the expense of running time
+    pub precise: bool,
+
     #[argh(option, default = "default_log_path()")]
     /// the file in which to store the detailed execution log
     pub log_path: String,
@@ -90,7 +94,7 @@ fn main() -> Result<()> {
     println!("Loaded raw data in {:?}", timer.elapsed());
     let timer = Instant::now();
     let mem_before = allocated();
-    let ts = WindowedTimeseries::new(ts, w);
+    let ts = WindowedTimeseries::new(ts, w, config.precise);
     let ts_bytes = allocated() - mem_before;
     let input_elapsed = timer.elapsed();
     println!(

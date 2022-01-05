@@ -14,13 +14,19 @@ pub struct WindowedTimeseries {
 }
 
 impl WindowedTimeseries {
-    pub fn new(ts: Vec<f64>, w: usize) -> Self {
+    pub fn new(ts: Vec<f64>, w: usize, precise: bool) -> Self {
         assert!(w <= ts.len());
 
         let timer = Instant::now();
 
         //// First we compute rolling statistics
-        let (rolling_avg, rolling_sd, squared_norms) = rolling_stat_slow(&ts, w);
+        let (rolling_avg, rolling_sd, squared_norms) = if precise {
+            println!("Compute slow rolling statistics");
+            rolling_stat_slow(&ts, w)
+        } else {
+            println!("Computing fast rolling statistics");
+            rolling_stat(&ts, w)
+        };
         println!(
             " . [{:?}] Computed mean and std and squared norms",
             timer.elapsed()
@@ -88,7 +94,7 @@ impl WindowedTimeseries {
         for i in 1..n {
             ts[i] = ts[i - 1] + ts[i];
         }
-        Self::new(ts, w)
+        Self::new(ts, w, true)
     }
 
     pub fn subsequence<'a>(&'a self, i: usize) -> &'a [f64] {
@@ -324,7 +330,7 @@ fn rolling_stat(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let mut rolling_sd = vec![0.0; n_subs];
     let mut squared_norms = vec![0.0; n_subs];
 
-    let chunk_size = 100_000;
+    let chunk_size = 1_000_000;
     let chunks = n_subs / chunk_size;
     for i in 0..chunks {
         let start = i * chunk_size;
@@ -379,7 +385,13 @@ fn _rolling_stat(
         let old = ts[i - 1];
         mean += (new - old) / w as f64;
         d_squared += (new - old) * (new - mean + old - old_mean);
-        assert!(d_squared > 0.0, "d_squared is {} at i {} variance should be {}", d_squared, i, variance(&ts[i..i+w], mean));
+        assert!(
+            d_squared > 0.0,
+            "d_squared is {} at i {} variance should be {}",
+            d_squared,
+            i,
+            variance(&ts[i..i + w], mean)
+        );
 
         sum += new - old;
         sq_sum += new * new - old * old;
@@ -387,7 +399,7 @@ fn _rolling_stat(
         dotp_num = sq_sum - 2.0 * mean * sum + w as f64 * mean * mean;
 
         assert!(mean.is_finite());
-        assert!((mean - average(&ts[i..(i + w)]).abs()) < 0.00000001);
+        debug_assert!((mean - average(&ts[i..(i + w)]).abs()) < 0.00000001);
         rolling_avg[i] = mean;
 
         let sd = (d_squared / (w - 1) as f64).sqrt();
@@ -559,7 +571,8 @@ mod test {
     #[test]
     fn test_rolling_stats() {
         let w = 1000;
-        let ts = crate::load::loadts("data/ECG.csv", Some(1_000_000)).expect("problem loading data");
+        let ts =
+            crate::load::loadts("data/ECG.csv", Some(1_000_000)).expect("problem loading data");
 
         let (a_mean, a_std, a_norms) = rolling_stat(&ts, w);
         let (e_mean, e_std, e_norms) = rolling_stat_slow(&ts, w);
