@@ -122,7 +122,7 @@ fn test_zeucl() {
     let rng = Xoroshiro128Plus::seed_from_u64(3462);
     let ts: Vec<f64> = rng.sample_iter(Uniform::new(0.0, 1.0)).take(1000).collect();
     let w = 100;
-    let ts = WindowedTimeseries::new(ts, w);
+    let ts = WindowedTimeseries::new(ts, w, true);
 
     let euclidean = |a: &[f64], b: &[f64]| {
         a.iter()

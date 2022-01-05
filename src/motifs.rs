@@ -499,9 +499,9 @@ mod test {
             (1000, 1172, 6112, 2.1325079069545545),
         ] {
             let ts: Vec<f64> = loadts("data/ECG-10000.csv", None).unwrap();
-            let ts = WindowedTimeseries::new(ts, w);
+            let ts = WindowedTimeseries::new(ts, w, true);
 
-            let motif = *motifs(&ts, 1, 20, 0.001, None, 12435).first().unwrap();
+            let motif = *motifs(&ts, 1, 20, 0.001, None, None, 12435).first().unwrap();
             assert_eq!(motif.idx_a, a);
             assert_eq!(motif.idx_b, b);
             println!("{}", motif.distance);
@@ -519,10 +519,10 @@ mod test {
             (1000, 7137168, 7414108, 0.3013925657),
         ] {
             let ts: Vec<f64> = loadts("data/ECG.csv", None).unwrap();
-            let ts = WindowedTimeseries::new(ts, w);
+            let ts = WindowedTimeseries::new(ts, w, true);
             assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
 
-            let motif = *motifs(&ts, 1, 20, 0.001, None, 12435).first().unwrap();
+            let motif = *motifs(&ts, 1, 20, 0.001, None, None, 12435).first().unwrap();
             println!("Motif distance {}", motif.distance);
             // We consider the test passed if we find a distance smaller than the one found by SCAMP,
             // and the motif instances are located within w steps from the ones found by SCAMP.

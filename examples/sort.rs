@@ -24,7 +24,7 @@ fn main() {
     println!("Generating time series");
     let start = Instant::now();
     let ts: Vec<f64> = attimo::load::loadts("data/ECG.csv", Some(n)).unwrap();
-    let ts = WindowedTimeseries::new(ts, 300);
+    let ts = WindowedTimeseries::new(ts, 300, true);
     println!("...{:?}", start.elapsed());
     // let ts = Rc::new(WindowedTimeseries::gen_randomwalk(n, 300, 1243));
     println!("Computing hashes");

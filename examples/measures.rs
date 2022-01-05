@@ -39,13 +39,13 @@ struct Measures {
 
 fn main() -> Result<()> {
     let args: Args = argh::from_env();
-    let ts = WindowedTimeseries::new(loadts(&args.path, None)?, args.window);
+    let ts = WindowedTimeseries::new(loadts(&args.path, None)?, args.window, true);
     let fft_data = ts.fft_data();
     let seed = 1234;
     let rng = Xoshiro256StarStar::seed_from_u64(seed);
 
     // Find the top motif, and estimate its dimensionality measures along with the samples
-    let motif = *motifs(&ts, 1, args.repetitions, 0.01, None, seed)
+    let motif = *motifs(&ts, 1, args.repetitions, 0.01, None, None, seed)
         .first()
         .unwrap();
 

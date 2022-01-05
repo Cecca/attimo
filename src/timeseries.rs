@@ -554,7 +554,7 @@ mod test {
         let rng = Xoroshiro128Plus::seed_from_u64(3462);
         let ts: Vec<f64> = rng.sample_iter(Uniform::new(0.0, 1.0)).take(1000).collect();
         let w = 100;
-        let ts = WindowedTimeseries::new(ts, w);
+        let ts = WindowedTimeseries::new(ts, w, true);
 
         for i in 0..ts.num_subsequences() {
             let a = ts.subsequence(i);
@@ -609,7 +609,7 @@ mod test {
     fn test_distance_profile() {
         let w = 1000;
         let ts = crate::load::loadts("data/ECG.csv", Some(100000)).expect("problem loading data");
-        let ts = WindowedTimeseries::new(ts, w);
+        let ts = WindowedTimeseries::new(ts, w, true);
         let fft_data = ts.fft_data();
 
         let actual = ts.distance_profile(0, &fft_data);
