@@ -32,16 +32,29 @@ def install_scamp():
             sp.run(shlex.split(cmd), cwd=d).check_returncode()
 
 def install_ll():
-    try:
-        if os.path.isfile("./LL"):
-            return
-    except:
+    if os.path.isfile("./LL"):
+        return
+    else:
         print("Installing LL....")
         commands = [
             ("git clone https://github.com/xiaoshengli/LL.git /tmp/LL"  , "/tmp"),
             ("git checkout 6a20ec1"                                     , "/tmp/LL"),
             ("g++ -O3 -o LL LL.cpp -std=c++11"                          , "/tmp/LL"),
             ("cp /tmp/LL/LL ."                                          , "."),
+        ]
+        for cmd, d in commands:
+            sp.run(shlex.split(cmd), cwd=d).check_returncode()
+
+def install_mk():
+    if os.path.isfile("./mk_l"):
+        return
+    else:
+        print("Installing mk_l ....")
+        commands = [
+            ("wget http://www.cs.ucr.edu/%7Emueen/zip/MK_code.zip"   , "/tmp"),
+            ("unzip MK_code.zip"                                        , "/tmp"),
+            ("g++ -O3 -o mk_l mk_l.cpp -std=c++11"                      , os.path.join("/tmp", "MK", "Subsequence version")),
+            ("cp /tmp/MK/Subsequence version/mk_l ."                    , "."),
         ]
         for cmd, d in commands:
             sp.run(shlex.split(cmd), cwd=d).check_returncode()
@@ -100,6 +113,19 @@ def get_db():
         """)
         db.execute("PRAGMA user_version = 2;")
         print("  Bump version to 2")
+    if dbver < 3:
+        db.execute("""
+        CREATE TABLE IF NOT EXISTS mk (
+            hostname     TEXT,
+            dataset      TEXT,
+            threads      INT,
+            window       INT,
+            reference_points  INT,
+            time_s       REAL
+        );
+        """)
+        db.execute("PRAGMA user_version = 3;")
+        print("  Bump version to 3")
     
     print("Database initialized")
 
@@ -134,6 +160,9 @@ def get_datasets():
         # ("data/EMG.csv", 100),
         # ("data/EMG.csv", 1000),
 
+        (prefix("data/ECG.csv", 20000), 1000),
+        (prefix("data/ECG.csv", 40000), 1000),
+        (prefix("data/ECG.csv", 80000), 1000),
         (prefix("data/ECG.csv", 1000000), 1000),
         (prefix("data/ECG.csv", 2000000), 1000),
         (prefix("data/ECG.csv", 3000000), 1000),
@@ -301,6 +330,62 @@ def wc(path):
     with open(path) as fp:
         return len(fp.readlines())
 
+def run_mk():
+    install_mk()
+    db = get_db()
+    datasets = get_datasets()
+    threads = NUM_CPUS
+    reference_points = 2
+    for dataset, window in datasets:
+        execid = db.execute("""
+            SELECT rowid from mk
+            where hostname=:hostname
+              and dataset=:dataset
+              and threads=:threads
+              and window=:window
+              and reference_points=:reference_points
+            """,
+            {
+                "hostname": HOSTNAME,
+                "dataset": dataset,
+                "threads": threads,
+                "window": window,
+                "reference_points": reference_points
+            }
+        ).fetchone()
+        if execid is not None:
+            print("Experiment already executed (mk id={})".format(execid[0]))
+            continue
+
+        print(f"running on {dataset} with w={window} and {threads} threads... ")
+        start = time.time()
+        sp.run([
+            "./mk_l", 
+            dataset,
+            str(wc(dataset)),
+            str(window),
+            str(window),
+            str(reference_points),
+            "1"
+        ]).check_returncode()
+        end = time.time()
+        elapsed = end - start
+        print(f"{elapsed} seconds")
+
+        db.execute("""
+            INSERT INTO mk VALUES (:hostname,:dataset,:threads,:window,:reference_points,:elapsed);
+            """,
+            {
+                "hostname": HOSTNAME,
+                "dataset": dataset,
+                "threads": threads,
+                "window": window,
+                "reference_points": reference_points,
+                "elapsed": elapsed
+            }
+        )
+
+
 def run_ll():
     install_ll()
     db = get_db()
@@ -423,4 +508,5 @@ if __name__ == "__main__":
     # run_attimo()
     # run_scamp()
     run_ll()
+    # run_mk()
     
