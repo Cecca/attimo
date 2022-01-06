@@ -225,12 +225,16 @@ pub fn motifs(
         "exclusion_zone" => exclusion_zone
     );
 
+    let max_dist = min_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
+    let min_dist = max_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
+    println!("Distance constrained between {:?} and {:?}", min_dist, max_dist);
+
     println!("Computing FFT data");
     let timer = Instant::now();
     let fft_data = ts.fft_data();
     println!("Computed FFT data in {:?}", timer.elapsed());
 
-    let hasher_width = Hasher::estimate_width(&ts, &fft_data, seed);
+    let hasher_width = Hasher::estimate_width(&ts, &fft_data, min_dist, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
     let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
     let mem_before = allocated();
@@ -244,10 +248,6 @@ pub fn motifs(
     );
     //// Drop the fft, which we don't need from now on.
     drop(fft_data);
-
-    let max_dist = min_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
-    let min_dist = max_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
-    println!("Distance constrained between {:?} and {:?}", min_dist, max_dist);
 
     //// This function is used in the stopping condition
     let threshold_fn = |d: f64, depth: isize| {
@@ -281,12 +281,12 @@ pub fn motifs(
 
 
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
-    // let mut depth = K as isize;
-    let mut depth = if let Some(min_dist) = min_dist {
-        level_for_distance(min_dist, K as isize)
-    } else {
-        K as isize
-    };
+    let mut depth = K as isize;
+    // let mut depth = if let Some(min_dist) = min_dist {
+    //     level_for_distance(min_dist, K as isize)
+    // } else {
+    //     K as isize
+    // };
     let mut previous_depth = None;
     while depth >= 0 && !stop {
         let depth_timer = Instant::now();
@@ -423,7 +423,8 @@ pub fn motifs(
                     max_dist.map(|d| threshold_fn(d, depth)).unwrap_or(usize::MAX)
                 );
                 pbar.println(format!(
-                    "Rep {}, threshold {} - d={:.3} ({:?}, {} dists {} cands)",
+                    "Depth {}, rep {}, threshold {} - d={:.3} ({:?}, {} dists {} cands)",
+                    depth,
                     rep,
                     threshold,
                     kth.distance,
