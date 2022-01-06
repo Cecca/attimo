@@ -404,7 +404,7 @@ impl Hasher {
     //// The procedure takes into account two things: that we have at least one collision at
     //// the deepest level, and that we have at most 1% of the hashes falling out of the range [-128, 128],
     //// i.e. that 99% of the hash values can be represented with 8 bits.
-    pub fn estimate_width(ts: &WindowedTimeseries, fft_data: &FFTData, seed: u64) -> f64 {
+    pub fn estimate_width(ts: &WindowedTimeseries, fft_data: &FFTData, min_dist: Option<f64>, seed: u64) -> f64 {
         let timer = Instant::now();
         let mut r = 1.0;
         loop {
@@ -432,7 +432,11 @@ impl Hasher {
                             let b_idx = *b_idx as usize;
                             if a_idx + ts.w < b_idx {
                                 if probe_collection.first_collision(a_idx, b_idx, K).is_some() {
-                                    return true;
+                                    let d = crate::distance::zeucl(&ts, a_idx, b_idx);
+                                    if d > min_dist.unwrap_or(-1.0) {
+                                        println!("There is a collision at distance {} for quantization width {}", d, r);
+                                        return true;
+                                    }
                                 }
                             }
                         }
@@ -446,6 +450,7 @@ impl Hasher {
             } else {
                 r *= 2.0;
             }
+            drop(probe_collection);
         }
         info!("width estimation"; "time_s" => timer.elapsed().as_secs_f64(), "width" => r, "tag" => "profiling");
 
