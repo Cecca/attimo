@@ -31,6 +31,22 @@ def install_scamp():
         for cmd, d in commands:
             sp.run(shlex.split(cmd), cwd=d).check_returncode()
 
+def install_ll():
+    try:
+        if os.path.isfile("./LL"):
+            return
+    except:
+        print("Installing LL....")
+        commands = [
+            ("git clone https://github.com/xiaoshengli/LL.git /tmp/LL"  , "/tmp"),
+            ("git checkout 6a20ec1"                                     , "/tmp/LL"),
+            ("g++ -O3 -o LL LL.cpp -std=c++11"                          , "/tmp/LL"),
+            ("cp /tmp/LL/LL ."                                          , "."),
+        ]
+        for cmd, d in commands:
+            sp.run(shlex.split(cmd), cwd=d).check_returncode()
+
+
 
 def get_db():
     db = sqlite3.connect("attimo-results.db", isolation_level=None)
@@ -71,6 +87,19 @@ def get_db():
         """)
         db.execute("PRAGMA user_version = 1;")
         print("  Bump version to 1")
+    if dbver < 2:
+        db.execute("""
+        CREATE TABLE IF NOT EXISTS ll (
+            hostname     TEXT,
+            dataset      TEXT,
+            threads      INT,
+            window       INT,
+            grids        INT,
+            time_s       REAL
+        );
+        """)
+        db.execute("PRAGMA user_version = 2;")
+        print("  Bump version to 2")
     
     print("Database initialized")
 
@@ -93,7 +122,7 @@ def get_datasets():
         # (prefix("data/GAP.csv", 1000000), 60),
         # (prefix("data/GAP.csv", 1500000), 60),
         # (prefix("data/GAP.csv", 2000000), 60),
-        ("data/GAP.csv", 60),
+        # ("data/GAP.csv", 60),
         # ("data/GAP.csv", 600),
 
         # (prefix("data/EMG.csv",  500000), 100),
@@ -102,15 +131,15 @@ def get_datasets():
         # (prefix("data/EMG.csv", 2000000), 100),
         # (prefix("data/EMG.csv", 2500000), 100),
         # (prefix("data/EMG.csv", 3000000), 100),
-        ("data/EMG.csv", 100),
+        # ("data/EMG.csv", 100),
         # ("data/EMG.csv", 1000),
 
-        # (prefix("data/ECG.csv", 1000000), 1000),
-        # (prefix("data/ECG.csv", 2000000), 1000),
-        # (prefix("data/ECG.csv", 3000000), 1000),
-        # (prefix("data/ECG.csv", 4000000), 1000),
-        # (prefix("data/ECG.csv", 5000000), 1000),
-        # (prefix("data/ECG.csv", 6000000), 1000),
+        (prefix("data/ECG.csv", 1000000), 1000),
+        (prefix("data/ECG.csv", 2000000), 1000),
+        (prefix("data/ECG.csv", 3000000), 1000),
+        (prefix("data/ECG.csv", 4000000), 1000),
+        (prefix("data/ECG.csv", 5000000), 1000),
+        (prefix("data/ECG.csv", 6000000), 1000),
         # (prefix("data/ECG.csv", 7000000), 1000),
         ("data/ECG.csv", 1000),
 
@@ -130,7 +159,7 @@ def get_datasets():
         # (prefix("data/freezer.txt", 5000000), 5000),
         # (prefix("data/freezer.txt", 6000000), 5000),
         # (prefix("data/freezer.txt", 7000000), 5000),
-        ("data/freezer.txt", 5000),
+        # ("data/freezer.txt", 5000),
 
         # (prefix("data/ASTRO.csv", 100000), 100),
         # (prefix("data/ASTRO.csv", 200000), 100),
@@ -142,10 +171,10 @@ def get_datasets():
         # (prefix("data/ASTRO.csv", 800000), 100),
         # (prefix("data/ASTRO.csv", 900000), 100),
         # (prefix("data/ASTRO.csv", 1000000), 100),
-        ("data/ASTRO.csv", 100),
+        # ("data/ASTRO.csv", 100),
 
-        ("data/HumanY.txt", 18000),
-        ("data/HumanY.txt", 21000)
+        # ("data/HumanY.txt", 18000),
+        # ("data/HumanY.txt", 21000)
     ]
 
 def remove_trivial(df, w):
@@ -268,6 +297,63 @@ def run_attimo():
                     }
                 )
 
+def wc(path):
+    with open(path) as fp:
+        return len(fp.readlines())
+
+def run_ll():
+    install_ll()
+    db = get_db()
+    datasets = get_datasets()
+    threads = NUM_CPUS
+    grids = 4
+    for dataset, window in datasets:
+        execid = db.execute("""
+            SELECT rowid from ll
+            where hostname=:hostname
+              and dataset=:dataset
+              and threads=:threads
+              and window=:window
+              and grids=:grids
+            """,
+            {
+                "hostname": HOSTNAME,
+                "dataset": dataset,
+                "threads": threads,
+                "window": window,
+                "grids": grids
+            }
+        ).fetchone()
+        if execid is not None:
+            print("Experiment already executed (ll id={})".format(execid[0]))
+            continue
+
+        print(f"running on {dataset} with w={window} and {threads} threads... ")
+        start = time.time()
+        sp.run([
+            "./LL", 
+            dataset,
+            str(wc(dataset)),
+            str(window),
+            str(grids)
+        ], stdout=sp.DEVNULL).check_returncode()
+        end = time.time()
+        elapsed = end - start
+        print(f"{elapsed} seconds")
+
+        db.execute("""
+            INSERT INTO ll VALUES (:hostname,:dataset,:threads,:window,:grids,:elapsed);
+            """,
+            {
+                "hostname": HOSTNAME,
+                "dataset": dataset,
+                "threads": threads,
+                "window": window,
+                "grids": grids,
+                "elapsed": elapsed
+            }
+        )
+
 
 def run_scamp():
     install_scamp()
@@ -334,6 +420,7 @@ def run_scamp():
 
 
 if __name__ == "__main__":
-    run_attimo()
-    run_scamp()
+    # run_attimo()
+    # run_scamp()
+    run_ll()
     
