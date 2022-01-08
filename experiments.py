@@ -502,8 +502,8 @@ def run_scamp():
 
 
 if __name__ == "__main__":
-    # run_attimo()
+    run_attimo()
     # run_scamp()
-    run_ll()
+    # run_ll()
     # run_mk()
     

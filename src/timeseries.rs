@@ -370,6 +370,11 @@ fn _rolling_stat(
     let mut sum = ts[0..w].iter().sum::<f64>();
     let mut sq_sum = ts[0..w].iter().map(|x| x * x).sum::<f64>();
 
+    let comp_d_squared = |i: usize| {
+        let mean = ts[i..i + w].iter().sum::<f64>() / w as f64;
+        ts[i..i + w].iter().map(|x| (x - mean).powi(2)).sum::<f64>()
+    };
+
     let mut mean = ts[0..w].iter().sum::<f64>() / w as f64;
     let mut d_squared = ts[0..w].iter().map(|x| (x - mean).powi(2)).sum::<f64>();
 
@@ -384,7 +389,17 @@ fn _rolling_stat(
         let new = ts[i + w - 1];
         let old = ts[i - 1];
         mean += (new - old) / w as f64;
-        d_squared += (new - old) * (new - mean + old - old_mean);
+        let new_d_squared = d_squared + (new - old) * (new - mean + old - old_mean);
+        d_squared = if new_d_squared > 0.0 {
+            new_d_squared
+        } else {
+            println!(" WARN: Computing from scratch {}", i);
+            comp_d_squared(i)
+        };
+        debug_assert!((d_squared - comp_d_squared(i)).abs() < 0.0000000001,
+            "({}) d_squared: rolling {} scratch {}",
+            i, d_squared, comp_d_squared(i)
+        );
         assert!(
             d_squared > 0.0,
             "d_squared is {} at i {} variance should be {}",
@@ -403,7 +418,12 @@ fn _rolling_stat(
         rolling_avg[i] = mean;
 
         let sd = (d_squared / (w - 1) as f64).sqrt();
-        // assert!((sd - standard_deviation(&ts[i..(i+w)], mean).abs()) < 0.00000001);
+        debug_assert!((sd - variance(&ts[i..(i + w)], mean).sqrt()).abs() < 0.0000001,
+            "({}) computed sd is {}, actual is {}",
+            i,
+            sd,
+            variance(&ts[i..i+w], mean).sqrt()
+        );
         assert!(
             sd.is_finite(),
             "standard deviation is {}, d_squared {}\n{:?}",

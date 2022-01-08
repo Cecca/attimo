@@ -52,9 +52,9 @@ pub fn monitor(period: Duration, flag: Arc<AtomicBool>) -> JoinHandle<()> {
 macro_rules! alloc_cnt {
     ($what:literal; $body:block) => {
         {
-            let __mem_before = allocated();
+            let __mem_before = allocated() as isize;
             let r = $body;
-            let __mem_after = allocated();
+            let __mem_after = allocated() as isize;
             info!(
                 "allocated";
                 "what" => $what,
