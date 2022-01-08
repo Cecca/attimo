@@ -17,30 +17,61 @@ dataset_info <- function() {
 
 load_attimo <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
-    tbl <- tbl(conn, "attimo") %>%
-        filter(version == max(version)) %>%
+    table <- tbl(conn, "attimo") %>%
+        filter(version == max(version, na.rm = T)) %>%
         collect() %>%
         mutate(
             algorithm = "attimo",
             path = dataset,
             dataset = str_remove(dataset, "data/") %>%
                 str_remove("-\\d+") %>%
-                str_remove(".(csv|txt)")
+                str_remove(".(csv|txt)"),
+            expid = row_number()
+        ) %>%
+        left_join(dataset_info()) %>%
+        mutate(
+            prefix = str_extract(path, "\\d+") %>% as.integer(),
+            prefix = if_else(
+                is.na(prefix),
+                as.integer(n),
+                prefix
+            )
         )
+    mem <- table %>%
+        as_tbl_json(json.column = "log") %>%
+        gather_array() %>%
+        spread_all() %>%
+        filter(tag == "memory") %>%
+        group_by(expid, prefix, dataset) %>%
+        summarise(mem_bytes = max(mem_bytes, na.rm = T)) %>%
+        ungroup() %>%
+        mutate(
+            bytes_per_subsequence = mem_bytes / prefix,
+            mem_gb = mem_bytes / (1024^3)
+        ) %>%
+        as_tibble() %>%
+        select(expid, bytes_per_subsequence, mem_gb, mem_bytes)
     DBI::dbDisconnect(conn)
-    tbl
+    inner_join(table, mem, by = "expid")
 }
 
 load_scamp <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "scamp") %>%
         collect() %>%
+        left_join(dataset_info()) %>%
         mutate(
             algorithm = "scamp",
             path = dataset,
             dataset = str_remove(dataset, "data/") %>%
                 str_remove("-\\d+") %>%
-                str_remove(".(csv|txt)")
+                str_remove(".(csv|txt)"),
+            prefix = str_extract(dataset, "\\d+") %>% as.integer(),
+            prefix = if_else(
+                is.na(prefix),
+                as.integer(n),
+                prefix
+            )
         )
     DBI::dbDisconnect(conn)
     tbl
@@ -72,12 +103,6 @@ plot_scalability_n <- function(plotdata) {
     plotdata %>%
         left_join(dataset_info(), by = "dataset") %>%
         mutate(
-            prefix = str_extract(dataset, "\\d+") %>% as.integer(),
-            prefix = if_else(
-                is.na(prefix),
-                as.integer(n),
-                prefix
-            ),
             dataset = str_remove(dataset, "data/") %>%
                 str_remove("-\\d+") %>%
                 str_remove(".(csv|txt)") %>%

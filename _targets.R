@@ -54,11 +54,11 @@ list(
         fig_scalability_n,
         bind_rows(
             select(
-                data_attimo, algorithm, hostname, dataset, threads, window,
+                data_attimo, algorithm, hostname, dataset, prefix, threads, window,
                 repetitions, motifs, delta, time_s
             ) %>% filter(motifs == 1),
             select(
-                data_scamp, algorithm, hostname, dataset,
+                data_scamp, algorithm, hostname, dataset, prefix,
                 threads, window, time_s
             )
         ) %>% plot_scalability_n()
