@@ -357,7 +357,7 @@ pub fn motifs(
                                             //// After computing the distance between the two subsequences,
                                             //// we try to insert the pair in the top data structure
                                             let d = zeucl(&ts, a_idx, b_idx);
-                                            if d > min_dist.unwrap_or(-1.0) {
+                                            if d.is_finite() && d > min_dist.unwrap_or(-1.0) {
                                                 rep_cnt_dists.fetch_add(1, Ordering::SeqCst);
 
                                                 //// This is the collision probability for this distance

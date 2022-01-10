@@ -68,6 +68,9 @@ pub fn dot_slow(a: &[f64], b: &[f64]) -> f64 {
 
 #[inline]
 pub fn zdot(a: &[f64], ma: f64, sda: f64, b: &[f64], mb: f64, sdb: f64) -> f64 {
+    if sda == 0.0 || sdb == 0.0 {
+        return f64::NAN;
+    }
     use packed_simd::f64x8;
     let ac = a.chunks_exact(8);
     let bc = b.chunks_exact(8);
@@ -85,9 +88,6 @@ pub fn zdot(a: &[f64], ma: f64, sda: f64, b: &[f64], mb: f64, sdb: f64) -> f64 {
         .map(|(a, b)| (a - ma) * (b - mb))
         .sum::<f64x8>()
         .sum() as f64;
-    //// replace the standard deviation with 1 (so no rescaling) in the case of constant signals
-    let sda = if sda > 0.0 { sda } else { 1.0 };
-    let sdb = if sdb > 0.0 { sdb } else { 1.0 };
     (part + rem) / (sda * sdb)
 }
 

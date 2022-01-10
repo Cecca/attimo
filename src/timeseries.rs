@@ -348,6 +348,10 @@ fn rolling_stat(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>) {
     (rolling_avg, rolling_sd)
 }
 
+fn relative_error(a: f64, b: f64) -> f64 {
+    (a - b).abs() / std::cmp::max_by(a, b, |a,b| a.partial_cmp(b).unwrap())
+}
+
 fn _rolling_stat(
     ts: &[f64],
     w: usize,
@@ -376,19 +380,12 @@ fn _rolling_stat(
         d_squared = if new_d_squared > 0.0 {
             new_d_squared
         } else {
-            println!(" WARN: Computing from scratch {}", i);
             comp_d_squared(i)
         };
-        debug_assert!((d_squared - comp_d_squared(i)).abs() < 0.0000000001,
-            "({}) d_squared: rolling {} scratch {}",
-            i, d_squared, comp_d_squared(i)
-        );
-        assert!(
-            d_squared > 0.0,
-            "d_squared is {} at i {} variance should be {}",
-            d_squared,
-            i,
-            variance(&ts[i..i + w], mean)
+        debug_assert!(comp_d_squared(i) == 0.0 || relative_error(d_squared, comp_d_squared(i)) < 0.000001,
+            "({}) d_squared: rolling {} scratch {} relative error {}",
+            i, d_squared, comp_d_squared(i),
+            relative_error(d_squared, comp_d_squared(i))
         );
 
         assert!(mean.is_finite());
