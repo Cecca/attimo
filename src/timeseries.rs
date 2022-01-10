@@ -238,7 +238,7 @@ impl WindowedTimeseries {
         self.znormalized_sliding_dot_product(&buf, fft_data, &mut dp);
 
         for i in 0..self.num_subsequences() {
-            dp[i] = (2.0 * (self.w - 1) as f64 - 2.0 * dp[i]).sqrt();
+            dp[i] = (2.0 * self.w as f64 - 2.0 * dp[i]).sqrt();
             // Due to floating point errors, it might be that the difference just
             // computed is slightly negative. If that's the case we replace it with 0
             if dp[i] < 0.0 {
@@ -365,7 +365,7 @@ fn _rolling_stat(
     let mut d_squared = ts[0..w].iter().map(|x| (x - mean).powi(2)).sum::<f64>();
 
     rolling_avg[0] = mean;
-    rolling_sd[0] = (d_squared / (w - 1) as f64).sqrt();
+    rolling_sd[0] = (d_squared / w as f64).sqrt();
 
     for i in 1..n_subs {
         let old_mean = mean;
@@ -395,7 +395,7 @@ fn _rolling_stat(
         debug_assert!((mean - average(&ts[i..(i + w)]).abs()) < 0.00000001);
         rolling_avg[i] = mean;
 
-        let sd = (d_squared / (w - 1) as f64).sqrt();
+        let sd = (d_squared / w as f64).sqrt();
         debug_assert!((sd - variance(&ts[i..(i + w)], mean).sqrt()).abs() < 0.0000001,
             "({}) computed sd is {}, actual is {}",
             i,
@@ -419,7 +419,7 @@ fn average(v: &[f64]) -> f64 {
 }
 
 fn variance(v: &[f64], mean: f64) -> f64 {
-    v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (v.len() - 1) as f64
+    v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / v.len() as f64
 }
 
 // #[cfg(test)]
@@ -431,11 +431,8 @@ fn rolling_stat_slow(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>) {
     let mut buffer = vec![0.0; w];
     for i in 0..n_subs {
         let mean = ts[i..i + w].iter().sum::<f64>() / w as f64;
-        // NOTE: Here we compute the standard deviation normalizing by w - 1. In stumpy and scamp,
-        // instead, the standard deviation is computed normalizing by w, which makes for slightly
-        // different results.
         let sd =
-            (ts[i..i + w].iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (w - 1) as f64).sqrt();
+            (ts[i..i + w].iter().map(|x| (x - mean).powi(2)).sum::<f64>() / w as f64).sqrt();
         buffer.fill(0.0);
         for (i, x) in ts[i..i + w].iter().enumerate() {
             buffer[i] = (x - mean) / sd;
@@ -553,7 +550,7 @@ mod test {
             let mean: f64 = a.iter().sum::<f64>() / a.len() as f64;
             let actual_mean = ts.mean(i);
             let sd =
-                ((a.iter().map(|x| (x - mean).powi(2)).sum::<f64>()) / (a.len() - 1) as f64).sqrt();
+                ((a.iter().map(|x| (x - mean).powi(2)).sum::<f64>()) / a.len() as f64).sqrt();
             let actual_sd = ts.sd(i);
             assert!((mean - actual_mean).abs() < 0.0000000000001);
             assert!((sd - actual_sd).abs() < 0.0000000000001);
