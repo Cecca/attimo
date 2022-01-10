@@ -39,7 +39,8 @@ pub fn zeucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
         ts.mean(j),
         ts.sd(j),
     );
-    (ts.squared_norm(i) + ts.squared_norm(j) - 2.0 * dotp).sqrt()
+    // The norm of z-normalized vectors of length w is (w-1) since we are considering the sample variance
+    (2.0 * (ts.w - 1) as f64 - 2.0 * dotp).sqrt()
 }
 
 pub fn zeucl_slow(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
