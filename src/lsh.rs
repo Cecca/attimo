@@ -26,6 +26,7 @@
 //// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
+use crate::motifs::Motif;
 use crate::{alloc_cnt, allocator::*};
 // TODO Remove this dependency
 use crate::sort::*;
@@ -404,7 +405,7 @@ impl Hasher {
     //// The procedure takes into account two things: that we have at least one collision at
     //// the deepest level, and that we have at most 1% of the hashes falling out of the range [-128, 128],
     //// i.e. that 99% of the hash values can be represented with 8 bits.
-    pub fn estimate_width(ts: &WindowedTimeseries, fft_data: &FFTData, min_dist: Option<f64>, seed: u64) -> f64 {
+    pub fn estimate_width(ts: &WindowedTimeseries, k: usize, fft_data: &FFTData, min_dist: Option<f64>, seed: u64) -> f64 {
         let timer = Instant::now();
         let mut r = 1.0;
         loop {
@@ -424,6 +425,7 @@ impl Hasher {
             info!("grouped subsequences");
 
             let has_collision = || {
+                let mut topk = crate::motifs::TopK::new(k, ts.w);
                 for bucket in probe_buckets.iter() {
                     let bucket = &probe_column[bucket.clone()];
                     for (_, a_idx) in bucket.iter() {
@@ -434,7 +436,17 @@ impl Hasher {
                                 if probe_collection.first_collision(a_idx, b_idx, K).is_some() {
                                     let d = crate::distance::zeucl(&ts, a_idx, b_idx);
                                     if d > min_dist.unwrap_or(-1.0) {
-                                        println!("There is a collision at distance {} for quantization width {}", d, r);
+                                        // println!("There is a collision at distance {} for quantization width {}", d, r);
+                                        // return true;
+                                        topk.insert(Motif{
+                                            distance: d,
+                                            collision_probability: f64::NAN,
+                                            elapsed: timer.elapsed(),
+                                            idx_a: a_idx,
+                                            idx_b: b_idx
+                                        });
+                                    }
+                                    if topk.k_th().is_some() {
                                         return true;
                                     }
                                 }

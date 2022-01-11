@@ -92,14 +92,14 @@ impl Motif {
 //// such that no two motifs in the data structure are overlapping,
 //// according to the parameter `exclusion_zone`.
 #[derive(Clone)]
-struct TopK {
+pub struct TopK {
     k: usize,
     exclusion_zone: usize,
     top: Vec<Motif>,
 }
 
 impl TopK {
-    fn new(k: usize, exclusion_zone: usize) -> Self {
+    pub fn new(k: usize, exclusion_zone: usize) -> Self {
         Self {
             k,
             exclusion_zone,
@@ -110,7 +110,7 @@ impl TopK {
     //// When inserting into the data structure, we first check, in order of distance,
     //// if there is a pair whose defining motif is closer than the one being inserted,
     //// and which is also overlapping.
-    fn insert(&mut self, motif: Motif) {
+    pub fn insert(&mut self, motif: Motif) {
         let mut i = 0;
         while i < self.top.len() && self.top[i].distance < motif.distance {
             //// If this is the case, we don't insert the motif, and return.
@@ -152,6 +152,10 @@ impl TopK {
         }
     }
 
+    fn for_each<F: FnMut((usize, &Motif))>(&self, f: F) {
+        self.top.iter().enumerate().for_each(f);
+    }
+
     fn merge(&mut self, other: &Self) {
         let kth_d = self
             .k_th()
@@ -165,7 +169,7 @@ impl TopK {
     }
 
     //// This function is used to access the k-th motif, if we already found it.
-    fn k_th(&self) -> Option<Motif> {
+    pub fn k_th(&self) -> Option<Motif> {
         if self.top.len() == self.k {
             self.top.last().map(|mot| *mot)
         } else {
@@ -227,14 +231,17 @@ pub fn motifs(
 
     let max_dist = min_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
     let min_dist = max_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
-    println!("Distance constrained between {:?} and {:?}", min_dist, max_dist);
+    println!(
+        "Distance constrained between {:?} and {:?}",
+        min_dist, max_dist
+    );
 
     println!("Computing FFT data");
     let timer = Instant::now();
     let fft_data = ts.fft_data();
     println!("Computed FFT data in {:?}", timer.elapsed());
 
-    let hasher_width = Hasher::estimate_width(&ts, &fft_data, min_dist, seed);
+    let hasher_width = Hasher::estimate_width(&ts, topk, &fft_data, min_dist, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
     let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
     let mem_before = allocated();
@@ -270,6 +277,7 @@ pub fn motifs(
 
     let cnt_dist = AtomicUsize::new(0);
 
+    let mut last_motif_reported = -1isize;
     let mut top = TopK::new(topk, exclusion_zone);
 
     let mut stop = false;
@@ -278,7 +286,6 @@ pub fn motifs(
     let mut column_buffer = Vec::new();
     //// This vector holds the boundaries between buckets. We reuse the allocations
     let mut buckets = Vec::new();
-
 
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
     let mut depth = K as isize;
@@ -291,13 +298,12 @@ pub fn motifs(
     while depth >= 0 && !stop {
         let depth_timer = Instant::now();
         let pbar = ProgressBar::new(repetitions as u64);
-        pbar.set_draw_rate(4);
+        pbar.set_draw_rate(1);
         pbar.set_style(
             ProgressStyle::default_bar()
                 .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
         );
         pbar.set_message(format!("depth {}", depth));
-
 
         for rep in 0..repetitions {
             let rep_cnt_dists = AtomicUsize::new(0);
@@ -410,6 +416,22 @@ pub fn motifs(
             cnt_dist.fetch_add(rep_cnt_dists.load(Ordering::SeqCst), Ordering::SeqCst);
             pbar.inc(1);
 
+            //// Report on the console the motifs new motifs that have been confirmed, if any
+            top.for_each(|(i, motif)| {
+                let t = threshold_fn(motif.distance, depth);
+                if rep >= t && i as isize > last_motif_reported {
+                    pbar.println(format!(
+                        "Found motif at distance {:.4} ({} -- {}, corr {:.4}) after {:?}",
+                        motif.distance,
+                        motif.idx_a,
+                        motif.idx_b,
+                        1.0 - motif.distance.powi(2) / (2.0 * ts.w as f64),
+                        motif.elapsed
+                    ));
+                    last_motif_reported = i as isize;
+                }
+            });
+
             //// Now we check the stopping condition. If we have seen enough
             //// repetitions to make it unlikely (where _unlikely_ is quantified
             //// by the parameter `delta`) that we have missed a pair
@@ -418,26 +440,41 @@ pub fn motifs(
             //// We check the condition even if no update happened, because there is
             //// one more repetition that could have made us pass the threshold.
             if let Some(kth) = top.k_th() {
-                let threshold = std::cmp::min(
-                    threshold_fn(kth.distance, depth),
-                    max_dist.map(|d| threshold_fn(d, depth)).unwrap_or(usize::MAX)
-                );
-                pbar.println(format!(
-                    "Depth {}, rep {}, threshold {} - d={:.3} ({:?}, {} dists {} cands)",
-                    depth,
-                    rep,
-                    threshold,
-                    kth.distance,
-                    rep_elapsed,
-                    rep_cnt_dists.load(Ordering::SeqCst),
-                    rep_candidate_pairs.load(Ordering::SeqCst),
-                ));
-                info!("check stopping condition"; "threshold" => threshold);
+                let threshold = threshold_fn(kth.distance, depth);
+                // pbar.println(format!(
+                //     "Depth {}, rep {}, threshold {} - d={:.3} ({:?}, {} dists {} cands)",
+                //     depth,
+                //     rep,
+                //     threshold,
+                //     kth.distance,
+                //     rep_elapsed,
+                //     rep_cnt_dists.load(Ordering::SeqCst),
+                //     rep_candidate_pairs.load(Ordering::SeqCst),
+                // ));
+                // info!("check stopping condition"; "threshold" => threshold);
                 if rep >= threshold {
                     stop = true;
                     break;
                 }
-            } 
+            }
+            if let Some(max_dist) = max_dist {
+                let threshold = threshold_fn(max_dist, depth);
+                // pbar.println(format!(
+                //     "Depth {}, rep {}, threshold {} - d={:.3} ({:?}, {} dists {} cands)",
+                //     depth,
+                //     rep,
+                //     threshold,
+                //     top.k_th().map(|d| format!("{:.3}", d.distance)).unwrap_or("--".to_owned()),
+                //     rep_elapsed,
+                //     rep_cnt_dists.load(Ordering::SeqCst),
+                //     rep_candidate_pairs.load(Ordering::SeqCst),
+                // ));
+                // info!("check stopping condition"; "threshold" => threshold);
+                if rep >= threshold {
+                    stop = true;
+                    break;
+                }
+            }
         }
 
         pbar.finish_and_clear();
@@ -456,7 +493,12 @@ pub fn motifs(
             previous_depth.replace(depth as usize);
             if let Some(kth) = top.k_th() {
                 let orig_depth = depth;
-                depth = level_for_distance(kth.distance, depth);
+                let d = if let Some(max_dist) = max_dist {
+                    std::cmp::min_by(max_dist, kth.distance, |a, b| a.partial_cmp(b).unwrap())
+                } else {
+                    kth.distance
+                };
+                depth = level_for_distance(d, depth);
                 assert!(depth < orig_depth, "we are not making progress in depth");
             } else {
                 depth -= 1;
@@ -502,7 +544,9 @@ mod test {
             let ts: Vec<f64> = loadts("data/ECG-10000.csv", None).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
 
-            let motif = *motifs(&ts, 1, 20, 0.001, None, None, 12435).first().unwrap();
+            let motif = *motifs(&ts, 1, 20, 0.001, None, None, 12435)
+                .first()
+                .unwrap();
             assert_eq!(motif.idx_a, a);
             assert_eq!(motif.idx_b, b);
             println!("{}", motif.distance);
@@ -516,14 +560,14 @@ mod test {
         // using SCAMP: https://github.com/zpzim/SCAMP
         // The distances are slightly different, due to numerical approximation
         // and a different normalization in their computation of the standard deviation
-        for (w, a, b, d) in [
-            (1000, 7137168, 7414108, 0.3013925657),
-        ] {
+        for (w, a, b, d) in [(1000, 7137168, 7414108, 0.3013925657)] {
             let ts: Vec<f64> = loadts("data/ECG.csv", None).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
             assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
 
-            let motif = *motifs(&ts, 1, 20, 0.001, None, None, 12435).first().unwrap();
+            let motif = *motifs(&ts, 1, 20, 0.001, None, None, 12435)
+                .first()
+                .unwrap();
             println!("Motif distance {}", motif.distance);
             // We consider the test passed if we find a distance smaller than the one found by SCAMP,
             // and the motif instances are located within w steps from the ones found by SCAMP.
