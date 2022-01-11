@@ -283,7 +283,7 @@ def run_attimo():
                 ]).check_returncode()
                 end = time.time()
                 elapsed = end - start
-                motif_pairs = pd.read_csv('/tmp/motifs.csv', names=['a', 'b','dist']).to_json(orient='records')
+                motif_pairs = pd.read_csv('/tmp/motifs.csv', names=['a', 'b','dist', 'confirmation_time']).to_json(orient='records')
                 with open("/tmp/attimo.json") as fp:
                     log = json.dumps([json.loads(l) for l in fp.readlines()])
 

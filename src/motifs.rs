@@ -40,7 +40,8 @@ pub struct Motif {
     pub idx_b: usize,
     pub distance: f64,
     pub collision_probability: f64,
-    pub elapsed: Duration,
+    /// When the motif was confirmed
+    pub elapsed: Option<Duration>,
 }
 
 impl Eq for Motif {}
@@ -152,8 +153,8 @@ impl TopK {
         }
     }
 
-    fn for_each<F: FnMut((usize, &Motif))>(&self, f: F) {
-        self.top.iter().enumerate().for_each(f);
+    fn for_each<F: FnMut(&mut Motif)>(&mut self, f: F) {
+        self.top.iter_mut().for_each(f);
     }
 
     fn merge(&mut self, other: &Self) {
@@ -277,7 +278,6 @@ pub fn motifs(
 
     let cnt_dist = AtomicUsize::new(0);
 
-    let mut last_motif_reported = -1isize;
     let mut top = TopK::new(topk, exclusion_zone);
 
     let mut stop = false;
@@ -373,7 +373,7 @@ pub fn motifs(
                                                     idx_a: a_idx,
                                                     idx_b: b_idx,
                                                     distance: d,
-                                                    elapsed: start.elapsed(),
+                                                    elapsed: None,
                                                     collision_probability: p,
                                                 };
                                                 tl_top.borrow_mut().insert(m);
@@ -416,19 +416,20 @@ pub fn motifs(
             cnt_dist.fetch_add(rep_cnt_dists.load(Ordering::SeqCst), Ordering::SeqCst);
             pbar.inc(1);
 
-            //// Report on the console the motifs new motifs that have been confirmed, if any
-            top.for_each(|(i, motif)| {
+            //// Report on the console the motifs new motifs that have been confirmed, if any,
+            //// and update their confirmation time on the go.
+            top.for_each(|motif| {
                 let t = threshold_fn(motif.distance, depth);
-                if rep >= t && i as isize > last_motif_reported {
+                if rep >= t && motif.elapsed.is_none() {
+                    motif.elapsed.replace(start.elapsed());
                     pbar.println(format!(
                         "Found motif at distance {:.4} ({} -- {}, corr {:.4}) after {:?}",
                         motif.distance,
                         motif.idx_a,
                         motif.idx_b,
                         1.0 - motif.distance.powi(2) / (2.0 * ts.w as f64),
-                        motif.elapsed
+                        motif.elapsed.unwrap()
                     ));
-                    last_motif_reported = i as isize;
                 }
             });
 
@@ -441,17 +442,6 @@ pub fn motifs(
             //// one more repetition that could have made us pass the threshold.
             if let Some(kth) = top.k_th() {
                 let threshold = threshold_fn(kth.distance, depth);
-                // pbar.println(format!(
-                //     "Depth {}, rep {}, threshold {} - d={:.3} ({:?}, {} dists {} cands)",
-                //     depth,
-                //     rep,
-                //     threshold,
-                //     kth.distance,
-                //     rep_elapsed,
-                //     rep_cnt_dists.load(Ordering::SeqCst),
-                //     rep_candidate_pairs.load(Ordering::SeqCst),
-                // ));
-                // info!("check stopping condition"; "threshold" => threshold);
                 if rep >= threshold {
                     stop = true;
                     break;
@@ -459,17 +449,6 @@ pub fn motifs(
             }
             if let Some(max_dist) = max_dist {
                 let threshold = threshold_fn(max_dist, depth);
-                // pbar.println(format!(
-                //     "Depth {}, rep {}, threshold {} - d={:.3} ({:?}, {} dists {} cands)",
-                //     depth,
-                //     rep,
-                //     threshold,
-                //     top.k_th().map(|d| format!("{:.3}", d.distance)).unwrap_or("--".to_owned()),
-                //     rep_elapsed,
-                //     rep_cnt_dists.load(Ordering::SeqCst),
-                //     rep_candidate_pairs.load(Ordering::SeqCst),
-                // ));
-                // info!("check stopping condition"; "threshold" => threshold);
                 if rep >= threshold {
                     stop = true;
                     break;

@@ -135,7 +135,9 @@ fn output_csv<P: AsRef<Path>>(path: P, motifs: &[Motif]) -> Result<()> {
     use std::io::prelude::*;
     let mut f = std::fs::File::create(path.as_ref())?;
     for m in motifs {
-        writeln!(f, "{}, {}, {}", m.idx_a, m.idx_b, m.distance)?;
+        if let Some(confirmation_time) = m.elapsed {
+            writeln!(f, "{}, {}, {}, {}", m.idx_a, m.idx_b, m.distance, confirmation_time.as_secs_f64())?;
+        }
     }
     Ok(())
 }

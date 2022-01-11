@@ -441,7 +441,7 @@ impl Hasher {
                                         topk.insert(Motif{
                                             distance: d,
                                             collision_probability: f64::NAN,
-                                            elapsed: timer.elapsed(),
+                                            elapsed: None,
                                             idx_a: a_idx,
                                             idx_b: b_idx
                                         });
