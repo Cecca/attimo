@@ -237,13 +237,17 @@ pub fn motifs(
         min_dist, max_dist
     );
 
+    info!("fft computation"; "tag" => "phase");
     println!("Computing FFT data");
     let timer = Instant::now();
     let fft_data = ts.fft_data();
     println!("Computed FFT data in {:?}", timer.elapsed());
 
+    info!("quantization width estimation"; "tag" => "phase");
     let hasher_width = Hasher::estimate_width(&ts, topk, &fft_data, min_dist, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
+
+    info!("hash computation"; "tag" => "phase");
     let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
     let mem_before = allocated();
     let pools = HashCollection::from_ts(ts, Arc::clone(&hasher), &fft_data);
@@ -278,6 +282,7 @@ pub fn motifs(
 
     let cnt_dist = AtomicUsize::new(0);
 
+    info!("tries exploration"; "tag" => "phase");
     let mut top = TopK::new(topk, exclusion_zone);
 
     let mut stop = false;
@@ -422,12 +427,14 @@ pub fn motifs(
                 let t = threshold_fn(motif.distance, depth);
                 if rep >= t && motif.elapsed.is_none() {
                     motif.elapsed.replace(start.elapsed());
+                    let correlation = 1.0 - motif.distance.powi(2) / (2.0 * ts.w as f64);
+                    info!("output reporting"; "tag" => "output", "distance" => motif.distance, "correlation" => correlation);
                     pbar.println(format!(
                         "Found motif at distance {:.4} ({} -- {}, corr {:.4}) after {:?}",
                         motif.distance,
                         motif.idx_a,
                         motif.idx_b,
-                        1.0 - motif.distance.powi(2) / (2.0 * ts.w as f64),
+                        correlation,
                         motif.elapsed.unwrap()
                     ));
                 }
@@ -486,6 +493,7 @@ pub fn motifs(
     }
     let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
     let cnt_dist = cnt_dist.load(Ordering::SeqCst);
+    info!("end"; "tag" => "phase");
     info!("motifs completed";
         "tag" => "profiling",
         "time_s" => start.elapsed().as_secs_f64(),

@@ -91,6 +91,7 @@ fn main() -> Result<()> {
     let monitor = allocator::monitor(Duration::from_millis(200), Arc::clone(&monitor_flag));
 
     let _guard = setup_logger(&config.log_path)?;
+    slog_scope::info!("input reading"; "tag" => "phase");
     let path = config.path;
     let w = config.window;
     let timer = Instant::now();
