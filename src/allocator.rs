@@ -8,7 +8,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct CountingAllocator;
 
@@ -35,13 +35,15 @@ pub fn allocated() -> usize {
 
 pub fn monitor(period: Duration, flag: Arc<AtomicBool>) -> JoinHandle<()> {
     std::thread::spawn(move || {
-        // let mut last = 0;
+        let mut last = 0;
+        let start = Instant::now();
         while flag.load(SeqCst) {
-            // let mem = allocated();
-            // if mem != last {
-            info!("memory"; "tag" => "memory", "mem_bytes" => allocated());
-            //     last = mem;
-            // }
+            let mem = allocated();
+            if mem != last {
+                let elapsed = start.elapsed().as_millis();
+                info!("memory"; "tag" => "memory", "elapsed_ms" => elapsed, "mem_bytes" => allocated());
+                last = mem;
+            }
             std::thread::sleep(period);
         }
         ()

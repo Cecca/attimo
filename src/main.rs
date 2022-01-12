@@ -88,7 +88,7 @@ fn main() -> Result<()> {
     let config: Config = argh::from_env();
 
     let monitor_flag = Arc::new(AtomicBool::new(true));
-    let monitor = allocator::monitor(Duration::from_secs(1), Arc::clone(&monitor_flag));
+    let monitor = allocator::monitor(Duration::from_millis(200), Arc::clone(&monitor_flag));
 
     let _guard = setup_logger(&config.log_path)?;
     let path = config.path;
