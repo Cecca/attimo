@@ -35,13 +35,13 @@ pub fn allocated() -> usize {
 
 pub fn monitor(period: Duration, flag: Arc<AtomicBool>) -> JoinHandle<()> {
     std::thread::spawn(move || {
-        let mut last = 0;
+        // let mut last = 0;
         while flag.load(SeqCst) {
-            let mem = allocated();
-            if mem != last {
-                info!("memory"; "tag" => "memory", "mem_bytes" => allocated());
-                last = mem;
-            }
+            // let mem = allocated();
+            // if mem != last {
+            info!("memory"; "tag" => "memory", "mem_bytes" => allocated());
+            //     last = mem;
+            // }
             std::thread::sleep(period);
         }
         ()

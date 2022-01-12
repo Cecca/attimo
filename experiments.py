@@ -235,7 +235,7 @@ def run_attimo():
     repetitions = 50
     delta = 0.001
     for seed in [14514]: #, 1346, 2524]:
-        for motifs in [1, 10]:#, 100]:
+        for motifs in [1, 10, 100]:
             for dataset, window in datasets:
                 print("==== Looking for", motifs, "in", dataset,
                       "window",window)
