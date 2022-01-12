@@ -235,7 +235,7 @@ def run_attimo():
     repetitions = 50
     delta = 0.001
     for seed in [14514]: #, 1346, 2524]:
-        for motifs in [1]:#, 10, 100]:
+        for motifs in [1, 10, 100]:
             for dataset, window in datasets:
                 print("==== Looking for", motifs, "in", dataset,
                       "window",window)
@@ -286,10 +286,8 @@ def run_attimo():
                 motif_pairs = pd.read_csv('/tmp/motifs.csv', names=['a', 'b','dist', 'confirmation_time']).to_json(orient='records')
                 with open("/tmp/attimo.json") as fp:
                     log = json.dumps([json.loads(l) for l in fp.readlines()])
-                    import pprint
-                    pprint.pprint(log)
 
-                # os.remove("/tmp/attimo.json")
+                os.remove("/tmp/attimo.json")
                 os.remove("/tmp/motifs.csv")
 
                 db.execute("""
