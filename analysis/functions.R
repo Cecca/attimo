@@ -83,18 +83,6 @@ load_ll <- function() {
     tbl
 }
 
-
-load_measures <- function() {
-    bind_rows(
-        read_csv("data/ASTRO.csv.measures") %>% mutate(dataset = "ASTRO"),
-        read_csv("data/ECG.csv.measures") %>% mutate(dataset = "ECG"),
-        read_csv("data/EMG.csv.measures") %>% mutate(dataset = "EMG"),
-        read_csv("data/GAP.csv.measures") %>% mutate(dataset = "GAP"),
-        read_csv("data/HumanY.txt.measures") %>% mutate(dataset = "HumanY"),
-        read_csv("data/freezer.txt.measures") %>% mutate(dataset = "freezer")
-    ) %>% rename(window = w)
-}
-
 get_motif_instances <- function(data_attimo) {
     data_attimo %>%
         filter(!str_detect(path, "-\\d+")) %>%
@@ -172,9 +160,6 @@ plot_profile <- function(data_attimo) {
 
     outputs <- expanded %>%
         filter(tag == "output")
-
-    outputs %>%
-        print()
 
     memory <- expanded %>%
         filter(tag == "memory") %>%
@@ -288,11 +273,14 @@ plot_motifs <- function(data_motif_occurences) {
 }
 
 latex_info <- function(data_motif_measures) {
-    inner_join(data_motif_measures, dataset_info()) %>%
-        select(dataset, n, window, rc1) %>%
+    inner_join(ungroup(data_motif_measures), dataset_info()) %>%
+        filter(motif_idx %in% c(1, 10)) %>%
+        mutate(label = str_c("RC_{", motif_idx, "}")) %>%
+        select(dataset, n, w, label, rc1) %>%
+        pivot_wider(names_from = label, values_from = rc1) %>%
         arrange(n) %>%
         mutate_if(is.numeric, scales::number_format(big.mark = "\\\\,")) %>%
-        kbl(format = "latex", booktabs = T, align = "lrrr", escape = F) %>%
+        kbl(format = "latex", booktabs = T, align = "lrrrr", escape = F) %>%
         write_file("imgs/dataset-info.tex")
 }
 
@@ -324,4 +312,40 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, file_out) {
         kable_styling() %>%
         add_header_above(c("dataset (window) " = 1, "Time (s)" = 3)) %>%
         write_file(file_out)
+}
+
+compute_measures <- function(path, window, idxs) {
+    out <- paste0(path, ".", window, ".measures")
+    if (!file.exists(out)) {
+        system2(
+            "target/release/examples/measures",
+            c(
+                "--window", window,
+                "--path", path,
+                "--output", out,
+                idxs
+            )
+        )
+    }
+    dat <- readr::read_csv(out) %>%
+        mutate(
+            motif_idx = row_number(),
+            nn_corr = 1 - nn^2 / (2 * window)
+        )
+    dat
+}
+
+dataset_measures <- function(data_attimo) {
+    data_attimo %>%
+        filter(motifs == 10) %>%
+        group_by(path, dataset, window) %>%
+        slice(1) %>%
+        as_tbl_json(json.column = "motif_pairs") %>%
+        select(path, dataset, window) %>%
+        gather_array() %>%
+        spread_all() %>%
+        group_by(path, dataset, window) %>%
+        summarise(idxs = list(a)) %>%
+        rowwise() %>%
+        summarise(compute_measures(path, window, idxs))
 }

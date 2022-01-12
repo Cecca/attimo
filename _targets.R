@@ -32,14 +32,7 @@ list(
     ),
     tar_target(
         data_measures,
-        load_measures()
-    ),
-    # The measures for the motif in each data
-    tar_target(
-        data_motif_measures,
-        data_measures %>%
-            group_by(dataset, window) %>%
-            slice(1)
+        dataset_measures(data_attimo)
     ),
     # The motif occurences
     tar_target(
@@ -108,21 +101,7 @@ list(
 
     # Figure measures -------------------------------------------------------
     tar_target(
-        fig_measures,
-        plot_measures(data_measures)
-    ),
-    tar_target(
-        img_measures,
-        ggsave(
-            "imgs/measures.png",
-            plot = fig_measures,
-            width = 9,
-            height = 1.5,
-            dpi = 300
-        )
-    ),
-    tar_target(
         table_info,
-        latex_info(data_motif_measures)
+        latex_info(data_measures)
     )
 )
