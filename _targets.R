@@ -23,6 +23,10 @@ list(
         load_scamp()
     ),
     tar_target(
+        data_ll,
+        load_ll()
+    ),
+    tar_target(
         data_gpucluster,
         read_csv("gpucluster.csv") %>% mutate(algorithm = "scamp", hostname = "gpucluster")
     ),
@@ -60,6 +64,10 @@ list(
             select(
                 data_scamp, algorithm, hostname, dataset, prefix,
                 threads, window, time_s
+            ),
+            select(
+                data_ll, algorithm, hostname, dataset, prefix, window,
+                time_s
             )
         ) %>% plot_scalability_n()
     ),
@@ -73,23 +81,30 @@ list(
         )
     ),
 
+    # Time comparison -----------------------------------------------
+    tar_target(
+        tab_time_comparison,
+        do_tab_time_comparison(data_attimo, data_scamp, data_ll, "imgs/time-comparison.tex")
+    ),
+
     # Figure profile -------------------------------------------------------
-    # tar_target(
-    #     fig_profile,
-    #     data_attimo %>%
-    #         filter(dataset == "data/HumanY.txt", motifs == 1) %>%
-    #         plot_profile()
-    # ),
-    # tar_target(
-    #     img_profile,
-    #     ggsave(
-    #         "imgs/profile.png",
-    #         plot = fig_profile,
-    #         width = 8,
-    #         height = 4,
-    #         dpi = 300
-    #     )
-    # ),
+    tar_target(
+        fig_profile,
+        data_attimo %>%
+            filter(dataset == "HumanY", motifs == 10, window == 18000) %>%
+            head(1) %>%
+            plot_profile()
+    ),
+    tar_target(
+        img_profile,
+        ggsave(
+            "imgs/profile.png",
+            plot = fig_profile,
+            width = 10,
+            height = 1.5,
+            dpi = 300
+        )
+    ),
 
     # Figure measures -------------------------------------------------------
     tar_target(
