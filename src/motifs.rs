@@ -178,6 +178,14 @@ impl TopK {
         }
     }
 
+    pub fn first_not_confirmed(&self) -> Option<Motif> {
+        self.top
+            .iter()
+            .filter(|m| m.elapsed.is_none())
+            .next()
+            .map(|m| *m)
+    }
+
     fn to_vec(&self) -> Vec<Motif> {
         self.top.clone().into_iter().collect()
     }
@@ -430,12 +438,14 @@ pub fn motifs(
                     let correlation = 1.0 - motif.distance.powi(2) / (2.0 * ts.w as f64);
                     info!("output reporting"; "tag" => "output", "distance" => motif.distance, "correlation" => correlation);
                     pbar.println(format!(
-                        "Found motif at distance {:.4} ({} -- {}, corr {:.4}) after {:?}",
+                        "Found motif at distance {:.4} ({} -- {}, corr {:.4}) after {:?} (depth {} repetition {})",
                         motif.distance,
                         motif.idx_a,
                         motif.idx_b,
                         correlation,
-                        motif.elapsed.unwrap()
+                        motif.elapsed.unwrap(),
+                        depth,
+                        rep
                     ));
                 }
             });
@@ -447,8 +457,8 @@ pub fn motifs(
             //// we stop the computation.
             //// We check the condition even if no update happened, because there is
             //// one more repetition that could have made us pass the threshold.
-            if let Some(kth) = top.k_th() {
-                let threshold = threshold_fn(kth.distance, depth);
+            if let Some(m) = top.k_th() {
+                let threshold = threshold_fn(m.distance, depth);
                 if rep >= threshold {
                     stop = true;
                     break;
@@ -477,12 +487,12 @@ pub fn motifs(
         //// deeper levels.
         if !stop {
             previous_depth.replace(depth as usize);
-            if let Some(kth) = top.k_th() {
+            if let Some(m) = top.first_not_confirmed() {
                 let orig_depth = depth;
                 let d = if let Some(max_dist) = max_dist {
-                    std::cmp::min_by(max_dist, kth.distance, |a, b| a.partial_cmp(b).unwrap())
+                    std::cmp::min_by(max_dist, m.distance, |a, b| a.partial_cmp(b).unwrap())
                 } else {
-                    kth.distance
+                    m.distance
                 };
                 depth = level_for_distance(d, depth);
                 assert!(depth < orig_depth, "we are not making progress in depth");
