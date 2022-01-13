@@ -84,7 +84,7 @@ list(
     tar_target(
         fig_profile,
         data_attimo %>%
-            filter(dataset == "HumanY", motifs == 10, window == 18000) %>%
+            filter(dataset == "HumanY", motifs == 1, repetitions == 50, window == 18000) %>%
             head(1) %>%
             plot_profile()
     ),
@@ -95,6 +95,22 @@ list(
             plot = fig_profile,
             width = 10,
             height = 1.5,
+            dpi = 300
+        )
+    ),
+
+    # Figure repetitions ----------------------------------------------------
+    tar_target(
+        fig_repetitions,
+        plot_memory_time(data_attimo)
+    ),
+    tar_target(
+        img_repetitions,
+        ggsave(
+            "imgs/repetitions.png",
+            plot = fig_repetitions,
+            width = 4,
+            height = 4,
             dpi = 300
         )
     ),

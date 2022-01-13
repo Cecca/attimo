@@ -15,6 +15,16 @@ dataset_info <- function() {
     )
 }
 
+allowed_combinations <- tibble::tribble(
+    ~dataset, ~window,
+    "HumanY", 18000,
+    "GAP", 600,
+    "EMG", 500,
+    "ECG", 1000,
+    "freezer", 5000,
+    "ASTRO", 100
+)
+
 add_prefix_info <- function(dat) {
     dat %>%
         mutate(
@@ -44,12 +54,13 @@ load_attimo <- function() {
             algorithm = "attimo",
             expid = row_number()
         ) %>%
-        add_prefix_info()
+        add_prefix_info() %>%
+        semi_join(allowed_combinations)
     mem <- table %>%
         as_tbl_json(json.column = "log") %>%
         gather_array() %>%
         spread_all() %>%
-        filter(tag == "memory") %>%
+        filter() %>%
         group_by(expid, prefix, dataset) %>%
         summarise(max_mem_bytes = max(mem_bytes, na.rm = T)) %>%
         ungroup() %>%
@@ -59,8 +70,16 @@ load_attimo <- function() {
         ) %>%
         as_tibble() %>%
         select(expid, bytes_per_subsequence, max_mem_gb, max_mem_bytes)
+    dists <- table %>%
+        as_tbl_json(json.column = "log") %>%
+        gather_array() %>%
+        spread_all() %>%
+        filter(msg == "motifs completed") %>%
+        as_tibble() %>%
+        select(expid, distances_fraction, total_distances, cnt_dist)
     DBI::dbDisconnect(conn)
-    inner_join(table, mem, by = "expid")
+    inner_join(table, mem, by = "expid") %>%
+        inner_join(dists, by = "expid")
 }
 
 load_scamp <- function() {
@@ -68,6 +87,7 @@ load_scamp <- function() {
     tbl <- tbl(conn, "scamp") %>%
         collect() %>%
         add_prefix_info() %>%
+        semi_join(allowed_combinations) %>%
         mutate(algorithm = "scamp")
     DBI::dbDisconnect(conn)
     tbl
@@ -78,6 +98,7 @@ load_ll <- function() {
     tbl <- tbl(conn, "ll") %>%
         collect() %>%
         add_prefix_info() %>%
+        semi_join(allowed_combinations) %>%
         mutate(algorithm = "ll")
     DBI::dbDisconnect(conn)
     tbl
@@ -147,13 +168,16 @@ plot_profile <- function(data_attimo) {
     events <- expanded %>%
         filter(tag == "phase") %>%
         filter(msg != "fft computation") %>% # Consider the FFT as part of the input reading
-        mutate(end = lead(elapsed_ts)) %>%
+        mutate(
+            end = lead(elapsed_ts),
+            dur = end - elapsed_ts
+        ) %>%
         filter(msg != "end") %>%
         mutate(labelpos = case_when(
-            msg == "input reading" ~ -7,
+            msg == "input reading" ~ 0,
             msg == "quantization width estimation" ~ 5,
-            msg == "hash computation" ~ 16,
-            msg == "tries exploration" ~ 48
+            msg == "hash computation" ~ 15,
+            msg == "tries exploration" ~ 49
         )) %>%
         mutate(msg = str_remove(msg, "quantization ")) %>%
         mutate(msg = str_replace(msg, " ", "\n"))
@@ -167,12 +191,12 @@ plot_profile <- function(data_attimo) {
             mem_gb = mem_bytes / (1024 * 1024 * 1024)
         )
 
-    ggplot(memory, aes(elapsed_ts, mem_gb)) +
+    p <- ggplot(memory, aes(elapsed_ts, mem_gb)) +
         geom_rect(
             data = events,
             mapping = aes(xmin = elapsed_ts, xmax = end, fill = msg),
             ymin = -Inf,
-            ymax = Inf,
+            ymax = max(19, pull(summarise(memory, max(mem_gb)))),
             inherit.aes = F,
             alpha = 0.3
         ) +
@@ -197,10 +221,35 @@ plot_profile <- function(data_attimo) {
                 label = msg
             ),
             y = 0.2,
-            angle = 90,
-            vjust = 1,
-            hjust = 0,
-            direction = "x"
+            size = 3,
+            angle = 0,
+            vjust = 0,
+            hjust = 0
+        ) +
+        geom_text(
+            data = events,
+            mapping = aes(
+                x = elapsed_ts + (end - elapsed_ts) / 2,
+                y = 23,
+                label = scales::number(as.double(dur), accuracy = 0.1, suffix = " s")
+            ),
+            size = 3,
+            vjust = 1
+        ) +
+        geom_segment(
+            data = events,
+            mapping = aes(
+                x = elapsed_ts + 0.3,
+                xend = end - 0.3,
+                y = 20,
+                yend = 20
+            ),
+            size = 0.5,
+            color = "gray"
+        ) +
+        scale_x_continuous(
+            breaks = c(0, events %>% pull(end) %>% as.double()),
+            labels = scales::number_format(accuracy = 0.1)
         ) +
         labs(
             x = "elapsed time (s)",
@@ -208,6 +257,8 @@ plot_profile <- function(data_attimo) {
         ) +
         theme_classic() +
         theme(legend.position = "none")
+
+    p
 }
 
 plot_measures <- function(data_measures) {
@@ -275,22 +326,23 @@ plot_motifs <- function(data_motif_occurences) {
 latex_info <- function(data_motif_measures) {
     inner_join(ungroup(data_motif_measures), dataset_info()) %>%
         filter(motif_idx %in% c(1, 10)) %>%
-        mutate(label = str_c("RC_{", motif_idx, "}")) %>%
+        mutate(label = str_c("$RC_{", motif_idx, "}$")) %>%
         select(dataset, n, w, label, rc1) %>%
         pivot_wider(names_from = label, values_from = rc1) %>%
-        arrange(n) %>%
+        arrange("$RC_{1}$") %>%
         mutate_if(is.numeric, scales::number_format(big.mark = "\\\\,")) %>%
-        kbl(format = "latex", booktabs = T, align = "lrrrr", escape = F) %>%
+        kbl(format = "latex", booktabs = T, linesep = "", align = "lrrrr", escape = F) %>%
         write_file("imgs/dataset-info.tex")
 }
 
 do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, file_out) {
     bind_rows(
-        select(
-            data_attimo,
-            algorithm, hostname, dataset, is_full_dataset, threads, window,
-            repetitions, motifs, delta, time_s
-        ) %>% filter(motifs == 1),
+        data_attimo %>%
+            filter(repetitions == 50) %>%
+            select(
+                algorithm, hostname, dataset, is_full_dataset, threads, window,
+                repetitions, motifs, delta, time_s, distances_fraction
+            ) %>% filter(motifs == 1),
         select(
             data_scamp, algorithm, hostname, dataset, is_full_dataset,
             threads, window, time_s
@@ -299,16 +351,35 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, file_out) {
             data_ll, algorithm, hostname, dataset, is_full_dataset, window,
             time_s
         )
-    ) %>%
+    ) %T>%
+        print(n = 1000) %>%
         filter(is_full_dataset) %>%
         mutate(dataset = str_c(dataset, " (", window, ")")) %>%
+        mutate(
+            time_s = scales::number(time_s, accuracy = 0.1),
+            distances_fraction = scales::scientific(
+                distances_fraction,
+                prefix = "$",
+                suffix = "}$",
+                digits = 2
+            ) %>% str_replace("e", "\\\\cdot 10^{"),
+            time_s = if_else(algorithm == "attimo",
+                str_c(time_s, " (", distances_fraction, ")"),
+                time_s
+            )
+        ) %>%
         select(dataset, algorithm, time_s) %>%
         pivot_wider(names_from = algorithm, values_from = time_s) %>%
         arrange(dataset) %>%
         # drop_na() %>%
-        mutate_if(is.numeric, scales::number_format(accuracy = 0.1)) %T>%
         print() %>%
-        kbl(format = "latex", booktabs = T, linesep = "", caption = "Time to find the top motif at different window lengths.") %>%
+        kbl(
+            format = "latex", booktabs = T, linesep = "", align = "lrrr",
+            escape = F,
+            caption = "Time to find the top motif at different window lengths. For \\attimo,
+            the number in parentheses reports the fraction of distance computations over ${n \\choose 2}$
+            performed to find the solution."
+        ) %>%
         kable_styling() %>%
         add_header_above(c("dataset (window) " = 1, "Time (s)" = 3)) %>%
         write_file(file_out)
@@ -348,4 +419,58 @@ dataset_measures <- function(data_attimo) {
         summarise(idxs = list(a)) %>%
         rowwise() %>%
         summarise(compute_measures(path, window, idxs))
+}
+
+plot_memory_time <- function(data_attimo) {
+    data_attimo %>%
+        filter(motifs == 1) %>%
+        group_by(dataset, window) %>%
+        mutate(
+            labelpos = time_s + 0.1 * max(time_s),
+            tickpos = -0.1 * max(time_s),
+            mempos = -0.6 * max(time_s),
+        ) %>%
+        ggplot(aes(repetitions, time_s)) +
+        geom_segment(aes(xend = repetitions), yend = 0) +
+        geom_text(
+            aes(
+                y = labelpos,
+                label = scales::number(time_s, accuracy = 0.1)
+            ),
+            size = 3
+        ) +
+        geom_text(
+            aes(
+                y = tickpos,
+                label = repetitions
+            ),
+            size = 3
+        ) +
+        # geom_text(
+        #     aes(
+        #         y = mempos,
+        #         label = scales::number(bytes_per_subsequence, accuracy=0.1)
+        #     ),
+        #     angle = 90,
+        #     vjust = 0.5,
+        #     hjust = 0
+        # ) +
+        geom_hline(yintercept = 0) +
+        geom_point() +
+        labs(
+            x = "repetitions",
+            y = "total time (s)"
+        ) +
+        facet_wrap(vars(str_c(dataset, " (", window, ")")), ncol = 3, scales = "free_y") +
+        coord_cartesian(clip = "off") +
+        theme_paper() +
+        theme(
+            axis.line.y = element_blank(),
+            axis.text.y = element_blank(),
+            axis.ticks.y = element_blank(),
+            axis.line.x = element_blank(),
+            axis.text.x = element_blank(),
+            axis.ticks.x = element_blank(),
+            panel.spacing = unit(10, "mm")
+        )
 }
