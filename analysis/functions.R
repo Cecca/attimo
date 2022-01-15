@@ -77,9 +77,35 @@ load_attimo <- function() {
         filter(msg == "motifs completed") %>%
         as_tibble() %>%
         select(expid, distances_fraction, total_distances, cnt_dist)
+
+    phases <- table %>%
+        as_tbl_json(json.column = "log") %>%
+        gather_array() %>%
+        spread_all() %>%
+        filter(tag == "phase", msg != "fft computation") %>% # Consider the FFT as part of the input reading
+        mutate(ts = lubridate::ymd_hms(ts)) %>%
+        group_by(expid) %>%
+        mutate(elapsed_ts = ts - min(ts)) %>%
+        mutate(
+            end = lead(elapsed_ts),
+            phase_duration = end - elapsed_ts
+        ) %>%
+        filter(msg != "end") %>%
+        mutate(
+            phase = fct_collapse(msg,
+                "preprocessing" = c("input reading", "quantization width estimation", "hash computation"),
+                "motif_finding" = "tries exploration"
+            )
+        ) %>%
+        group_by(expid, phase) %>%
+        summarise(phase_duration = sum(phase_duration)) %>%
+        select(expid, phase, phase_duration) %>%
+        pivot_wider(names_from = phase, values_from = phase_duration)
+
     DBI::dbDisconnect(conn)
     inner_join(table, mem, by = "expid") %>%
-        inner_join(dists, by = "expid")
+        inner_join(dists, by = "expid") %>%
+        inner_join(phases)
 }
 
 load_scamp <- function() {
@@ -180,7 +206,7 @@ plot_profile <- function(data_attimo) {
             msg == "tries exploration" ~ 49
         )) %>%
         mutate(msg = str_remove(msg, "quantization ")) %>%
-        mutate(msg = str_replace(msg, " ", "\n"))
+        mutate(msg = if_else(msg == "input reading", "input", msg))
 
     outputs <- expanded %>%
         filter(tag == "output")
@@ -202,10 +228,10 @@ plot_profile <- function(data_attimo) {
         ) +
         scale_fill_manual(
             values = c(
-                "hash\ncomputation" = "#ffd607",
-                "input\nreading" = "#bebebe",
-                "width\nestimation" = "#e0712d",
-                "tries\nexploration" = "#74caff"
+                "hash computation" = "#ffd607",
+                "input" = "#bebebe",
+                "width estimation" = "#e0712d",
+                "tries exploration" = "#74caff"
             )
         ) +
         geom_vline(
@@ -217,15 +243,18 @@ plot_profile <- function(data_attimo) {
         geom_text(
             data = events,
             mapping = aes(
-                x = labelpos,
-                label = msg
+                # x = labelpos,
+                x = elapsed_ts,
+                label = msg,
             ),
-            y = 0.2,
+            y = -5.3,
+            # y = 0.2,
             size = 3,
             angle = 0,
-            vjust = 0,
+            vjust = 1,
             hjust = 0
         ) +
+        scale_y_continuous(limits = c(0, NA)) +
         geom_text(
             data = events,
             mapping = aes(
@@ -255,6 +284,7 @@ plot_profile <- function(data_attimo) {
             x = "elapsed time (s)",
             y = "memory (Gb)"
         ) +
+        coord_cartesian(clip = "off") +
         theme_classic() +
         theme(legend.position = "none")
 
@@ -329,7 +359,7 @@ latex_info <- function(data_motif_measures) {
         mutate(label = str_c("$RC_{", motif_idx, "}$")) %>%
         select(dataset, n, w, label, rc1) %>%
         pivot_wider(names_from = label, values_from = rc1) %>%
-        arrange("$RC_{1}$") %>%
+        arrange(`$RC_{10}$`) %>%
         mutate_if(is.numeric, scales::number_format(big.mark = "\\\\,")) %>%
         kbl(format = "latex", booktabs = T, linesep = "", align = "lrrrr", escape = F) %>%
         write_file("imgs/dataset-info.tex")
@@ -338,7 +368,7 @@ latex_info <- function(data_motif_measures) {
 do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, file_out) {
     bind_rows(
         data_attimo %>%
-            filter(repetitions == 50) %>%
+            filter(repetitions == 100) %>%
             select(
                 algorithm, hostname, dataset, is_full_dataset, threads, window,
                 repetitions, motifs, delta, time_s, distances_fraction
@@ -376,7 +406,7 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, file_out) {
         kbl(
             format = "latex", booktabs = T, linesep = "", align = "lrrr",
             escape = F,
-            caption = "Time to find the top motif at different window lengths. For \\attimo,
+            caption = "Time to find the top motif at different window lengths. For \\our,
             the number in parentheses reports the fraction of distance computations over ${n \\choose 2}$
             performed to find the solution."
         ) %>%
@@ -423,7 +453,7 @@ dataset_measures <- function(data_attimo) {
 
 plot_memory_time <- function(data_attimo) {
     data_attimo %>%
-        filter(motifs == 1) %>%
+        filter(motifs == 10) %>%
         group_by(dataset, window) %>%
         mutate(
             labelpos = time_s + 0.1 * max(time_s),
@@ -431,46 +461,114 @@ plot_memory_time <- function(data_attimo) {
             mempos = -0.6 * max(time_s),
         ) %>%
         ggplot(aes(repetitions, time_s)) +
-        geom_segment(aes(xend = repetitions), yend = 0) +
-        geom_text(
-            aes(
-                y = labelpos,
-                label = scales::number(time_s, accuracy = 0.1)
-            ),
-            size = 3
-        ) +
-        geom_text(
-            aes(
-                y = tickpos,
-                label = repetitions
-            ),
-            size = 3
-        ) +
-        # geom_text(
-        #     aes(
-        #         y = mempos,
-        #         label = scales::number(bytes_per_subsequence, accuracy=0.1)
-        #     ),
-        #     angle = 90,
-        #     vjust = 0.5,
-        #     hjust = 0
-        # ) +
-        geom_hline(yintercept = 0) +
+        geom_area(aes(y = preprocessing), fill = "#f78a36", alpha = 0.4) +
+        geom_ribbon(aes(ymin = preprocessing, ymax = time_s), fill = "#74caff", alpha = 0.4) +
+        geom_line() +
         geom_point() +
         labs(
             x = "repetitions",
             y = "total time (s)"
         ) +
-        facet_wrap(vars(str_c(dataset, " (", window, ")")), ncol = 3, scales = "free_y") +
+        facet_wrap(vars(str_c(dataset, " (", window, ")")), ncol = 3, scales = "free") +
         coord_cartesian(clip = "off") +
+        theme_paper() +
+        theme(
+            # axis.line.y = element_blank(),
+            # axis.text.y = element_blank(),
+            # axis.ticks.y = element_blank(),
+            # axis.line.x = element_blank(),
+            # axis.text.x = element_blank(),
+            # axis.ticks.x = element_blank(),
+            panel.spacing = unit(5, "mm")
+        )
+}
+
+plot_motifs_10 <- function(data_attimo, data_scamp, data_measures) {
+    data_attimo %>%
+        inner_join(select(filter(data_scamp, is_full_dataset), dataset, window, time_scamp_s = time_s)) %>%
+        filter(motifs == 10) %>%
+        as_tbl_json(json.column = "motif_pairs") %>%
+        gather_array() %>%
+        spread_all() %>%
+        rename(motif_idx = array.index) %>%
+        as_tibble() %>%
+        inner_join(select(data_measures, dataset, window = w, motif_idx, rc1, nn)) %>%
+        ggplot(aes(motif_idx, confirmation_time)) +
+        geom_point() +
+        geom_segment(aes(xend = motif_idx, yend = as.double(preprocessing))) +
+        geom_area(aes(y = preprocessing), fill = "#f78a36") +
+        scale_x_continuous(breaks = c(2, 4, 6, 8, 10)) +
+        facet_wrap(vars(dataset), scales = "free") +
+        labs(
+            x = "motif index",
+            y = "time (s)"
+        ) +
+        theme_paper() +
+        theme(
+            panel.spacing = unit(5, "mm")
+        )
+}
+
+plot_motifs_10_alt <- function(data_attimo, data_scamp, data_measures) {
+    bars <- data_attimo %>%
+        inner_join(select(filter(data_scamp, is_full_dataset), dataset, window, time_scamp_s = time_s)) %>%
+        filter(motifs == 10, repetitions == 200) %>%
+        as_tbl_json(json.column = "motif_pairs") %>%
+        gather_array() %>%
+        spread_all() %>%
+        rename(motif_idx = array.index) %>%
+        as_tibble() %>%
+        inner_join(select(data_measures, dataset, window = w, motif_idx, rc1, nn)) %>%
+        mutate(
+            confirmation_time = as.numeric(confirmation_time),
+            preprocessing = as.numeric(preprocessing)
+        ) %>% # select(dataset, confirmation_time, preprocessing) %>% view()
+        ggplot(aes(x = factor(0), y = confirmation_time)) +
+        geom_col(
+            mapping = aes(y = preprocessing),
+            data = function(d) {
+                group_by(d, dataset) %>% slice(1)
+            },
+            fill = "#f78a36",
+            width = 0.3
+        ) +
+        geom_quasirandom(size = 1, width = 0.3) +
+        facet_wrap(vars(dataset), ncol = 1, scales = "free", strip.position = "left") +
+        labs(
+            # x = "motif index",
+            y = "time (s)"
+        ) +
+        coord_flip() +
         theme_paper() +
         theme(
             axis.line.y = element_blank(),
             axis.text.y = element_blank(),
+            axis.title.y = element_blank(),
             axis.ticks.y = element_blank(),
-            axis.line.x = element_blank(),
-            axis.text.x = element_blank(),
-            axis.ticks.x = element_blank(),
-            panel.spacing = unit(10, "mm")
+            panel.grid.major.y = element_line(color = "gray"),
+            # axis.line.x = element_blank(),
+            # axis.text.x = element_blank(),
+            # axis.ticks.x = element_blank(),
+            panel.spacing = unit(0, "mm")
         )
+
+    scamp <- data_scamp %>%
+        filter(is_full_dataset) %>%
+        ggplot(aes(x = factor(0), y = factor(0))) +
+        geom_text(
+            aes(label = scales::number(time_s, accuracy = 0.1, suffix = " s")),
+            size = 3,
+            hjust = 0.5
+        ) +
+        facet_wrap(vars(dataset), ncol = 1) +
+        labs(title = "SCAMP") +
+        theme_void() +
+        theme(
+            strip.background = element_blank(),
+            strip.text = element_blank(),
+            plot.title = element_text(hjust = 0.5, size = 9)
+            # plot.margin = unit(0, "mm")
+        )
+
+    bars + scamp + plot_layout(widths = c(5, 1))
 }

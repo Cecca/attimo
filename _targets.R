@@ -8,6 +8,8 @@ tar_option_set(packages = c(
     "tidyjson",
     "lubridate",
     "ggrepel",
+    "ggbeeswarm",
+    "patchwork",
     "kableExtra"
 ))
 
@@ -80,11 +82,23 @@ list(
         do_tab_time_comparison(data_attimo, data_scamp, data_ll, "imgs/time-comparison.tex")
     ),
 
+    # Figure motifs 10 -----------------------------------------------------
+    tar_target(
+        img_motifs_10,
+        ggsave(
+            "imgs/10-motifs.png",
+            plot = plot_motifs_10_alt(data_attimo, data_scamp, data_measures),
+            width = 5,
+            height = 4,
+            dpi = 300
+        )
+    ),
+
     # Figure profile -------------------------------------------------------
     tar_target(
         fig_profile,
         data_attimo %>%
-            filter(dataset == "HumanY", motifs == 1, repetitions == 50, window == 18000) %>%
+            filter(dataset == "HumanY", motifs == 1, repetitions == 100, window == 18000) %>%
             head(1) %>%
             plot_profile()
     ),
@@ -109,8 +123,8 @@ list(
         ggsave(
             "imgs/repetitions.png",
             plot = fig_repetitions,
-            width = 4,
-            height = 4,
+            width = 5,
+            height = 5,
             dpi = 300
         )
     ),
