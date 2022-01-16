@@ -357,10 +357,10 @@ latex_info <- function(data_motif_measures) {
     inner_join(ungroup(data_motif_measures), dataset_info()) %>%
         filter(motif_idx %in% c(1, 10)) %>%
         mutate(label = str_c("$RC_{", motif_idx, "}$")) %>%
-        select(dataset, n, w, label, rc1) %>%
+        select(dataset, n, window, label, rc1) %>%
         pivot_wider(names_from = label, values_from = rc1) %>%
         arrange(`$RC_{10}$`) %>%
-        mutate_if(is.numeric, scales::number_format(big.mark = "\\\\,")) %>%
+        mutate_if(is.numeric, scales::number_format(accuracy = 0.01, big.mark = "\\\\,")) %>%
         kbl(format = "latex", booktabs = T, linesep = "", align = "lrrrr", escape = F) %>%
         write_file("imgs/dataset-info.tex")
 }
@@ -415,6 +415,32 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, file_out) {
         write_file(file_out)
 }
 
+compute_distance_distibution <- function(data_attimo) {
+    do_compute <- function(dataset, path, window) {
+        out <- paste0(path, ".", window, ".dists")
+        if (!file.exists(out)) {
+            system2(
+                "target/release/examples/distances",
+                c(
+                    "--window", window,
+                    "--path", path,
+                    "--output", out,
+                    "--samples", "1000000"
+                )
+            )
+        }
+        dat <- readr::read_csv(out) %>%
+            mutate(dataset = dataset) %>%
+            rename(window = w)
+        dat
+    }
+
+    data_attimo %>%
+        distinct(path, dataset, window) %>%
+        rowwise() %>%
+        summarise(do_compute(dataset, path, window))
+}
+
 compute_measures <- function(path, window, idxs) {
     out <- paste0(path, ".", window, ".measures")
     if (!file.exists(out)) {
@@ -436,7 +462,11 @@ compute_measures <- function(path, window, idxs) {
     dat
 }
 
-dataset_measures <- function(data_attimo) {
+dataset_measures <- function(data_attimo, data_distances) {
+    avg_dists <- data_distances %>%
+        group_by(dataset, window) %>%
+        summarise(avg_distance = mean(distance))
+
     data_attimo %>%
         filter(motifs == 10) %>%
         group_by(path, dataset, window) %>%
@@ -445,10 +475,22 @@ dataset_measures <- function(data_attimo) {
         select(path, dataset, window) %>%
         gather_array() %>%
         spread_all() %>%
-        group_by(path, dataset, window) %>%
-        summarise(idxs = list(a)) %>%
-        rowwise() %>%
-        summarise(compute_measures(path, window, idxs))
+        rename(motif_idx = array.index) %>%
+        inner_join(avg_dists) %>%
+        mutate(rc1 = avg_distance / dist)
+
+    # data_attimo %>%
+    #     filter(motifs == 10) %>%
+    #     group_by(path, dataset, window) %>%
+    #     slice(1) %>%
+    #     as_tbl_json(json.column = "motif_pairs") %>%
+    #     select(path, dataset, window) %>%
+    #     gather_array() %>%
+    #     spread_all() %>%
+    #     group_by(path, dataset, window) %>%
+    #     summarise(idxs = list(a)) %>%
+    #     rowwise() %>%
+    #     summarise(compute_measures(path, window, idxs))
 }
 
 plot_memory_time <- function(data_attimo) {
@@ -492,7 +534,7 @@ plot_motifs_10 <- function(data_attimo, data_scamp, data_measures) {
         spread_all() %>%
         rename(motif_idx = array.index) %>%
         as_tibble() %>%
-        inner_join(select(data_measures, dataset, window = w, motif_idx, rc1, nn)) %>%
+        inner_join(select(data_measures, dataset, window, motif_idx, rc1, nn)) %>%
         ggplot(aes(motif_idx, confirmation_time)) +
         geom_point() +
         geom_segment(aes(xend = motif_idx, yend = as.double(preprocessing))) +
@@ -518,7 +560,7 @@ plot_motifs_10_alt <- function(data_attimo, data_scamp, data_measures) {
         spread_all() %>%
         rename(motif_idx = array.index) %>%
         as_tibble() %>%
-        inner_join(select(data_measures, dataset, window = w, motif_idx, rc1, nn)) %>%
+        inner_join(select(data_measures, dataset, window, motif_idx, rc1)) %>%
         mutate(
             confirmation_time = as.numeric(confirmation_time),
             preprocessing = as.numeric(preprocessing)

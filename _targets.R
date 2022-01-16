@@ -34,7 +34,11 @@ list(
     ),
     tar_target(
         data_measures,
-        dataset_measures(data_attimo)
+        dataset_measures(data_attimo, data_distances)
+    ),
+    tar_target(
+        data_distances,
+        compute_distance_distibution(data_attimo)
     ),
     # The motif occurences
     tar_target(
