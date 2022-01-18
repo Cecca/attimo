@@ -426,6 +426,7 @@ impl Hasher {
 
             let has_collision = || {
                 let mut topk = crate::motifs::TopK::new(k, ts.w);
+                let mut cnt_dists = 0;
                 for bucket in probe_buckets.iter() {
                     let bucket = &probe_column[bucket.clone()];
                     for (_, a_idx) in bucket.iter() {
@@ -435,6 +436,7 @@ impl Hasher {
                             if a_idx + ts.w < b_idx {
                                 if probe_collection.first_collision(a_idx, b_idx, K).is_some() {
                                     let d = crate::distance::zeucl(&ts, a_idx, b_idx);
+                                    cnt_dists += 1;
                                     if d > min_dist.unwrap_or(-1.0) {
                                         // println!("There is a collision at distance {} for quantization width {}", d, r);
                                         // return true;
@@ -447,6 +449,7 @@ impl Hasher {
                                         });
                                     }
                                     if topk.k_th().is_some() {
+                                        println!("{:#?}", topk.to_vec());
                                         return true;
                                     }
                                 }
@@ -454,6 +457,8 @@ impl Hasher {
                         }
                     }
                 }
+                println!("{:#?}", topk.to_vec());
+                println!("Found {} motifs with {} distance computations", topk.to_vec().len(), cnt_dists);
                 return false;
             };
 

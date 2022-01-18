@@ -144,63 +144,11 @@ def prefix(path, n):
 def get_datasets():
     return [
         ("data/HumanY.txt", 18000),
-        # ("data/HumanY.txt", 21000),
-        # (prefix("data/GAP.csv",  250000), 60),
-        # (prefix("data/GAP.csv",  500000), 60),
-        # (prefix("data/GAP.csv", 1000000), 60),
-        # (prefix("data/GAP.csv", 1500000), 60),
-        # (prefix("data/GAP.csv", 2000000), 60),
-        # ("data/GAP.csv", 60),
-        # ("data/GAP.csv", 600),
-
-        # (prefix("data/EMG.csv",  500000), 100),
-        # (prefix("data/EMG.csv", 1000000), 100),
-        # (prefix("data/EMG.csv", 1500000), 100),
-        # (prefix("data/EMG.csv", 2000000), 100),
-        # (prefix("data/EMG.csv", 2500000), 100),
-        # (prefix("data/EMG.csv", 3000000), 100),
-        ("data/EMG.csv", 500),
-        # ("data/EMG.csv", 1000),
-
-        # (prefix("data/ECG.csv", 1000000), 1000),
-        # (prefix("data/ECG.csv", 2000000), 1000),
-        # (prefix("data/ECG.csv", 3000000), 1000),
-        # (prefix("data/ECG.csv", 4000000), 1000),
-        # (prefix("data/ECG.csv", 5000000), 1000),
-        # (prefix("data/ECG.csv", 6000000), 1000),
-        # (prefix("data/ECG.csv", 7000000), 1000),
         ("data/ECG.csv", 1000),
-
-#         (prefix("data/ECG.csv", 1000000), 5000),
-#         (prefix("data/ECG.csv", 2000000), 5000),
-#         (prefix("data/ECG.csv", 3000000), 5000),
-#         (prefix("data/ECG.csv", 4000000), 5000),
-#         (prefix("data/ECG.csv", 5000000), 5000),
-#         (prefix("data/ECG.csv", 6000000), 5000),
-#         (prefix("data/ECG.csv", 7000000), 5000),
-        # ("data/ECG.csv", 5000),
-
-        # (prefix("data/freezer.txt", 1000000), 1000),
-        # (prefix("data/freezer.txt", 2000000), 1000),
-        # (prefix("data/freezer.txt", 3000000), 1000),
-        # (prefix("data/freezer.txt", 4000000), 1000),
-        # (prefix("data/freezer.txt", 5000000), 1000),
-        # (prefix("data/freezer.txt", 6000000), 1000),
-        # (prefix("data/freezer.txt", 7000000), 1000),
+        ("data/GAP.csv", 600),
+        ("data/EMG.csv", 500),
         ("data/freezer.txt", 5000),
-
-        # (prefix("data/ASTRO.csv", 100000), 100),
-        # (prefix("data/ASTRO.csv", 200000), 100),
-        # (prefix("data/ASTRO.csv", 300000), 100),
-        # (prefix("data/ASTRO.csv", 400000), 100),
-        # (prefix("data/ASTRO.csv", 500000), 100),
-        # (prefix("data/ASTRO.csv", 600000), 100),
-        # (prefix("data/ASTRO.csv", 700000), 100),
-        # (prefix("data/ASTRO.csv", 800000), 100),
-        # (prefix("data/ASTRO.csv", 900000), 100),
-        # (prefix("data/ASTRO.csv", 1000000), 100),
-        # ("data/ASTRO.csv", 100)
-
+        ("data/ASTRO.csv", 100)
     ]
 
 def remove_trivial(df, w):
@@ -235,9 +183,9 @@ def run_attimo():
     repetitions = 50
     delta = 0.001
     for seed in [14514]: #, 1346, 2524]:
-        for repetitions in [100]:
-        # for repetitions in [25, 50, 75, 100]:
-            for motifs in [10]:
+        for repetitions in [400]:
+        # for repetitions in [50, 75, 100, 200]:
+            for motifs in [50]:
                 for dataset, window in datasets:
                     print("==== Looking for", motifs, "in", dataset,
                           "window",window)
