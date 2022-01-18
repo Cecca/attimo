@@ -125,19 +125,26 @@ fn main() -> Result<()> {
     monitor_flag.store(false, std::sync::atomic::Ordering::SeqCst);
     monitor.join().unwrap();
 
-    output_csv(&config.output, &motifs)?;
+    output_csv(&config.output, &ts, &motifs, true)?;
 
     println!("Total time {:?}", total_timer.elapsed());
 
     Ok(())
 }
 
-fn output_csv<P: AsRef<Path>>(path: P, motifs: &[Motif]) -> Result<()> {
+fn output_csv<P: AsRef<Path>>(path: P, ts: &WindowedTimeseries, motifs: &[Motif], with_support: bool) -> Result<()> {
     use std::io::prelude::*;
+    let fft_data = ts.fft_data();
     let mut f = std::fs::File::create(path.as_ref())?;
     for m in motifs {
         if let Some(confirmation_time) = m.elapsed {
-            writeln!(f, "{}, {}, {}, {}", m.idx_a, m.idx_b, m.distance, confirmation_time.as_secs_f64())?;
+            if with_support {
+                let dp = ts.distance_profile(m.idx_a, &fft_data);
+                let support = dp.into_iter().filter(|d| *d < 2.0*m.distance).count();
+                writeln!(f, "{}, {}, {}, {}, {}", m.idx_a, m.idx_b, m.distance, confirmation_time.as_secs_f64(), support)?;
+            } else {
+                writeln!(f, "{}, {}, {}, {}", m.idx_a, m.idx_b, m.distance, confirmation_time.as_secs_f64())?;
+            }
         }
     }
     Ok(())

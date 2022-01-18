@@ -1,4 +1,4 @@
-use crate::distance::zeucl;
+use crate::distance::{zdot, zeucl};
 use rand_distr::num_traits::Zero;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::{cell::RefCell, convert::TryFrom, fmt::Display, sync::Arc, time::Instant};
@@ -238,25 +238,64 @@ impl WindowedTimeseries {
         self.znormalized_sliding_dot_product(&buf, fft_data, &mut dp);
 
         for i in 0..self.num_subsequences() {
-            dp[i] = (2.0 * self.w as f64 - 2.0 * dp[i]).sqrt();
-            // Due to floating point errors, it might be that the difference just
-            // computed is slightly negative. If that's the case we replace it with 0
-            if dp[i] < 0.0 {
+            if i == from {
                 dp[i] = 0.0;
+            } else {
+                debug_assert!(
+                    self.w as f64 > dp[i],
+                    "i = {} w = {} dp[i] = {} zdot = {} zeucl = {}",
+                    i,
+                    self.w,
+                    dp[i],
+                    zdot(
+                        self.subsequence(from),
+                        self.mean(from),
+                        self.sd(from),
+                        self.subsequence(i),
+                        self.mean(i),
+                        self.sd(i)
+                    ),
+                    zeucl(self, i, from)
+                );
+                debug_assert!(
+                    (zdot(
+                        self.subsequence(from),
+                        self.mean(from),
+                        self.sd(from),
+                        self.subsequence(i),
+                        self.mean(i),
+                        self.sd(i)
+                    ) - dp[i])
+                        .abs() <= 0.0000000001,
+                    "i = {} w = {} dp[i] = {} zdot = {} zeucl = {}",
+                    i,
+                    self.w,
+                    dp[i],
+                    zdot(
+                        self.subsequence(from),
+                        self.mean(from),
+                        self.sd(from),
+                        self.subsequence(i),
+                        self.mean(i),
+                        self.sd(i)
+                    ),
+                    zeucl(self, i, from)
+                );
+                dp[i] = (2.0 * self.w as f64 - 2.0 * dp[i]).sqrt();
+                assert!(!dp[i].is_nan());
+                debug_assert!(
+                    (dp[i] - zeucl(self, from, i)).abs() < 0.0001,
+                    "dp[i]={} zeucl={} diff={}",
+                    dp[i],
+                    zeucl(self, from, i),
+                    (dp[i] - zeucl(self, from, i))
+                );
             }
-            dp[i] = dp[i].sqrt();
-            debug_assert!(
-                (dp[i] - zeucl(self, from, i)).abs() < 0.0001,
-                "dp[i]={} zeucl={} diff={}",
-                dp[i],
-                zeucl(self, from, i),
-                (dp[i] - zeucl(self, from, i))
-            );
         }
         dp
     }
 
-    #[cfg(test)]
+    // #[cfg(test)]
     pub fn distance_profile_slow<D: Fn(&WindowedTimeseries, usize, usize) -> f64>(
         &self,
         from: usize,
@@ -349,15 +388,10 @@ fn rolling_stat(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>) {
 }
 
 fn relative_error(a: f64, b: f64) -> f64 {
-    (a - b).abs() / std::cmp::max_by(a, b, |a,b| a.partial_cmp(b).unwrap())
+    (a - b).abs() / std::cmp::max_by(a, b, |a, b| a.partial_cmp(b).unwrap())
 }
 
-fn _rolling_stat(
-    ts: &[f64],
-    w: usize,
-    rolling_avg: &mut [f64],
-    rolling_sd: &mut [f64],
-) {
+fn _rolling_stat(ts: &[f64], w: usize, rolling_avg: &mut [f64], rolling_sd: &mut [f64]) {
     let n_subs = ts.len() - w;
 
     let comp_d_squared = |i: usize| {
@@ -382,9 +416,12 @@ fn _rolling_stat(
         } else {
             comp_d_squared(i)
         };
-        debug_assert!(comp_d_squared(i) == 0.0 || relative_error(d_squared, comp_d_squared(i)) < 0.000001,
+        debug_assert!(
+            comp_d_squared(i) == 0.0 || relative_error(d_squared, comp_d_squared(i)) < 0.000001,
             "({}) d_squared: rolling {} scratch {} relative error {}",
-            i, d_squared, comp_d_squared(i),
+            i,
+            d_squared,
+            comp_d_squared(i),
             relative_error(d_squared, comp_d_squared(i))
         );
 
@@ -393,11 +430,12 @@ fn _rolling_stat(
         rolling_avg[i] = mean;
 
         let sd = (d_squared / w as f64).sqrt();
-        debug_assert!((sd - variance(&ts[i..(i + w)], mean).sqrt()).abs() < 0.0000001,
+        debug_assert!(
+            (sd - variance(&ts[i..(i + w)], mean).sqrt()).abs() < 0.0000001,
             "({}) computed sd is {}, actual is {}",
             i,
             sd,
-            variance(&ts[i..i+w], mean).sqrt()
+            variance(&ts[i..i + w], mean).sqrt()
         );
         assert!(
             sd.is_finite(),
@@ -407,7 +445,6 @@ fn _rolling_stat(
             &ts[i..(i + w)]
         );
         rolling_sd[i] = sd;
-
     }
 }
 
@@ -428,8 +465,7 @@ fn rolling_stat_slow(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>) {
     let mut buffer = vec![0.0; w];
     for i in 0..n_subs {
         let mean = ts[i..i + w].iter().sum::<f64>() / w as f64;
-        let sd =
-            (ts[i..i + w].iter().map(|x| (x - mean).powi(2)).sum::<f64>() / w as f64).sqrt();
+        let sd = (ts[i..i + w].iter().map(|x| (x - mean).powi(2)).sum::<f64>() / w as f64).sqrt();
         buffer.fill(0.0);
         for (i, x) in ts[i..i + w].iter().enumerate() {
             buffer[i] = (x - mean) / sd;
@@ -546,8 +582,7 @@ mod test {
             let a = ts.subsequence(i);
             let mean: f64 = a.iter().sum::<f64>() / a.len() as f64;
             let actual_mean = ts.mean(i);
-            let sd =
-                ((a.iter().map(|x| (x - mean).powi(2)).sum::<f64>()) / a.len() as f64).sqrt();
+            let sd = ((a.iter().map(|x| (x - mean).powi(2)).sum::<f64>()) / a.len() as f64).sqrt();
             let actual_sd = ts.sd(i);
             assert!((mean - actual_mean).abs() < 0.0000000000001);
             assert!((sd - actual_sd).abs() < 0.0000000000001);
@@ -584,7 +619,6 @@ mod test {
                 e
             );
         }
-
     }
 
     #[test]
