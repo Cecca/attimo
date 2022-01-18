@@ -186,7 +186,7 @@ impl TopK {
             .map(|m| *m)
     }
 
-    fn to_vec(&self) -> Vec<Motif> {
+    pub fn to_vec(&self) -> Vec<Motif> {
         self.top.clone().into_iter().collect()
     }
 }
@@ -530,13 +530,13 @@ mod test {
     #[test]
     fn test_ecg_10000() {
         // The indices and distances in this test have been computed
-        // using STUMPY: https://github.com/TDAmeritrade/stumpy
+        // using SCAMP: https://github.com/zpzim/SCAMP
         // The distances are slightly different, due to numerical approximation
         // and a different normalization in their computation of the standard deviation
         for (w, a, b, d) in [
-            (100, 616, 2780, 0.17526071805739987),
-            (200, 416, 2580, 0.35932460689995877),
-            (1000, 1172, 6112, 2.1325079069545545),
+            (100, 616, 2780, 0.1761538477),
+            (200, 416, 2580, 0.3602377446),
+            (1000, 1172, 6112, 2.133571168),
         ] {
             let ts: Vec<f64> = loadts("data/ECG-10000.csv", None).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
@@ -544,10 +544,10 @@ mod test {
             let motif = *motifs(&ts, 1, 20, 0.001, None, None, 12435)
                 .first()
                 .unwrap();
-            assert_eq!(motif.idx_a, a);
-            assert_eq!(motif.idx_b, b);
             println!("{}", motif.distance);
-            assert!((motif.distance - d).abs() < 0.0000001);
+            assert!((motif.idx_a as isize - a as isize).abs() < w as isize);
+            assert!((motif.idx_b as isize - b as isize).abs() < w as isize);
+            assert!(motif.distance <= d + 0.00001);
         }
     }
 
