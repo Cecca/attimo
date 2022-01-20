@@ -31,6 +31,7 @@ use crate::{alloc_cnt, allocator::*};
 // TODO Remove this dependency
 use crate::sort::*;
 use crate::timeseries::WindowedTimeseries;
+use bitvec::prelude::BitVec;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -148,10 +149,7 @@ impl HashCollection {
 
     //// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
     //// and a `Hasher`.
-    pub fn from_ts(
-        ts: &WindowedTimeseries,
-        hasher: Arc<Hasher>,
-    ) -> Self {
+    pub fn from_ts(ts: &WindowedTimeseries, hasher: Arc<Hasher>) -> Self {
         assert!(ts.num_subsequences() < u32::MAX as usize, "We use 32 bit integers as pointers into subsequences, this timeseries has too many subsequences.");
         println!(
             "Number of tensor repetitions: {}",
@@ -292,6 +290,7 @@ impl HashCollection {
         depth: usize,
         repetition: usize,
         exclusion_zone: usize,
+        available: &BitVec<usize>,
         // This buffer emulates the column of the hash matrix
         buffer: &mut Vec<(HashValue, u32)>,
         output: &mut Vec<Range<usize>>,
@@ -302,11 +301,13 @@ impl HashCollection {
         output.clear();
 
         let start = Instant::now();
-        buffer.par_extend(
-            (0..ns)
-                .into_par_iter()
-                .map(|i| (self.hash_value(i, depth, repetition), i as u32)),
-        );
+        buffer.par_extend((0..ns).into_par_iter().filter_map(|i| {
+            if available[i] {
+                Some((self.hash_value(i, depth, repetition), i as u32))
+            } else {
+                None
+            }
+        }));
         let elapsed_hashes = start.elapsed();
         let start = Instant::now();
         buffer.par_sort_unstable();
@@ -404,14 +405,20 @@ impl Hasher {
     //// The procedure takes into account two things: that we have at least one collision at
     //// the deepest level, and that we have at most 1% of the hashes falling out of the range [-128, 128],
     //// i.e. that 99% of the hash values can be represented with 8 bits.
-    pub fn estimate_width(ts: &WindowedTimeseries, k: usize, min_dist: Option<f64>, seed: u64) -> f64 {
+    pub fn estimate_width(
+        ts: &WindowedTimeseries,
+        k: usize,
+        min_dist: Option<f64>,
+        seed: u64,
+    ) -> f64 {
         let timer = Instant::now();
         let mut r = 1.0;
+        let mut available = BitVec::<usize>::new();
+        available.resize(ts.num_subsequences(), true);
         loop {
             println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
-            let probe_collection =
-                HashCollection::from_ts(&ts, probe_hasher);
+            let probe_collection = HashCollection::from_ts(&ts, probe_hasher);
             let fraction_oob = probe_collection.fraction_oob();
             let probe_collection = Arc::new(probe_collection);
             info!(
@@ -420,7 +427,7 @@ impl Hasher {
             );
             let mut probe_column = Vec::new();
             let mut probe_buckets = Vec::new();
-            probe_collection.group_subsequences(K, 0, ts.w, &mut probe_column, &mut probe_buckets);
+            probe_collection.group_subsequences(K, 0, ts.w, &available, &mut probe_column, &mut probe_buckets);
             info!("grouped subsequences");
 
             let has_collision = || {
@@ -439,12 +446,12 @@ impl Hasher {
                                     if d > min_dist.unwrap_or(-1.0) {
                                         // println!("There is a collision at distance {} for quantization width {}", d, r);
                                         // return true;
-                                        topk.insert(Motif{
+                                        topk.insert(Motif {
                                             distance: d,
                                             collision_probability: f64::NAN,
                                             elapsed: None,
                                             idx_a: a_idx,
-                                            idx_b: b_idx
+                                            idx_b: b_idx,
                                         });
                                     }
                                     if topk.k_th().is_some() {
@@ -457,7 +464,11 @@ impl Hasher {
                     }
                 }
                 println!("{:#?}", topk.to_vec());
-                println!("Found {} motifs with {} distance computations", topk.to_vec().len(), cnt_dists);
+                println!(
+                    "Found {} motifs with {} distance computations",
+                    topk.to_vec().len(),
+                    cnt_dists
+                );
                 return false;
             };
 
