@@ -52,6 +52,10 @@ struct Config {
     /// seed for the psudorandom number generator
     pub seed: u64,
 
+    #[argh(option, default = "2.0")]
+    /// the range for the dominance relation
+    pub range: f64,
+
     #[argh(switch)]
     /// wether meand and std computations should be at the best precision, at the expense of running time
     pub precise: bool,
@@ -116,7 +120,7 @@ fn main() -> Result<()> {
     let motifs = motifs(
         &ts,
         config.motifs,
-        c,
+        config.range,
         config.repetitions,
         config.delta,
         config.max_correlation,
