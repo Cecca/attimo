@@ -319,20 +319,13 @@ pub fn motifs(
         min_dist, max_dist
     );
 
-    info!("fft computation"; "tag" => "phase");
-    println!("Computing FFT data");
-    let timer = Instant::now();
-    let fft_data = ts.fft_data();
-    println!("Computed FFT data in {:?}", timer.elapsed());
-
-    info!("quantization width estimation"; "tag" => "phase");
-    let hasher_width = Hasher::estimate_width(&ts, topk, &fft_data, min_dist, seed);
+    let hasher_width = Hasher::estimate_width(&ts, topk, min_dist, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
 
     info!("hash computation"; "tag" => "phase");
     let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
     let mem_before = allocated();
-    let pools = HashCollection::from_ts(ts, Arc::clone(&hasher), &fft_data);
+    let pools = HashCollection::from_ts(ts, Arc::clone(&hasher));
     let pools = Arc::new(pools);
     let pools_size = allocated() - mem_before;
     println!(
@@ -340,8 +333,6 @@ pub fn motifs(
         start.elapsed(),
         PrettyBytes(pools_size)
     );
-    //// Drop the fft, which we don't need from now on.
-    drop(fft_data);
 
     //// This function is used in the stopping condition
     let threshold_fn = |d: f64, depth: isize| {
