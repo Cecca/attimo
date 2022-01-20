@@ -10,18 +10,22 @@ use crate::allocator::allocated;
 use crate::distance::*;
 use crate::lsh::*;
 use crate::timeseries::*;
+use crossbeam_channel::IntoIter;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
 use std::cell::RefCell;
+use std::cmp::Reverse;
+use std::collections::BTreeSet;
+use std::collections::BinaryHeap;
+use std::iter::FromIterator;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use thread_local::ThreadLocal;
-use std::collections::BTreeSet;
 
 //// ## Support data structures
 //// ### Motifs
@@ -103,6 +107,55 @@ impl Motif {
         idxs[0] + exclusion_zone > idxs[1]
             || idxs[1] + exclusion_zone > idxs[2]
             || idxs[2] + exclusion_zone > idxs[3]
+    }
+}
+
+pub struct Candidates {
+    cands: Vec<Motif>,
+}
+
+impl Candidates {
+    pub fn new() -> Self {
+        Self {
+            cands: Vec::default(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.cands.len()
+    }
+
+    pub fn insert(&mut self, m: Motif) {
+        self.cands.push(m);
+    }
+
+    pub fn fix_order(&mut self) {
+        self.cands.sort_unstable_by(|a,b| a.cmp(&b).reverse())
+    }
+
+    pub fn top(&self) -> Option<&Motif> {
+        self.cands.last()
+    }
+
+    pub fn pop(&mut self) -> Option<Motif> {
+        self.cands.pop()
+    }
+
+    pub fn iter(sets: impl IntoIterator<Item = Self>) -> impl Iterator<Item = Motif> {
+        let mut sets = Vec::from_iter(sets.into_iter());
+        sets.iter_mut().for_each(|s| s.fix_order());
+
+        std::iter::from_fn(move || {
+            //// Find the set with minimum element
+            let s = sets.iter_mut().min_by_key(|s| s.top().unwrap().clone());
+            if let Some(s) = s {
+                let m = s.pop().unwrap();
+                sets.retain(|s| s.len() > 0);
+                Some(m)
+            } else {
+                None
+            }
+        })
     }
 }
 
