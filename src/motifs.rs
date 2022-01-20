@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use thread_local::ThreadLocal;
+use std::collections::BTreeSet;
 
 //// ## Support data structures
 //// ### Motifs
@@ -47,11 +48,7 @@ pub struct Motif {
 impl Eq for Motif {}
 impl PartialEq for Motif {
     fn eq(&self, other: &Self) -> bool {
-        self.idx_a == other.idx_a
-            && self.idx_b == other.idx_b
-            && self.distance == other.distance
-            && self.collision_probability == other.collision_probability
-            && self.elapsed == other.elapsed
+        self.idx_a == other.idx_a && self.idx_b == other.idx_b && self.distance == other.distance
     }
 }
 
@@ -63,7 +60,9 @@ impl Ord for Motif {
 
 impl PartialOrd for Motif {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.distance.partial_cmp(&other.distance)
+        self.distance
+            .partial_cmp(&other.distance)
+            .map(|ord| ord.then_with(|| self.idx_a.cmp(&other.idx_a)))
     }
 }
 
@@ -74,6 +73,28 @@ impl PartialOrd for Motif {
 //// `exclusion_zone` from each other, then the motifs overlap and one of them
 //// shall be discarded.
 impl Motif {
+    fn is_confirmed(&self) -> bool {
+        self.elapsed.is_some()
+    }
+
+    fn dominates(
+        &self,
+        ts: &WindowedTimeseries,
+        other: &Self,
+        exclusion_zone: usize,
+        c: f64,
+    ) -> bool {
+        if self.distance > other.distance {
+            return false;
+        }
+        let threshold = c * self.distance;
+        self.overlaps(other, exclusion_zone)
+            || zeucl(ts, self.idx_a, other.idx_a) <= threshold
+            || zeucl(ts, self.idx_a, other.idx_b) <= threshold
+            || zeucl(ts, self.idx_b, other.idx_a) <= threshold
+            || zeucl(ts, self.idx_b, other.idx_b) <= threshold
+    }
+
     /// Tells whether the two motifs overlap, in order to avoid storing trivial matches
     fn overlaps(&self, other: &Self, exclusion_zone: usize) -> bool {
         let mut idxs = [self.idx_a, self.idx_b, other.idx_a, other.idx_b];
