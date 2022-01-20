@@ -92,66 +92,65 @@ impl Motif {
     }
 }
 
-#[derive(Clone)]
-pub struct Candidates {
-    cands: Vec<Motif>,
+pub struct Buffer {
+    capacity: usize,
+    inner: Vec<Motif>,
+    sorted: bool,
 }
 
-impl Candidates {
-    pub fn new() -> Self {
+impl Buffer {
+    fn new(capacity: usize) -> Buffer {
         Self {
-            cands: Vec::default(),
+            capacity,
+            inner: Vec::with_capacity(2 * capacity),
+            sorted: false,
         }
     }
 
-    pub fn clear(&mut self) {
-        self.cands.clear()
+    fn push(&mut self, m: Motif) {
+        self.truncate();
+        self.sorted = false;
+        self.inner.push(m);
     }
 
-    pub fn len(&self) -> usize {
-        self.cands.len()
-    }
-
-    pub fn insert(&mut self, m: Motif) {
-        self.cands.push(m);
-    }
-
-    pub fn fix_order(&mut self) {
-        self.cands.sort_unstable_by(|a, b| a.cmp(&b).reverse());
-    }
-
-    pub fn top(&self) -> Option<&Motif> {
-        assert!(self.cands.is_sorted_by(|a, b| Some(a.cmp(&b).reverse())));
-        self.cands.last()
-    }
-
-    pub fn pop(&mut self) -> Option<Motif> {
-        self.cands.pop()
-    }
-
-    pub fn union(sets: impl IntoIterator<Item = Self>) -> impl Iterator<Item = Motif> {
-        let mut btree = BTreeSet::new();
-        for set in sets {
-            btree.extend(set.cands.into_iter());
+    fn truncate(&mut self) {
+        if self.inner.len() >= 2 * self.capacity {
+            self.inner.sort_unstable();
+            self.inner.dedup();
+            self.inner.truncate(self.capacity);
+            self.sorted = false;
         }
-        btree.into_iter()
-        // let mut sets = Vec::from_iter(sets.into_iter().filter(|c| c.len() > 0));
-        // sets.iter_mut().for_each(|s| s.fix_order());
+    }
 
-        // std::iter::from_fn(move || {
-        //     //// Find the set with minimum element
-        //     let s = sets
-        //         .iter_mut()
-        //         .min_by_key(|s| s.top().expect("empty candidate set").clone());
-        //     let ret = if let Some(s) = s {
-        //         let m = s.pop().unwrap();
-        //         Some(m)
-        //     } else {
-        //         None
-        //     };
-        //     sets.retain(|s| s.len() > 0);
-        //     ret
-        // })
+    fn ensure_sorted(&mut self) {
+        if !self.sorted {
+            self.inner.sort_unstable_by(|m1, m2| m1.cmp(m2).reverse());
+            self.inner.dedup();
+            self.sorted = true;
+        }
+    }
+
+    fn top(&mut self) -> Option<&Motif> {
+        self.ensure_sorted();
+        self.inner.last()
+    }
+
+    fn pop(&mut self) -> Option<Motif> {
+        self.ensure_sorted();
+        self.inner.pop()
+    }
+
+    fn merge(&mut self, other: &mut Self) {
+        while let Some(m) = other.pop() {
+            self.push(m);
+        }
+        self.sorted = false;
+    }
+
+    fn retain(&mut self, f: impl FnMut(&Motif) -> bool) {
+        self.truncate();
+        self.sorted = false;
+        self.inner.retain(f)
     }
 }
 
@@ -354,7 +353,7 @@ pub fn motifs(
 
     info!("tries exploration"; "tag" => "phase");
     // let mut top = TopK::new(topk, exclusion_zone);
-    let mut candidates = BTreeSet::new();
+    let mut candidates = Buffer::new(10000);
     let mut output: Vec<Motif> = Vec::with_capacity(topk);
 
     let mut available = bitvec::vec::BitVec::<usize>::new();
@@ -400,7 +399,7 @@ pub fn motifs(
             (0..n_buckets / chunk_size)
                 .into_par_iter()
                 .for_each(|chunk_i| {
-                    let tl_candidates = tl_candidates.get_or(|| RefCell::new(Vec::new()));
+                    let tl_candidates = tl_candidates.get_or(|| RefCell::new(Buffer::new(10000)));
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
                         let bucket = &column_buffer[buckets[i].clone()];
                         let bpbar = if bucket.len() > 1000000 {
@@ -483,17 +482,24 @@ pub fn motifs(
 
             //// Find out which motifs can be confirmed at this point, and mark the
             //// subsequences they dominate as not available.
-            
+
+            let timer_merge = Instant::now();
             tl_candidates.iter_mut().for_each(|cands| {
-                candidates.extend(cands.borrow_mut().drain(..));
+                candidates.merge(&mut cands.borrow_mut());
             });
-            
+            pbar.println(format!("Candidates merged in {:?}", timer_merge.elapsed()));
+
+            let mut skip_timer = Instant::now();
+            let mut skip_count = 0;
+
             candidates.retain(|motif| {
                 if !(available[motif.idx_a] && available[motif.idx_b]) {
+                    skip_count += 1;
                     return false;
                 }
                 let t = threshold_fn(motif.distance, depth);
                 if rep >= t {
+                    pbar.println(format!("Skipped {} pairs in {:?} ({:.3} pairs/sec)", skip_count, skip_timer.elapsed(), skip_count as f64 / skip_timer.elapsed().as_secs_f64()));
                     let correlation = 1.0 - motif.distance.powi(2) / (2.0 * ts.w as f64);
                     info!("output reporting"; "tag" => "output", "distance" => motif.distance, "correlation" => correlation);
                     pbar.println(format!(
@@ -509,25 +515,39 @@ pub fn motifs(
                     // mark all the sequences which are dominated by the motif
                     for idx in [motif.idx_a, motif.idx_b] {
                         // mark overlaps
+                        let t = Instant::now();
                         for i in (idx - exclusion_zone + 1)..(idx + exclusion_zone) {
                             available.set(i, false);
                         }
                         // FIXME: Pre-allocate memory
                         let dp = ts.distance_profile(idx);
+                        let elapsed_dp = t.elapsed();
+                        pbar.println(format!(" . DP {:?}", elapsed_dp));
                         let threshold = c * motif.distance;
+                        let mut cnt = 0;
                         for (i, d) in dp.into_iter().enumerate() {
                             if d <= threshold {
                                 available.set(i, false);
+                                cnt += 1;
                             }
                         }
+                        pbar.println(format!(" . flags {:?}", t.elapsed() - elapsed_dp));
+                        pbar.println(format!(" . inhibited {}", cnt));
                     }
                     output.push(Motif {elapsed: Some(start.elapsed()), ..motif.clone()});
+                    skip_timer = Instant::now();
+                    skip_count = 0;
                     return false;
                 }
+                skip_count += 1;
                 true
             });
-
-            pbar.println(format!("{} subsequences still available, {} candidates", available.count_ones(), candidates.len()));
+            pbar.println(format!(
+                "Skipped {} pairs in {:?} ({:.3} pairs/sec)",
+                skip_count,
+                skip_timer.elapsed(),
+                skip_count as f64 / skip_timer.elapsed().as_secs_f64()
+            ));
 
             //// Now we check the stopping condition. If we have seen enough
             //// repetitions to make it unlikely (where _unlikely_ is quantified
@@ -564,7 +584,7 @@ pub fn motifs(
         //// deeper levels.
         if !stop {
             previous_depth.replace(depth as usize);
-            if let Some(m) = candidates.first() {
+            if let Some(m) = candidates.top() {
                 let orig_depth = depth;
                 let d = if let Some(max_dist) = max_dist {
                     std::cmp::min_by(max_dist, m.distance, |a, b| a.partial_cmp(b).unwrap())
