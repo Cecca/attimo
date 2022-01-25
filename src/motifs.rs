@@ -377,9 +377,6 @@ pub fn motifs(
         output.iter().find(|out| out.overlaps(m, exclusion_zone)).is_some()
     };
 
-    let mut available = bitvec::vec::BitVec::<usize>::new();
-    available.resize(ts.num_subsequences(), true);
-
     let mut stop = false;
 
     //// This vector holds the (sorted) hashed subsequences, and their index
@@ -406,7 +403,7 @@ pub fn motifs(
             let rep_candidate_pairs = AtomicUsize::new(0);
             let rep_timer = Instant::now();
             alloc_cnt!("column_buffer"; {
-                pools.group_subsequences(depth as usize, rep, exclusion_zone, &available, &mut column_buffer, &mut buckets);
+                pools.group_subsequences(depth as usize, rep, exclusion_zone, &mut column_buffer, &mut buckets);
             });
             let snap_subsequences = rep_timer.elapsed();
             let n_buckets = buckets.len();
@@ -615,6 +612,10 @@ pub fn motifs(
     );
     output
 }
+
+// fn explore_tries(ts: &WindowedTimeseries, pools: Arc<HashCollection>) {
+
+// }
 
 #[cfg(test)]
 mod test {

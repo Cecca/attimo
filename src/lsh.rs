@@ -31,7 +31,6 @@ use crate::{alloc_cnt, allocator::*};
 // TODO Remove this dependency
 use crate::sort::*;
 use crate::timeseries::WindowedTimeseries;
-use bitvec::prelude::BitVec;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -290,7 +289,6 @@ impl HashCollection {
         depth: usize,
         repetition: usize,
         exclusion_zone: usize,
-        available: &BitVec<usize>,
         // This buffer emulates the column of the hash matrix
         buffer: &mut Vec<(HashValue, u32)>,
         output: &mut Vec<Range<usize>>,
@@ -301,13 +299,11 @@ impl HashCollection {
         output.clear();
 
         let start = Instant::now();
-        buffer.par_extend((0..ns).into_par_iter().filter_map(|i| {
-            if available[i] {
-                Some((self.hash_value(i, depth, repetition), i as u32))
-            } else {
-                None
-            }
-        }));
+        buffer.par_extend(
+            (0..ns)
+                .into_par_iter()
+                .map(|i| (self.hash_value(i, depth, repetition), i as u32)),
+        );
         let elapsed_hashes = start.elapsed();
         let start = Instant::now();
         buffer.par_sort_unstable();
@@ -413,8 +409,6 @@ impl Hasher {
     ) -> f64 {
         let timer = Instant::now();
         let mut r = 1.0;
-        let mut available = BitVec::<usize>::new();
-        available.resize(ts.num_subsequences(), true);
         loop {
             println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
@@ -431,7 +425,6 @@ impl Hasher {
                 K,
                 0,
                 ts.w,
-                &available,
                 &mut probe_column,
                 &mut probe_buckets,
             );
