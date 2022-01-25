@@ -15,6 +15,7 @@ use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
 use std::cell::RefCell;
+use std::ops::Range;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -47,11 +48,7 @@ pub struct Motif {
 impl Eq for Motif {}
 impl PartialEq for Motif {
     fn eq(&self, other: &Self) -> bool {
-        self.idx_a == other.idx_a
-            && self.idx_b == other.idx_b
-            && self.distance == other.distance
-            && self.collision_probability == other.collision_probability
-            && self.elapsed == other.elapsed
+        self.idx_a == other.idx_a && self.idx_b == other.idx_b && self.distance == other.distance
     }
 }
 
@@ -63,7 +60,9 @@ impl Ord for Motif {
 
 impl PartialOrd for Motif {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.distance.partial_cmp(&other.distance)
+        self.distance
+            .partial_cmp(&other.distance)
+            .map(|ord| ord.then_with(|| self.idx_a.cmp(&other.idx_a)))
     }
 }
 
@@ -74,6 +73,21 @@ impl PartialOrd for Motif {
 //// `exclusion_zone` from each other, then the motifs overlap and one of them
 //// shall be discarded.
 impl Motif {
+    fn dominates(
+        &self,
+        other: &Self,
+        ts: &WindowedTimeseries,
+        c: f64,
+        exclusion_zone: usize,
+    ) -> bool {
+        let threshold = c * self.distance;
+        (self.overlaps(other, exclusion_zone) && self.distance < other.distance)
+            || zeucl(ts, self.idx_a, other.idx_a) < threshold
+            || zeucl(ts, self.idx_a, other.idx_b) < threshold
+            || zeucl(ts, self.idx_b, other.idx_a) < threshold
+            || zeucl(ts, self.idx_b, other.idx_b) < threshold
+    }
+
     /// Tells whether the two motifs overlap, in order to avoid storing trivial matches
     fn overlaps(&self, other: &Self, exclusion_zone: usize) -> bool {
         let mut idxs = [self.idx_a, self.idx_b, other.idx_a, other.idx_b];
@@ -82,6 +96,110 @@ impl Motif {
         idxs[0] + exclusion_zone > idxs[1]
             || idxs[1] + exclusion_zone > idxs[2]
             || idxs[2] + exclusion_zone > idxs[3]
+    }
+}
+
+pub struct Buffer {
+    capacity: usize,
+    inner: Vec<Motif>,
+    sorted: bool,
+    /// The minimum distance we had to discard when truncating the buffer.
+    /// We use this information to check whether we are losing some information
+    min_forgotten_distance: Option<f64>,
+}
+
+impl Buffer {
+    fn new(capacity: usize) -> Buffer {
+        Self {
+            capacity,
+            inner: Vec::with_capacity(2 * capacity),
+            sorted: false,
+            min_forgotten_distance: None,
+        }
+    }
+
+    fn push(&mut self, m: Motif) {
+        self.truncate();
+        self.sorted = false;
+        self.inner.push(m);
+    }
+
+    fn truncate(&mut self) {
+        if self.inner.len() >= 2 * self.capacity {
+            self.inner.sort_unstable();
+            self.inner.dedup();
+            let trunc_dist = self.inner[self.capacity].distance;
+            self.inner.truncate(self.capacity);
+            self.sorted = false;
+            self.min_forgotten_distance.replace(
+                self.min_forgotten_distance
+                    .map(|d| std::cmp::min_by(d, trunc_dist, |a, b| a.partial_cmp(b).unwrap()))
+                    .unwrap_or(trunc_dist),
+            );
+        }
+    }
+
+    fn ensure_sorted(&mut self) {
+        if !self.sorted {
+            self.inner.sort_unstable_by(|m1, m2| m1.cmp(m2).reverse());
+            self.inner.dedup();
+            self.sorted = true;
+        }
+    }
+
+    fn top(&mut self) -> Result<Option<&Motif>, f64> {
+        self.ensure_sorted();
+        let m = self.inner.last();
+        if let Some(m) = m {
+            if m.distance >= self.min_forgotten_distance.unwrap_or(f64::INFINITY) {
+                return Err(self.min_forgotten_distance.unwrap());
+            }
+        }
+        Ok(m)
+    }
+
+    fn pop(&mut self) -> Result<Option<Motif>, f64> {
+        self.ensure_sorted();
+        let m = self.inner.pop();
+        if let Some(m) = m {
+            if m.distance >= self.min_forgotten_distance.unwrap_or(f64::INFINITY) {
+                return Err(self.min_forgotten_distance.unwrap());
+            }
+        }
+        Ok(m)
+    }
+
+    fn merge(&mut self, other: &mut Self, pred: impl Fn(&Motif) -> bool) {
+        loop {
+            match other.pop() {
+                Ok(Some(m)) => {
+                    if pred(&m) {
+                        self.push(m)
+                    }
+                }
+                Ok(None) => break,
+                Err(d) => {
+                    self.min_forgotten_distance.replace(std::cmp::min_by(
+                        d,
+                        self.min_forgotten_distance.unwrap_or(f64::INFINITY),
+                        |a, b| a.partial_cmp(b).unwrap(),
+                    ));
+                    break;
+                }
+            }
+        }
+        // while let Some(m) = other.pop()? {
+        //     if pred(&m) {
+        //         self.push(m);
+        //     }
+        // }
+        self.sorted = false;
+    }
+
+    fn retain(&mut self, f: impl FnMut(&Motif) -> bool) {
+        self.truncate();
+        self.sorted = false;
+        self.inner.retain(f)
     }
 }
 
@@ -153,22 +271,6 @@ impl TopK {
         }
     }
 
-    fn for_each<F: FnMut(&mut Motif)>(&mut self, f: F) {
-        self.top.iter_mut().for_each(f);
-    }
-
-    fn merge(&mut self, other: &Self) {
-        let kth_d = self
-            .k_th()
-            .map(|m| m.distance)
-            .unwrap_or(std::f64::INFINITY);
-        for m in other.top.iter() {
-            if m.distance < kth_d {
-                self.insert(*m);
-            }
-        }
-    }
-
     //// This function is used to access the k-th motif, if we already found it.
     pub fn k_th(&self) -> Option<Motif> {
         if self.top.len() == self.k {
@@ -218,6 +320,7 @@ impl TopK {
 pub fn motifs(
     ts: &WindowedTimeseries,
     topk: usize,
+    c: f64,
     repetitions: usize,
     delta: f64,
     max_correlation: Option<f64>,
@@ -245,20 +348,13 @@ pub fn motifs(
         min_dist, max_dist
     );
 
-    info!("fft computation"; "tag" => "phase");
-    println!("Computing FFT data");
-    let timer = Instant::now();
-    let fft_data = ts.fft_data();
-    println!("Computed FFT data in {:?}", timer.elapsed());
-
-    info!("quantization width estimation"; "tag" => "phase");
-    let hasher_width = Hasher::estimate_width(&ts, topk, &fft_data, min_dist, seed);
+    let hasher_width = Hasher::estimate_width(&ts, topk, min_dist, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
 
     info!("hash computation"; "tag" => "phase");
     let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
     let mem_before = allocated();
-    let pools = HashCollection::from_ts(ts, Arc::clone(&hasher), &fft_data);
+    let pools = HashCollection::from_ts(ts, Arc::clone(&hasher));
     let pools = Arc::new(pools);
     let pools_size = allocated() - mem_before;
     println!(
@@ -266,15 +362,95 @@ pub fn motifs(
         start.elapsed(),
         PrettyBytes(pools_size)
     );
-    //// Drop the fft, which we don't need from now on.
-    drop(fft_data);
+
+    let cnt_dist = AtomicUsize::new(0);
+
+    let mut output: Vec<Motif> = Vec::with_capacity(topk);
+
+    info!("tries exploration"; "tag" => "phase");
+    //// This vector holds the (sorted) hashed subsequences, and their index
+    let mut column_buffer = Vec::new();
+    //// This vector holds the boundaries between buckets. We reuse the allocations
+    let mut buckets = Vec::new();
+
+    let mut min_dist = min_dist.clone();
+    while output.len() < topk {
+        match explore_tries(
+            ts,
+            Arc::clone(&pools),
+            &cnt_dist,
+            topk,
+            delta,
+            c,
+            exclusion_zone,
+            min_dist,
+            max_dist,
+            start,
+            &mut output,
+            &mut column_buffer,
+            &mut buckets,
+        ) {
+            Ok(()) => (),
+            Err(forgotten_distance) => {
+                println!("Truncation made us forget distance {} and above, restarting", forgotten_distance);
+                min_dist.replace(forgotten_distance);
+            }
+        }
+    }
+
+    let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
+    let cnt_dist = cnt_dist.load(Ordering::SeqCst);
+    info!("end"; "tag" => "phase");
+    info!("motifs completed";
+        "tag" => "profiling",
+        "time_s" => start.elapsed().as_secs_f64(),
+        "cnt_dist" => cnt_dist,
+        "total_distances" => total_distances,
+        "distances_fraction" => (cnt_dist as f64 / total_distances as f64)
+    );
+    println!(
+        "[{:?}] done! Computed {}/{} distances ({}%)",
+        start.elapsed(),
+        cnt_dist,
+        total_distances,
+        (cnt_dist as f64 / total_distances as f64) * 100.0,
+    );
+    output
+}
+
+fn explore_tries(
+    ts: &WindowedTimeseries,
+    pools: Arc<HashCollection>,
+    cnt_dist: &AtomicUsize,
+    topk: usize,
+    delta: f64,
+    c: f64,
+    exclusion_zone: usize,
+    min_dist: Option<f64>,
+    max_dist: Option<f64>,
+    start: Instant,
+    output: &mut Vec<Motif>,
+    column_buffer: &mut Vec<(HashValue, u32)>,
+    buckets: &mut Vec<Range<usize>>,
+) -> Result<(), f64> {
+    let buffer_capacity = ts.w * topk;
+    println!("Buffer capacity {}", buffer_capacity);
+    let mut candidates = Buffer::new(buffer_capacity);
+
+    let repetitions = pools.hasher.repetitions;
+    let hasher = Arc::clone(&pools.hasher);
 
     //// This function is used in the stopping condition
     let threshold_fn = |d: f64, depth: isize| {
         let p = hasher.collision_probability_at(d);
         ((1.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize
     };
-
+    let overlaps_with_output = |output: &[Motif], m: &Motif| {
+        output
+            .iter()
+            .find(|out| out.overlaps(m, exclusion_zone))
+            .is_some()
+    };
     //// Find the level for which the given distance has a good probability of being
     //// found withing the allowed number of repetitions
     let level_for_distance = |d: f64, mut depth: isize| {
@@ -288,27 +464,18 @@ pub fn motifs(
         depth
     };
 
-    let cnt_dist = AtomicUsize::new(0);
-
-    info!("tries exploration"; "tag" => "phase");
-    let mut top = TopK::new(topk, exclusion_zone);
-
-    let mut stop = false;
-
-    //// This vector holds the (sorted) hashed subsequences, and their index
-    let mut column_buffer = Vec::new();
-    //// This vector holds the boundaries between buckets. We reuse the allocations
-    let mut buckets = Vec::new();
-
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
-    let mut depth = K as isize;
-    // let mut depth = if let Some(min_dist) = min_dist {
-    //     level_for_distance(min_dist, K as isize)
-    // } else {
-    //     K as isize
-    // };
+    let mut depth = if let Some(min_dist) = min_dist {
+        level_for_distance(min_dist, K as isize)
+    } else {
+        K as isize
+    };
+    println!(
+        "Exploring tries starting from minimum distance {:?} at depth {}",
+        min_dist, depth
+    );
     let mut previous_depth = None;
-    while depth >= 0 && !stop {
+    while depth >= 0 {
         let depth_timer = Instant::now();
         let pbar = ProgressBar::new(repetitions as u64);
         pbar.set_draw_rate(1);
@@ -324,12 +491,12 @@ pub fn motifs(
             let rep_candidate_pairs = AtomicUsize::new(0);
             let rep_timer = Instant::now();
             alloc_cnt!("column_buffer"; {
-                pools.group_subsequences(depth as usize, rep, exclusion_zone, &mut column_buffer, &mut buckets);
+                pools.group_subsequences(depth as usize, rep, exclusion_zone, column_buffer, buckets);
             });
             let snap_subsequences = rep_timer.elapsed();
             let n_buckets = buckets.len();
 
-            let tl_top = ThreadLocal::new();
+            let mut tl_candidates = ThreadLocal::new();
 
             //// Each thread works on these many buckets at one time, to reduce the
             //// overhead of scheduling.
@@ -338,7 +505,7 @@ pub fn motifs(
             (0..n_buckets / chunk_size)
                 .into_par_iter()
                 .for_each(|chunk_i| {
-                    let tl_top = tl_top.get_or(|| RefCell::new(top.clone()));
+                    let tl_candidates = tl_candidates.get_or(|| RefCell::new(Buffer::new(buffer_capacity)));
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
                         let bucket = &column_buffer[buckets[i].clone()];
                         let bpbar = if bucket.len() > 1000000 {
@@ -389,7 +556,9 @@ pub fn motifs(
                                                     elapsed: None,
                                                     collision_probability: p,
                                                 };
-                                                tl_top.borrow_mut().insert(m);
+                                                if !overlaps_with_output(&output, &m) {
+                                                    tl_candidates.borrow_mut().push(m);
+                                                }
                                             }
                                         }
                                     } else {
@@ -397,22 +566,12 @@ pub fn motifs(
                                     }
                                 }
                             }
-                            bpbar.iter().for_each(|b| {
-                                let top_d = tl_top.borrow().k_th().map(|m| m.distance);
-                                b.inc(1);
-                                b.set_message(format!("spurious {}/{} d={:?}", spurious_collisions_cnt.load(Ordering::SeqCst), rep_candidate_pairs.load(Ordering::SeqCst), top_d));
-                            });
                         }
                         bpbar.iter().for_each(|b| b.finish_and_clear());
                     }
                 });
 
             let snap_bucket_solve = rep_timer.elapsed();
-
-            //// Now merge the information from the thread local tops
-            for tl_top in tl_top.into_iter() {
-                top.merge(&tl_top.borrow());
-            }
 
             let rep_elapsed = rep_timer.elapsed();
             info!("completed repetition";
@@ -429,26 +588,42 @@ pub fn motifs(
             cnt_dist.fetch_add(rep_cnt_dists.load(Ordering::SeqCst), Ordering::SeqCst);
             pbar.inc(1);
 
-            //// Report on the console the motifs new motifs that have been confirmed, if any,
-            //// and update their confirmation time on the go.
-            top.for_each(|motif| {
-                let t = threshold_fn(motif.distance, depth);
-                if rep >= t && motif.elapsed.is_none() {
-                    motif.elapsed.replace(start.elapsed());
-                    let correlation = 1.0 - motif.distance.powi(2) / (2.0 * ts.w as f64);
-                    info!("output reporting"; "tag" => "output", "distance" => motif.distance, "correlation" => correlation);
-                    pbar.println(format!(
-                        "Found motif at distance {:.4} ({} -- {}, corr {:.4}) after {:?} (depth {} repetition {})",
-                        motif.distance,
-                        motif.idx_a,
-                        motif.idx_b,
-                        correlation,
-                        motif.elapsed.unwrap(),
-                        depth,
-                        rep
-                    ));
+            //// Merge the candidate lists, ignoring the candidates overlapping with the current solution
+            for cands in tl_candidates.iter_mut() {
+                candidates.merge(&mut cands.borrow_mut(), |m| {
+                    !overlaps_with_output(&output, m)
+                });
+            }
+
+            //// See if there is any pair that can be confirmed at the current repetition,
+            //// that is not dominated by the current solution
+            while let Some(m) = candidates.top()? {
+                if rep >= threshold_fn(m.distance, depth) {
+                    let m = candidates.pop().unwrap().unwrap();
+                    if output
+                        .iter()
+                        .find(|confirmed| confirmed.dominates(&m, ts, c, exclusion_zone))
+                        .is_none()
+                    {
+                        pbar.println(format!(
+                            "Found motif at distance {:.4} ({} -- {}) after {:?} (depth {} repetition {})",
+                            m.distance,
+                            m.idx_a,
+                            m.idx_b,
+                            start.elapsed(),
+                            depth,
+                            rep
+                        ));
+                        candidates.retain(|cand| !cand.overlaps(&m, exclusion_zone));
+                        output.push(m);
+                    }
+                    if output.len() >= topk {
+                        break;
+                    }
+                } else {
+                    break;
                 }
-            });
+            }
 
             //// Now we check the stopping condition. If we have seen enough
             //// repetitions to make it unlikely (where _unlikely_ is quantified
@@ -457,18 +632,14 @@ pub fn motifs(
             //// we stop the computation.
             //// We check the condition even if no update happened, because there is
             //// one more repetition that could have made us pass the threshold.
-            if let Some(m) = top.k_th() {
-                let threshold = threshold_fn(m.distance, depth);
-                if rep >= threshold {
-                    stop = true;
-                    break;
-                }
+            // if let Some(m) = top.k_th() {
+            if output.len() >= topk {
+                return Ok(());
             }
             if let Some(max_dist) = max_dist {
                 let threshold = threshold_fn(max_dist, depth);
                 if rep >= threshold {
-                    stop = true;
-                    break;
+                    return Ok(());
                 }
             }
         }
@@ -485,40 +656,24 @@ pub fn motifs(
         //// it means that we are jumping on a level too low. But this only hurts performance, since it means we
         //// are going to evaluate more pairs, but we will not miss any pair that would have been evaluated at
         //// deeper levels.
-        if !stop {
-            previous_depth.replace(depth as usize);
-            if let Some(m) = top.first_not_confirmed() {
-                let orig_depth = depth;
-                let d = if let Some(max_dist) = max_dist {
-                    std::cmp::min_by(max_dist, m.distance, |a, b| a.partial_cmp(b).unwrap())
-                } else {
-                    m.distance
-                };
-                depth = level_for_distance(d, depth);
-                assert!(depth < orig_depth, "we are not making progress in depth");
+        previous_depth.replace(depth as usize);
+        if let Some(m) = candidates
+            .top()
+            .expect("We forgot a pair that might be useful now!")
+        {
+            let orig_depth = depth;
+            let d = if let Some(max_dist) = max_dist {
+                std::cmp::min_by(max_dist, m.distance, |a, b| a.partial_cmp(b).unwrap())
             } else {
-                depth -= 1;
-            }
+                m.distance
+            };
+            depth = level_for_distance(d, depth);
+            assert!(depth < orig_depth, "we are not making progress in depth");
+        } else {
+            depth -= 1;
         }
     }
-    let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
-    let cnt_dist = cnt_dist.load(Ordering::SeqCst);
-    info!("end"; "tag" => "phase");
-    info!("motifs completed";
-        "tag" => "profiling",
-        "time_s" => start.elapsed().as_secs_f64(),
-        "cnt_dist" => cnt_dist,
-        "total_distances" => total_distances,
-        "distances_fraction" => (cnt_dist as f64 / total_distances as f64)
-    );
-    println!(
-        "[{:?}] done! Computed {}/{} distances ({}%)",
-        start.elapsed(),
-        cnt_dist,
-        total_distances,
-        (cnt_dist as f64 / total_distances as f64) * 100.0,
-    );
-    top.to_vec()
+    Ok(())
 }
 
 #[cfg(test)]
@@ -541,7 +696,7 @@ mod test {
             let ts: Vec<f64> = loadts("data/ECG-10000.csv", None).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
 
-            let motif = *motifs(&ts, 1, 20, 0.001, None, None, 12435)
+            let motif = *motifs(&ts, 1, 1.0, 20, 0.001, None, None, 12435)
                 .first()
                 .unwrap();
             println!("{}", motif.distance);
@@ -562,7 +717,7 @@ mod test {
             let ts = WindowedTimeseries::new(ts, w, true);
             assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
 
-            let motif = *motifs(&ts, 1, 20, 0.001, None, None, 12435)
+            let motif = *motifs(&ts, 1, 1.0, 20, 0.001, None, None, 12435)
                 .first()
                 .unwrap();
             println!("Motif distance {}", motif.distance);

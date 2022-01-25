@@ -52,6 +52,10 @@ struct Config {
     /// seed for the psudorandom number generator
     pub seed: u64,
 
+    #[argh(option, default = "2.0")]
+    /// the range for the dominance relation
+    pub range: f64,
+
     #[argh(switch)]
     /// wether meand and std computations should be at the best precision, at the expense of running time
     pub precise: bool,
@@ -115,6 +119,7 @@ fn main() -> Result<()> {
     let motifs = motifs(
         &ts,
         config.motifs,
+        config.range,
         config.repetitions,
         config.delta,
         config.max_correlation,
@@ -125,26 +130,26 @@ fn main() -> Result<()> {
     monitor_flag.store(false, std::sync::atomic::Ordering::SeqCst);
     monitor.join().unwrap();
 
-    output_csv(&config.output, &ts, &motifs, true)?;
+    output_csv(&config.output, &motifs)?;
 
     println!("Total time {:?}", total_timer.elapsed());
 
     Ok(())
 }
 
-fn output_csv<P: AsRef<Path>>(path: P, ts: &WindowedTimeseries, motifs: &[Motif], with_support: bool) -> Result<()> {
+fn output_csv<P: AsRef<Path>>(path: P, motifs: &[Motif]) -> Result<()> {
     use std::io::prelude::*;
-    let fft_data = ts.fft_data();
     let mut f = std::fs::File::create(path.as_ref())?;
     for m in motifs {
         if let Some(confirmation_time) = m.elapsed {
-            if with_support {
-                let dp = ts.distance_profile(m.idx_a, &fft_data);
-                let support = dp.into_iter().filter(|d| *d < 2.0*m.distance).count();
-                writeln!(f, "{}, {}, {}, {}, {}", m.idx_a, m.idx_b, m.distance, confirmation_time.as_secs_f64(), support)?;
-            } else {
-                writeln!(f, "{}, {}, {}, {}", m.idx_a, m.idx_b, m.distance, confirmation_time.as_secs_f64())?;
-            }
+            writeln!(
+                f,
+                "{}, {}, {}, {}",
+                m.idx_a,
+                m.idx_b,
+                m.distance,
+                confirmation_time.as_secs_f64()
+            )?;
         }
     }
     Ok(())

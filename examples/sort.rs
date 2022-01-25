@@ -30,8 +30,10 @@ fn main() {
     println!("Computing hashes");
     let start = Instant::now();
     let hasher = Arc::new(Hasher::new(300, 200, 2.0, 123));
-    let hc = HashCollection::from_ts(&ts, hasher, &ts.fft_data());
-    let v: Vec<(HashValue, usize)> = (0..n).map(|i| (hc.hash_value(i, attimo::lsh::K, 0), i)).collect();
+    let hc = HashCollection::from_ts(&ts, hasher);
+    let v: Vec<(HashValue, usize)> = (0..n)
+        .map(|i| (hc.hash_value(i, attimo::lsh::K, 0), i))
+        .collect();
     println!("...{:?}", start.elapsed());
 
     println!("Radix sort");

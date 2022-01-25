@@ -30,7 +30,7 @@ use crate::motifs::Motif;
 use crate::{alloc_cnt, allocator::*};
 // TODO Remove this dependency
 use crate::sort::*;
-use crate::timeseries::{FFTData, WindowedTimeseries};
+use crate::timeseries::WindowedTimeseries;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -120,7 +120,7 @@ impl<'a, T> UnsafeSlice<'a, T> {
 //// This data structure contains all the information needed to generate the hash values for all the repeititions
 //// for all the subsequences.
 pub struct HashCollection {
-    hasher: Arc<Hasher>,
+    pub hasher: Arc<Hasher>,
     n_subsequences: usize,
     oob: usize,
     // Pools are organized as three dimensional matrices, in C order.
@@ -148,11 +148,7 @@ impl HashCollection {
 
     //// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
     //// and a `Hasher`.
-    pub fn from_ts(
-        ts: &WindowedTimeseries,
-        hasher: Arc<Hasher>,
-        fft_data: &FFTData,
-    ) -> Self {
+    pub fn from_ts(ts: &WindowedTimeseries, hasher: Arc<Hasher>) -> Self {
         assert!(ts.num_subsequences() < u32::MAX as usize, "We use 32 bit integers as pointers into subsequences, this timeseries has too many subsequences.");
         println!(
             "Number of tensor repetitions: {}",
@@ -178,7 +174,7 @@ impl HashCollection {
 
                 let mut buffer = tl_buffer.get_or(|| RefCell::new(vec![0; ns])).borrow_mut();
 
-                let oob = hasher.hash_all(&ts, &fft_data, k, repetition, &mut buffer);
+                let oob = hasher.hash_all(&ts, k, repetition, &mut buffer);
                 for (i, h) in buffer.iter().enumerate() {
                     let idx = K * ns * repetition + i * K + k;
                     assert!(idx < nhashes);
@@ -405,14 +401,18 @@ impl Hasher {
     //// The procedure takes into account two things: that we have at least one collision at
     //// the deepest level, and that we have at most 1% of the hashes falling out of the range [-128, 128],
     //// i.e. that 99% of the hash values can be represented with 8 bits.
-    pub fn estimate_width(ts: &WindowedTimeseries, k: usize, fft_data: &FFTData, min_dist: Option<f64>, seed: u64) -> f64 {
+    pub fn estimate_width(
+        ts: &WindowedTimeseries,
+        k: usize,
+        min_dist: Option<f64>,
+        seed: u64,
+    ) -> f64 {
         let timer = Instant::now();
         let mut r = 1.0;
         loop {
             println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
-            let probe_collection =
-                HashCollection::from_ts(&ts, probe_hasher, fft_data);
+            let probe_collection = HashCollection::from_ts(&ts, probe_hasher);
             let fraction_oob = probe_collection.fraction_oob();
             let probe_collection = Arc::new(probe_collection);
             info!(
@@ -421,7 +421,13 @@ impl Hasher {
             );
             let mut probe_column = Vec::new();
             let mut probe_buckets = Vec::new();
-            probe_collection.group_subsequences(K, 0, ts.w, &mut probe_column, &mut probe_buckets);
+            probe_collection.group_subsequences(
+                K,
+                0,
+                ts.w,
+                &mut probe_column,
+                &mut probe_buckets,
+            );
             info!("grouped subsequences");
 
             let has_collision = || {
@@ -440,12 +446,12 @@ impl Hasher {
                                     if d > min_dist.unwrap_or(-1.0) {
                                         // println!("There is a collision at distance {} for quantization width {}", d, r);
                                         // return true;
-                                        topk.insert(Motif{
+                                        topk.insert(Motif {
                                             distance: d,
                                             collision_probability: f64::NAN,
                                             elapsed: None,
                                             idx_a: a_idx,
-                                            idx_b: b_idx
+                                            idx_b: b_idx,
                                         });
                                     }
                                     if topk.k_th().is_some() {
@@ -458,7 +464,11 @@ impl Hasher {
                     }
                 }
                 println!("{:#?}", topk.to_vec());
-                println!("Found {} motifs with {} distance computations", topk.to_vec().len(), cnt_dists);
+                println!(
+                    "Found {} motifs with {} distance computations",
+                    topk.to_vec().len(),
+                    cnt_dists
+                );
                 return false;
             };
 
@@ -484,7 +494,6 @@ impl Hasher {
     pub fn hash_all(
         &self,
         ts: &WindowedTimeseries,
-        fft_data: &FFTData,
         k: usize,
         repetition: usize,
         buffer: &mut [u8],
@@ -494,7 +503,7 @@ impl Hasher {
         let shift = self.shifts[repetition * K + k];
         let mut oob = 0; // count how many out of bounds we have
         DOTP_BUFFER.with(|dotp_buf| {
-            ts.znormalized_sliding_dot_product(v, fft_data, &mut dotp_buf.borrow_mut());
+            ts.znormalized_sliding_dot_product(v, &mut dotp_buf.borrow_mut());
             for (i, dotp) in dotp_buf.borrow().iter().enumerate() {
                 let h = (dotp + shift) / self.width;
                 //// Count if the value is out of bounds to be repre
@@ -530,8 +539,7 @@ mod test {
         let repetitions = 200;
 
         let hasher = Arc::new(Hasher::new(w, repetitions, 5.0, 1245));
-        let fft_data = ts.fft_data();
-        let pools = HashCollection::from_ts(&ts, Arc::clone(&hasher), &fft_data);
+        let pools = HashCollection::from_ts(&ts, Arc::clone(&hasher));
 
         for &depth in &[32usize, 20, 10] {
             for i in 0..ts.num_subsequences() {

@@ -9,6 +9,7 @@ pub struct WindowedTimeseries {
     pub w: usize,
     rolling_avg: Vec<f64>,
     rolling_sd: Vec<f64>,
+    fft_data: FFTData,
 }
 
 impl WindowedTimeseries {
@@ -35,18 +36,9 @@ impl WindowedTimeseries {
             "time_s" => timer.elapsed().as_secs_f64()
         );
 
-        WindowedTimeseries {
-            data: ts,
-            w,
-            rolling_avg,
-            rolling_sd,
-        }
-    }
-
-    pub fn fft_data(&self) -> FFTData {
         let fft_length = std::cmp::min(
-            std::cmp::max(1 << 14, self.w.next_power_of_two()),
-            self.data.len().next_power_of_two(),
+            std::cmp::max(1 << 14, w.next_power_of_two()),
+            ts.len().next_power_of_two(),
         );
         let mut fft_chunks = Vec::new();
 
@@ -55,9 +47,9 @@ impl WindowedTimeseries {
         let ifftfun = planner.plan_fft_inverse(fft_length);
 
         let mut begin = 0;
-        while begin < self.data.len() {
-            let end = std::cmp::min(begin + fft_length, self.data.len());
-            let mut chunk: Vec<Complex<f64>> = self.data[begin..end]
+        while begin < ts.len() {
+            let end = std::cmp::min(begin + fft_length, ts.len());
+            let mut chunk: Vec<Complex<f64>> = ts[begin..end]
                 .iter()
                 .map(|x| Complex { re: *x, im: 0.0 })
                 .collect();
@@ -67,16 +59,22 @@ impl WindowedTimeseries {
 
             //// We shift the window taking into account the width of the window `w`,
             //// since we need to compute all dot products
-            begin += fft_length - self.w;
+            begin += fft_length - w;
         }
 
-        FFTData {
-            fft_length,
-            fft_chunks,
-            fftfun,
-            ifftfun,
-            buf_vfft: ThreadLocal::new(),
-            buf_ivfft: ThreadLocal::new(),
+        WindowedTimeseries {
+            data: ts,
+            w,
+            rolling_avg,
+            rolling_sd,
+            fft_data: FFTData {
+                fft_length,
+                fft_chunks,
+                fftfun,
+                ifftfun,
+                buf_vfft: ThreadLocal::new(),
+                buf_ivfft: ThreadLocal::new(),
+            },
         }
     }
 
@@ -119,23 +117,25 @@ impl WindowedTimeseries {
         self.data.len() - self.w
     }
 
-    pub fn sliding_dot_product(&self, v: &[f64], fft_data: &FFTData, output: &mut Vec<f64>) {
+    pub fn sliding_dot_product(&self, v: &[f64], output: &mut Vec<f64>) {
         // let n = self.data_fft.len();
         assert!(v.len() == self.w);
 
-        let stride = fft_data.fft_length - self.w;
+        let stride = self.fft_data.fft_length - self.w;
 
         //// Pre-allocate the output
         output.clear();
         output.resize(self.num_subsequences(), 0.0);
 
         //// Get local scratch vectors, to avoid allocations
-        let fft_length = fft_data.fft_length;
-        let mut vfft = fft_data
+        let fft_length = self.fft_data.fft_length;
+        let mut vfft = self
+            .fft_data
             .buf_vfft
             .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
             .borrow_mut();
-        let mut ivfft = fft_data
+        let mut ivfft = self
+            .fft_data
             .buf_ivfft
             .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
             .borrow_mut();
@@ -145,26 +145,26 @@ impl WindowedTimeseries {
         for (i, &x) in v.iter().enumerate() {
             vfft[self.w - i - 1] = Complex { re: x, im: 0.0 };
         }
-        fft_data.fftfun.process(&mut vfft);
+        self.fft_data.fftfun.process(&mut vfft);
 
         //// Iterate over the chunks
-        for (chunk_idx, chunk) in fft_data.fft_chunks.iter().enumerate() {
+        for (chunk_idx, chunk) in self.fft_data.fft_chunks.iter().enumerate() {
             ivfft.fill(Complex::zero());
             //// Then compute the element-wise multiplication between the dot products, inplace
-            for i in 0..fft_data.fft_length {
+            for i in 0..self.fft_data.fft_length {
                 ivfft[i] = vfft[i] * chunk[i];
             }
 
             //// And go back to the time domain
-            fft_data.ifftfun.process(&mut ivfft);
+            self.fft_data.ifftfun.process(&mut ivfft);
 
             //// Copy the values to the output buffer, rescaling on the go (`rustfft`
             //// does not perform normalization automatically)
             let offset = chunk_idx * stride;
-            for i in 0..(fft_data.fft_length - self.w) {
+            for i in 0..(self.fft_data.fft_length - self.w) {
                 if i + offset < self.num_subsequences() {
-                    output[i + offset] = ivfft[(i + v.len() - 1) % fft_data.fft_length].re
-                        / fft_data.fft_length as f64
+                    output[i + offset] = ivfft[(i + v.len() - 1) % self.fft_data.fft_length].re
+                        / self.fft_data.fft_length as f64
                 }
             }
         }
@@ -186,13 +186,8 @@ impl WindowedTimeseries {
     //// This function allows to compute the sliding dot product between the input vector
     //// and the z-normalized subsequences of the time series. Note that the input
     //// is not z-normalized by this function.
-    pub fn znormalized_sliding_dot_product(
-        &self,
-        v: &[f64],
-        fft_data: &FFTData,
-        output: &mut Vec<f64>,
-    ) {
-        self.sliding_dot_product(v, fft_data, output);
+    pub fn znormalized_sliding_dot_product(&self, v: &[f64], output: &mut Vec<f64>) {
+        self.sliding_dot_product(v, output);
         let sumv: f64 = v.iter().sum();
         for i in 0..self.num_subsequences() {
             let m = self.mean(i);
@@ -230,12 +225,12 @@ impl WindowedTimeseries {
         }
     }
 
-    pub fn distance_profile(&self, from: usize, fft_data: &FFTData) -> Vec<f64> {
+    pub fn distance_profile(&self, from: usize) -> Vec<f64> {
         let mut dp = vec![0.0; self.num_subsequences()];
         let mut buf = vec![0.0; self.w];
 
         self.znormalized(from, &mut buf);
-        self.znormalized_sliding_dot_product(&buf, fft_data, &mut dp);
+        self.znormalized_sliding_dot_product(&buf, &mut dp);
 
         for i in 0..self.num_subsequences() {
             if i == from {
@@ -479,7 +474,7 @@ fn rolling_stat_slow(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>) {
     (rolling_avg, rolling_sd)
 }
 
-pub struct FFTData {
+struct FFTData {
     fft_length: usize,
     /// We maintain the fft transform for computing dot products in chunks
     /// of size `fft_length` (or the smallest power of 2 after w, whichever largest), in order to
@@ -506,7 +501,6 @@ mod test {
                 if w < n {
                     println!("n={}, w={}", n, w);
                     let ts = WindowedTimeseries::gen_randomwalk(n, w, 12345);
-                    let fft_data = ts.fft_data();
 
                     let rng = Xoroshiro128Plus::seed_from_u64(12344);
                     let v: Vec<f64> = rng.sample_iter(StandardNormal).take(w).collect();
@@ -514,7 +508,7 @@ mod test {
                     let mut actual = vec![0.0; ts.num_subsequences()];
 
                     ts.sliding_dot_product_slow(&v, &mut expected);
-                    ts.sliding_dot_product(&v, &fft_data, &mut actual);
+                    ts.sliding_dot_product(&v, &mut actual);
                     // dump_vec(format!("/tmp/sliding-expected-{}-{}.txt", n, w), &expected);
                     // dump_vec(format!("/tmp/sliding-actual-{}-{}.txt", n, w), &actual);
 
@@ -547,7 +541,6 @@ mod test {
                 if w < n {
                     println!("n={}, w={}", n, w);
                     let ts = WindowedTimeseries::gen_randomwalk(n, w, 12345);
-                    let fft_data = ts.fft_data();
 
                     let rng = Xoroshiro128Plus::seed_from_u64(12344);
                     let v: Vec<f64> = rng.sample_iter(StandardNormal).take(w).collect();
@@ -555,7 +548,7 @@ mod test {
                     let mut actual = vec![0.0; ts.num_subsequences()];
 
                     ts.znormalized_sliding_dot_product_slow(&v, &mut expected);
-                    ts.znormalized_sliding_dot_product(&v, &fft_data, &mut actual);
+                    ts.znormalized_sliding_dot_product(&v, &mut actual);
                     // dump_vec(format!("/tmp/expected-{}-{}.txt", n, w), &expected);
                     // dump_vec(format!("/tmp/actual-{}-{}.txt", n, w), &actual);
 
@@ -626,9 +619,8 @@ mod test {
         let w = 1000;
         let ts = crate::load::loadts("data/ECG.csv", Some(100000)).expect("problem loading data");
         let ts = WindowedTimeseries::new(ts, w, true);
-        let fft_data = ts.fft_data();
 
-        let actual = ts.distance_profile(0, &fft_data);
+        let actual = ts.distance_profile(0);
         let expected = ts.distance_profile_slow(0, zeucl);
 
         assert_eq!(actual.len(), expected.len());
