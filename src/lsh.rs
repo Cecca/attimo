@@ -412,7 +412,7 @@ impl Hasher {
         seed: u64,
     ) -> f64 {
         let timer = Instant::now();
-        let mut r = 0.25;// 1.0;
+        let mut r = 1.0;
         let mut available = BitVec::<usize>::new();
         available.resize(ts.num_subsequences(), true);
         loop {
