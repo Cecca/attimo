@@ -116,7 +116,6 @@ fn main() -> Result<()> {
         "time_s" => input_elapsed.as_secs_f64()
     );
 
-    let c = 2.0;
     let motifs = motifs(
         &ts,
         config.motifs,

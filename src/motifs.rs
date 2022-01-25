@@ -81,6 +81,21 @@ impl Motif {
         self.elapsed.is_some()
     }
 
+    fn dominates(
+        &self,
+        other: &Self,
+        ts: &WindowedTimeseries,
+        c: f64,
+        exclusion_zone: usize,
+    ) -> bool {
+        let threshold = c * self.distance;
+        (self.overlaps(other, exclusion_zone) && self.distance < other.distance)
+            || zeucl(ts, self.idx_a, other.idx_a) < threshold
+            || zeucl(ts, self.idx_a, other.idx_b) < threshold
+            || zeucl(ts, self.idx_b, other.idx_a) < threshold
+            || zeucl(ts, self.idx_b, other.idx_b) < threshold
+    }
+
     /// Tells whether the two motifs overlap, in order to avoid storing trivial matches
     fn overlaps(&self, other: &Self, exclusion_zone: usize) -> bool {
         let mut idxs = [self.idx_a, self.idx_b, other.idx_a, other.idx_b];
@@ -96,6 +111,9 @@ pub struct Buffer {
     capacity: usize,
     inner: Vec<Motif>,
     sorted: bool,
+    /// The minimum distance we had to discard when truncating the buffer.
+    /// We use this information to check whether we are losing some information
+    min_forgotten_distance: Option<f64>,
 }
 
 impl Buffer {
@@ -104,6 +122,7 @@ impl Buffer {
             capacity,
             inner: Vec::with_capacity(2 * capacity),
             sorted: false,
+            min_forgotten_distance: None,
         }
     }
 
@@ -117,8 +136,14 @@ impl Buffer {
         if self.inner.len() >= 2 * self.capacity {
             self.inner.sort_unstable();
             self.inner.dedup();
+            let trunc_dist = self.inner[self.capacity].distance;
             self.inner.truncate(self.capacity);
             self.sorted = false;
+            self.min_forgotten_distance.replace(
+                self.min_forgotten_distance
+                    .map(|d| std::cmp::min_by(d, trunc_dist, |a, b| a.partial_cmp(b).unwrap()))
+                    .unwrap_or(trunc_dist),
+            );
         }
     }
 
@@ -130,21 +155,34 @@ impl Buffer {
         }
     }
 
-    fn top(&mut self) -> Option<&Motif> {
+    fn top(&mut self) -> Result<Option<&Motif>, f64> {
         self.ensure_sorted();
-        self.inner.last()
+        let m = self.inner.last();
+        if let Some(m) = m {
+            if m.distance >= self.min_forgotten_distance.unwrap_or(f64::INFINITY) {
+                return Err(self.min_forgotten_distance.unwrap());
+            }
+        }
+        Ok(m)
     }
 
-    fn pop(&mut self) -> Option<Motif> {
+    fn pop(&mut self) -> Result<Option<Motif>, f64> {
         self.ensure_sorted();
-        self.inner.pop()
+        let m = self.inner.pop();
+        if let Some(m) = m {
+            if m.distance >= self.min_forgotten_distance.unwrap_or(f64::INFINITY) {
+                return Err(self.min_forgotten_distance.unwrap());
+            }
+        }
+        Ok(m)
     }
 
-    fn merge(&mut self, other: &mut Self) {
-        while let Some(m) = other.pop() {
+    fn merge(&mut self, other: &mut Self) -> Result<(), f64> {
+        while let Some(m) = other.pop()? {
             self.push(m);
         }
         self.sorted = false;
+        Ok(())
     }
 
     fn retain(&mut self, f: impl FnMut(&Motif) -> bool) {
@@ -482,72 +520,43 @@ pub fn motifs(
 
             //// Find out which motifs can be confirmed at this point, and mark the
             //// subsequences they dominate as not available.
-
-            let timer_merge = Instant::now();
             tl_candidates.iter_mut().for_each(|cands| {
-                candidates.merge(&mut cands.borrow_mut());
+                candidates
+                    .merge(&mut cands.borrow_mut())
+                    .expect("We forgot a pair that might be useful now!");
             });
-            pbar.println(format!("Candidates merged in {:?}", timer_merge.elapsed()));
 
-            let mut skip_timer = Instant::now();
-            let mut skip_count = 0;
-
-            candidates.retain(|motif| {
-                if !(available[motif.idx_a] && available[motif.idx_b]) {
-                    skip_count += 1;
-                    return false;
-                }
-                let t = threshold_fn(motif.distance, depth);
-                if rep >= t {
-                    pbar.println(format!("Skipped {} pairs in {:?} ({:.3} pairs/sec)", skip_count, skip_timer.elapsed(), skip_count as f64 / skip_timer.elapsed().as_secs_f64()));
-                    let correlation = 1.0 - motif.distance.powi(2) / (2.0 * ts.w as f64);
-                    info!("output reporting"; "tag" => "output", "distance" => motif.distance, "correlation" => correlation);
-                    pbar.println(format!(
-                        "Found motif at distance {:.4} ({} -- {}, corr {:.4}) after {:?} (depth {} repetition {})",
-                        motif.distance,
-                        motif.idx_a,
-                        motif.idx_b,
-                        correlation,
-                        start.elapsed(),
-                        depth,
-                        rep
-                    ));
-                    // mark all the sequences which are dominated by the motif
-                    for idx in [motif.idx_a, motif.idx_b] {
-                        // mark overlaps
-                        let t = Instant::now();
-                        for i in (idx - exclusion_zone + 1)..(idx + exclusion_zone) {
-                            available.set(i, false);
-                        }
-                        // FIXME: Pre-allocate memory
-                        let dp = ts.distance_profile(idx);
-                        let elapsed_dp = t.elapsed();
-                        pbar.println(format!(" . DP {:?}", elapsed_dp));
-                        let threshold = c * motif.distance;
-                        let mut cnt = 0;
-                        for (i, d) in dp.into_iter().enumerate() {
-                            if d <= threshold {
-                                available.set(i, false);
-                                cnt += 1;
-                            }
-                        }
-                        pbar.println(format!(" . flags {:?}", t.elapsed() - elapsed_dp));
-                        pbar.println(format!(" . inhibited {}", cnt));
+            //// See if there is any pair that can be confirmed at the current repetition,
+            //// that is not dominated by the current solution
+            while let Some(m) = candidates
+                .top()
+                .expect("We forgot a pair that might be useful now!")
+            {
+                if rep >= threshold_fn(m.distance, depth) {
+                    let m = candidates.pop().unwrap().unwrap();
+                    if output
+                        .iter()
+                        .find(|confirmed| confirmed.dominates(&m, ts, c, exclusion_zone))
+                        .is_none()
+                    {
+                        pbar.println(format!(
+                            "Found motif at distance {:.4} ({} -- {}) after {:?} (depth {} repetition {})",
+                            m.distance,
+                            m.idx_a,
+                            m.idx_b,
+                            start.elapsed(),
+                            depth, 
+                            rep
+                        ));
+                        output.push(m);
                     }
-                    output.push(Motif {elapsed: Some(start.elapsed()), ..motif.clone()});
-                    skip_timer = Instant::now();
-                    skip_count = 0;
-                    return false;
+                    if output.len() >= topk {
+                        break;
+                    }
+                } else {
+                    break;
                 }
-                skip_count += 1;
-                true
-            });
-            pbar.println(format!(
-                "Skipped {} pairs in {:?} ({:.3} pairs/sec)",
-                skip_count,
-                skip_timer.elapsed(),
-                skip_count as f64 / skip_timer.elapsed().as_secs_f64()
-            ));
+            }
 
             //// Now we check the stopping condition. If we have seen enough
             //// repetitions to make it unlikely (where _unlikely_ is quantified
@@ -557,7 +566,7 @@ pub fn motifs(
             //// We check the condition even if no update happened, because there is
             //// one more repetition that could have made us pass the threshold.
             // if let Some(m) = top.k_th() {
-            if output.len() == topk {
+            if output.len() >= topk {
                 stop = true;
                 break;
             }
@@ -584,7 +593,10 @@ pub fn motifs(
         //// deeper levels.
         if !stop {
             previous_depth.replace(depth as usize);
-            if let Some(m) = candidates.top() {
+            if let Some(m) = candidates
+                .top()
+                .expect("We forgot a pair that might be useful now!")
+            {
                 let orig_depth = depth;
                 let d = if let Some(max_dist) = max_dist {
                     std::cmp::min_by(max_dist, m.distance, |a, b| a.partial_cmp(b).unwrap())
