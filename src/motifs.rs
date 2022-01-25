@@ -15,6 +15,7 @@ use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
 use std::cell::RefCell;
+use std::ops::Range;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -125,6 +126,7 @@ impl Buffer {
 
     fn truncate(&mut self) {
         if self.inner.len() >= 2 * self.capacity {
+            let t = Instant::now();
             self.inner.sort_unstable();
             self.inner.dedup();
             let trunc_dist = self.inner[self.capacity].distance;
@@ -135,6 +137,7 @@ impl Buffer {
                     .map(|d| std::cmp::min_by(d, trunc_dist, |a, b| a.partial_cmp(b).unwrap()))
                     .unwrap_or(trunc_dist),
             );
+            // info!("truncate"; "distance" => self.min_forgotten_distance.unwrap_or(f64::INFINITY), "time_s" => t.elapsed().as_secs_f64());
         }
     }
 
@@ -168,18 +171,31 @@ impl Buffer {
         Ok(m)
     }
 
-    fn merge(
-        &mut self,
-        other: &mut Self,
-        pred: impl Fn(&Motif) -> bool
-    ) -> Result<(), f64> {
-        while let Some(m) = other.pop()? {
-            if pred(&m) {
-                self.push(m);
+    fn merge(&mut self, other: &mut Self, pred: impl Fn(&Motif) -> bool) {
+        loop {
+            match other.pop() {
+                Ok(Some(m)) => {
+                    if pred(&m) {
+                        self.push(m)
+                    }
+                }
+                Ok(None) => break,
+                Err(d) => {
+                    self.min_forgotten_distance.replace(std::cmp::min_by(
+                        d,
+                        self.min_forgotten_distance.unwrap_or(f64::INFINITY),
+                        |a, b| a.partial_cmp(b).unwrap(),
+                    ));
+                    break;
+                }
             }
         }
+        // while let Some(m) = other.pop()? {
+        //     if pred(&m) {
+        //         self.push(m);
+        //     }
+        // }
         self.sorted = false;
-        Ok(())
     }
 
     fn retain(&mut self, f: impl FnMut(&Motif) -> bool) {
@@ -349,12 +365,94 @@ pub fn motifs(
         PrettyBytes(pools_size)
     );
 
+    let cnt_dist = AtomicUsize::new(0);
+
+    let mut output: Vec<Motif> = Vec::with_capacity(topk);
+
+    info!("tries exploration"; "tag" => "phase");
+    //// This vector holds the (sorted) hashed subsequences, and their index
+    let mut column_buffer = Vec::new();
+    //// This vector holds the boundaries between buckets. We reuse the allocations
+    let mut buckets = Vec::new();
+
+    let mut min_dist = min_dist.clone();
+    while output.len() < topk {
+        match explore_tries(
+            ts,
+            Arc::clone(&pools),
+            &cnt_dist,
+            topk,
+            delta,
+            c,
+            exclusion_zone,
+            min_dist,
+            max_dist,
+            start,
+            &mut output,
+            &mut column_buffer,
+            &mut buckets,
+        ) {
+            Ok(()) => (),
+            Err(forgotten_distance) => {
+                println!("Truncation made us forget distance {} and above, restarting", forgotten_distance);
+                min_dist.replace(forgotten_distance);
+            }
+        }
+    }
+
+    let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
+    let cnt_dist = cnt_dist.load(Ordering::SeqCst);
+    info!("end"; "tag" => "phase");
+    info!("motifs completed";
+        "tag" => "profiling",
+        "time_s" => start.elapsed().as_secs_f64(),
+        "cnt_dist" => cnt_dist,
+        "total_distances" => total_distances,
+        "distances_fraction" => (cnt_dist as f64 / total_distances as f64)
+    );
+    println!(
+        "[{:?}] done! Computed {}/{} distances ({}%)",
+        start.elapsed(),
+        cnt_dist,
+        total_distances,
+        (cnt_dist as f64 / total_distances as f64) * 100.0,
+    );
+    output
+}
+
+fn explore_tries(
+    ts: &WindowedTimeseries,
+    pools: Arc<HashCollection>,
+    cnt_dist: &AtomicUsize,
+    topk: usize,
+    delta: f64,
+    c: f64,
+    exclusion_zone: usize,
+    min_dist: Option<f64>,
+    max_dist: Option<f64>,
+    start: Instant,
+    output: &mut Vec<Motif>,
+    column_buffer: &mut Vec<(HashValue, u32)>,
+    buckets: &mut Vec<Range<usize>>,
+) -> Result<(), f64> {
+    let buffer_capacity = ts.w * topk;
+    println!("Buffer capacity {}", buffer_capacity);
+    let mut candidates = Buffer::new(buffer_capacity);
+
+    let repetitions = pools.hasher.repetitions;
+    let hasher = Arc::clone(&pools.hasher);
+
     //// This function is used in the stopping condition
     let threshold_fn = |d: f64, depth: isize| {
         let p = hasher.collision_probability_at(d);
         ((1.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize
     };
-
+    let overlaps_with_output = |output: &[Motif], m: &Motif| {
+        output
+            .iter()
+            .find(|out| out.overlaps(m, exclusion_zone))
+            .is_some()
+    };
     //// Find the level for which the given distance has a good probability of being
     //// found withing the allowed number of repetitions
     let level_for_distance = |d: f64, mut depth: isize| {
@@ -368,26 +466,18 @@ pub fn motifs(
         depth
     };
 
-    let cnt_dist = AtomicUsize::new(0);
-
-    info!("tries exploration"; "tag" => "phase");
-    let mut candidates = Buffer::new(100000);
-    let mut output: Vec<Motif> = Vec::with_capacity(topk);
-    let overlaps_with_output = |output: &[Motif], m: &Motif| {
-        output.iter().find(|out| out.overlaps(m, exclusion_zone)).is_some()
-    };
-
-    let mut stop = false;
-
-    //// This vector holds the (sorted) hashed subsequences, and their index
-    let mut column_buffer = Vec::new();
-    //// This vector holds the boundaries between buckets. We reuse the allocations
-    let mut buckets = Vec::new();
-
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
-    let mut depth = K as isize;
+    let mut depth = if let Some(min_dist) = min_dist {
+        level_for_distance(min_dist, K as isize)
+    } else {
+        K as isize
+    };
+    println!(
+        "Exploring tries starting from minimum distance {:?} at depth {}",
+        min_dist, depth
+    );
     let mut previous_depth = None;
-    while depth >= 0 && !stop {
+    while depth >= 0 {
         let depth_timer = Instant::now();
         let pbar = ProgressBar::new(repetitions as u64);
         pbar.set_draw_rate(1);
@@ -403,7 +493,7 @@ pub fn motifs(
             let rep_candidate_pairs = AtomicUsize::new(0);
             let rep_timer = Instant::now();
             alloc_cnt!("column_buffer"; {
-                pools.group_subsequences(depth as usize, rep, exclusion_zone, &mut column_buffer, &mut buckets);
+                pools.group_subsequences(depth as usize, rep, exclusion_zone, column_buffer, buckets);
             });
             let snap_subsequences = rep_timer.elapsed();
             let n_buckets = buckets.len();
@@ -417,7 +507,7 @@ pub fn motifs(
             (0..n_buckets / chunk_size)
                 .into_par_iter()
                 .for_each(|chunk_i| {
-                    let tl_candidates = tl_candidates.get_or(|| RefCell::new(Buffer::new(100000)));
+                    let tl_candidates = tl_candidates.get_or(|| RefCell::new(Buffer::new(buffer_capacity)));
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
                         let bucket = &column_buffer[buckets[i].clone()];
                         let bpbar = if bucket.len() > 1000000 {
@@ -501,26 +591,22 @@ pub fn motifs(
             pbar.inc(1);
 
             //// Merge the candidate lists, ignoring the candidates overlapping with the current solution
-            tl_candidates.iter_mut().for_each(|cands| {
-                candidates
-                    .merge(&mut cands.borrow_mut(), |m| 
-                        !overlaps_with_output(&output, m)
-                    )
-                    .expect("We forgot a pair that might be useful now!");
-            });
+            for cands in tl_candidates.iter_mut() {
+                candidates.merge(&mut cands.borrow_mut(), |m| {
+                    !overlaps_with_output(&output, m)
+                });
+            }
 
             //// See if there is any pair that can be confirmed at the current repetition,
             //// that is not dominated by the current solution
-            while let Some(m) = candidates
-                .top()
-                .expect("We forgot a pair that might be useful now!")
-            {
+            while let Some(m) = candidates.top()? {
                 if rep >= threshold_fn(m.distance, depth) {
                     let m = candidates.pop().unwrap().unwrap();
                     if output
                         .iter()
                         .find(|confirmed| confirmed.dominates(&m, ts, c, exclusion_zone))
-                        .is_none() {
+                        .is_none()
+                    {
                         pbar.println(format!(
                             "Found motif at distance {:.4} ({} -- {}) after {:?} (depth {} repetition {})",
                             m.distance,
@@ -550,14 +636,12 @@ pub fn motifs(
             //// one more repetition that could have made us pass the threshold.
             // if let Some(m) = top.k_th() {
             if output.len() >= topk {
-                stop = true;
-                break;
+                return Ok(());
             }
             if let Some(max_dist) = max_dist {
                 let threshold = threshold_fn(max_dist, depth);
                 if rep >= threshold {
-                    stop = true;
-                    break;
+                    return Ok(());
                 }
             }
         }
@@ -574,48 +658,25 @@ pub fn motifs(
         //// it means that we are jumping on a level too low. But this only hurts performance, since it means we
         //// are going to evaluate more pairs, but we will not miss any pair that would have been evaluated at
         //// deeper levels.
-        if !stop {
-            previous_depth.replace(depth as usize);
-            if let Some(m) = candidates
-                .top()
-                .expect("We forgot a pair that might be useful now!")
-            {
-                let orig_depth = depth;
-                let d = if let Some(max_dist) = max_dist {
-                    std::cmp::min_by(max_dist, m.distance, |a, b| a.partial_cmp(b).unwrap())
-                } else {
-                    m.distance
-                };
-                depth = level_for_distance(d, depth);
-                assert!(depth < orig_depth, "we are not making progress in depth");
+        previous_depth.replace(depth as usize);
+        if let Some(m) = candidates
+            .top()
+            .expect("We forgot a pair that might be useful now!")
+        {
+            let orig_depth = depth;
+            let d = if let Some(max_dist) = max_dist {
+                std::cmp::min_by(max_dist, m.distance, |a, b| a.partial_cmp(b).unwrap())
             } else {
-                depth -= 1;
-            }
+                m.distance
+            };
+            depth = level_for_distance(d, depth);
+            assert!(depth < orig_depth, "we are not making progress in depth");
+        } else {
+            depth -= 1;
         }
     }
-    let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
-    let cnt_dist = cnt_dist.load(Ordering::SeqCst);
-    info!("end"; "tag" => "phase");
-    info!("motifs completed";
-        "tag" => "profiling",
-        "time_s" => start.elapsed().as_secs_f64(),
-        "cnt_dist" => cnt_dist,
-        "total_distances" => total_distances,
-        "distances_fraction" => (cnt_dist as f64 / total_distances as f64)
-    );
-    println!(
-        "[{:?}] done! Computed {}/{} distances ({}%)",
-        start.elapsed(),
-        cnt_dist,
-        total_distances,
-        (cnt_dist as f64 / total_distances as f64) * 100.0,
-    );
-    output
+    Ok(())
 }
-
-// fn explore_tries(ts: &WindowedTimeseries, pools: Arc<HashCollection>) {
-
-// }
 
 #[cfg(test)]
 mod test {

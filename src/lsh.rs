@@ -120,7 +120,7 @@ impl<'a, T> UnsafeSlice<'a, T> {
 //// This data structure contains all the information needed to generate the hash values for all the repeititions
 //// for all the subsequences.
 pub struct HashCollection {
-    hasher: Arc<Hasher>,
+    pub hasher: Arc<Hasher>,
     n_subsequences: usize,
     oob: usize,
     // Pools are organized as three dimensional matrices, in C order.
