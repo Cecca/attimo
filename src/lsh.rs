@@ -427,7 +427,14 @@ impl Hasher {
             );
             let mut probe_column = Vec::new();
             let mut probe_buckets = Vec::new();
-            probe_collection.group_subsequences(K, 0, ts.w, &available, &mut probe_column, &mut probe_buckets);
+            probe_collection.group_subsequences(
+                K,
+                0,
+                ts.w,
+                &available,
+                &mut probe_column,
+                &mut probe_buckets,
+            );
             info!("grouped subsequences");
 
             let has_collision = || {

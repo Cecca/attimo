@@ -129,11 +129,13 @@ impl WindowedTimeseries {
 
         //// Get local scratch vectors, to avoid allocations
         let fft_length = self.fft_data.fft_length;
-        let mut vfft = self.fft_data
+        let mut vfft = self
+            .fft_data
             .buf_vfft
             .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
             .borrow_mut();
-        let mut ivfft = self.fft_data
+        let mut ivfft = self
+            .fft_data
             .buf_ivfft
             .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
             .borrow_mut();
@@ -184,11 +186,7 @@ impl WindowedTimeseries {
     //// This function allows to compute the sliding dot product between the input vector
     //// and the z-normalized subsequences of the time series. Note that the input
     //// is not z-normalized by this function.
-    pub fn znormalized_sliding_dot_product(
-        &self,
-        v: &[f64],
-        output: &mut Vec<f64>,
-    ) {
+    pub fn znormalized_sliding_dot_product(&self, v: &[f64], output: &mut Vec<f64>) {
         self.sliding_dot_product(v, output);
         let sumv: f64 = v.iter().sum();
         for i in 0..self.num_subsequences() {
@@ -232,7 +230,7 @@ impl WindowedTimeseries {
         let mut buf = vec![0.0; self.w];
 
         self.znormalized(from, &mut buf);
-        self.znormalized_sliding_dot_product(&buf,&mut dp);
+        self.znormalized_sliding_dot_product(&buf, &mut dp);
 
         for i in 0..self.num_subsequences() {
             dp[i] = (2.0 * self.w as f64 - 2.0 * dp[i]).sqrt();

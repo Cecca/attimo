@@ -10,16 +10,11 @@ use crate::allocator::allocated;
 use crate::distance::*;
 use crate::lsh::*;
 use crate::timeseries::*;
-use crossbeam_channel::IntoIter;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
 use std::cell::RefCell;
-use std::cmp::Reverse;
-use std::collections::BTreeSet;
-use std::collections::BinaryHeap;
-use std::iter::FromIterator;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -77,10 +72,6 @@ impl PartialOrd for Motif {
 //// `exclusion_zone` from each other, then the motifs overlap and one of them
 //// shall be discarded.
 impl Motif {
-    fn is_confirmed(&self) -> bool {
-        self.elapsed.is_some()
-    }
-
     fn dominates(
         &self,
         other: &Self,
@@ -177,9 +168,15 @@ impl Buffer {
         Ok(m)
     }
 
-    fn merge(&mut self, other: &mut Self) -> Result<(), f64> {
+    fn merge(
+        &mut self,
+        other: &mut Self,
+        pred: impl Fn(&Motif) -> bool
+    ) -> Result<(), f64> {
         while let Some(m) = other.pop()? {
-            self.push(m);
+            if pred(&m) {
+                self.push(m);
+            }
         }
         self.sorted = false;
         Ok(())
@@ -257,22 +254,6 @@ impl TopK {
         //// Finally, we ratain only `k` elements
         if self.top.len() > self.k {
             self.top.truncate(self.k);
-        }
-    }
-
-    fn for_each<F: FnMut(&mut Motif)>(&mut self, f: F) {
-        self.top.iter_mut().for_each(f);
-    }
-
-    fn merge(&mut self, other: &Self) {
-        let kth_d = self
-            .k_th()
-            .map(|m| m.distance)
-            .unwrap_or(std::f64::INFINITY);
-        for m in other.top.iter() {
-            if m.distance < kth_d {
-                self.insert(*m);
-            }
         }
     }
 
@@ -390,9 +371,11 @@ pub fn motifs(
     let cnt_dist = AtomicUsize::new(0);
 
     info!("tries exploration"; "tag" => "phase");
-    // let mut top = TopK::new(topk, exclusion_zone);
-    let mut candidates = Buffer::new(10000);
+    let mut candidates = Buffer::new(100000);
     let mut output: Vec<Motif> = Vec::with_capacity(topk);
+    let overlaps_with_output = |output: &[Motif], m: &Motif| {
+        output.iter().find(|out| out.overlaps(m, exclusion_zone)).is_some()
+    };
 
     let mut available = bitvec::vec::BitVec::<usize>::new();
     available.resize(ts.num_subsequences(), true);
@@ -437,7 +420,7 @@ pub fn motifs(
             (0..n_buckets / chunk_size)
                 .into_par_iter()
                 .for_each(|chunk_i| {
-                    let tl_candidates = tl_candidates.get_or(|| RefCell::new(Buffer::new(10000)));
+                    let tl_candidates = tl_candidates.get_or(|| RefCell::new(Buffer::new(100000)));
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
                         let bucket = &column_buffer[buckets[i].clone()];
                         let bpbar = if bucket.len() > 1000000 {
@@ -488,7 +471,9 @@ pub fn motifs(
                                                     elapsed: None,
                                                     collision_probability: p,
                                                 };
-                                                tl_candidates.borrow_mut().push(m);
+                                                if !overlaps_with_output(&output, &m) {
+                                                    tl_candidates.borrow_mut().push(m);
+                                                }
                                             }
                                         }
                                     } else {
@@ -518,11 +503,12 @@ pub fn motifs(
             cnt_dist.fetch_add(rep_cnt_dists.load(Ordering::SeqCst), Ordering::SeqCst);
             pbar.inc(1);
 
-            //// Find out which motifs can be confirmed at this point, and mark the
-            //// subsequences they dominate as not available.
+            //// Merge the candidate lists, ignoring the candidates overlapping with the current solution
             tl_candidates.iter_mut().for_each(|cands| {
                 candidates
-                    .merge(&mut cands.borrow_mut())
+                    .merge(&mut cands.borrow_mut(), |m| 
+                        !overlaps_with_output(&output, m)
+                    )
                     .expect("We forgot a pair that might be useful now!");
             });
 
@@ -537,17 +523,17 @@ pub fn motifs(
                     if output
                         .iter()
                         .find(|confirmed| confirmed.dominates(&m, ts, c, exclusion_zone))
-                        .is_none()
-                    {
+                        .is_none() {
                         pbar.println(format!(
                             "Found motif at distance {:.4} ({} -- {}) after {:?} (depth {} repetition {})",
                             m.distance,
                             m.idx_a,
                             m.idx_b,
                             start.elapsed(),
-                            depth, 
+                            depth,
                             rep
                         ));
+                        candidates.retain(|cand| !cand.overlaps(&m, exclusion_zone));
                         output.push(m);
                     }
                     if output.len() >= topk {
