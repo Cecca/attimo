@@ -135,10 +135,11 @@ get_motif_instances <- function(data_attimo) {
         filter(!str_detect(path, "-\\d+")) %>%
         as_tbl_json(json.column = "motif_pairs") %>%
         gather_array() %>%
-        filter(array.index == 1) %>%
+        # filter(array.index == 1) %>%
         spread_all() %>%
         as_tibble() %>%
-        distinct(path, dataset, window, a, b, dist)
+        rename(motif_idx = array.index) %>%
+        distinct(path, dataset, window, motif_idx, a, b, dist)
 }
 
 plot_scalability_n <- function(plotdata) {
@@ -310,21 +311,21 @@ plot_measures <- function(data_measures) {
 }
 
 plot_motifs <- function(data_motif_occurences) {
-    dat <- data_motif_occurences %>%
-        arrange(dataset, window) %>%
-        group_by(dataset, path, window) %>%
-        slice(1) %>%
-        ungroup()
+    dat <- data_motif_occurences
+    # dat <- data_motif_occurences %>%
+    #     arrange(dataset, window) %>%
+    #     group_by(dataset, path, window) %>%
+    #     slice(1) %>%
+    #     ungroup()
     for (i in seq_len(nrow(dat))) {
-        # print(paste("Plotting motifs for", row$dataset, "with window", row$window))
         row <- as.list(dat[i, ])
         print(str(row))
         corr <- 1 - row$dist^2 / (2 * row$window)
         ts <- read_csv(row$path, col_names = "y") %>% pull()
         a <- ts[row$a:(row$a + row$window - 1)]
         b <- ts[row$b:(row$b + row$window - 1)]
-        # a <- (a - mean(a)) / sd(a)
-        # b <- (b - mean(b)) / sd(b)
+        w <- row$window
+        idx <- row$motif_idx
         plotdata <- tibble(
             a = a,
             b = b,
@@ -348,7 +349,7 @@ plot_motifs <- function(data_motif_occurences) {
                 axis.text.y = element_blank(),
                 axis.title = element_blank()
             )
-        fname <- str_c("imgs/motifs-", row$dataset, "-", row$window, ".png")
+        fname <- str_c("imgs/motifs-", row$dataset, "-w", w, "-m", idx, ".png")
         ggsave(fname, width = 9, height = 1.2, dpi = 300)
     }
 }
@@ -360,7 +361,11 @@ latex_info <- function(data_motif_measures) {
         select(dataset, n, window, label, rc1) %>%
         pivot_wider(names_from = label, values_from = rc1) %>%
         arrange(`$RC_{10}$`) %>%
-        mutate_if(is.numeric, scales::number_format(accuracy = 0.01, big.mark = "\\\\,")) %>%
+        mutate(
+            across(matches("RC"), scales::number_format(accuracy = 0.01, big.mark = "\\\\,")),
+            n = scales::number(n, big.mark = "\\\\,"),
+            window = scales::number(window, big.mark = "\\\\,")
+        ) %>%
         kbl(format = "latex", booktabs = T, linesep = "", align = "lrrrr", escape = F) %>%
         write_file("imgs/dataset-info.tex")
 }
@@ -425,7 +430,7 @@ compute_distance_distibution <- function(data_attimo) {
                     "--window", window,
                     "--path", path,
                     "--output", out,
-                    "--samples", "1000000"
+                    "--samples", "10000000"
                 )
             )
         }
@@ -613,4 +618,102 @@ plot_motifs_10_alt <- function(data_attimo, data_scamp, data_measures) {
         )
 
     bars + scamp + plot_layout(widths = c(5, 1))
+}
+
+plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_distances, data_measures) {
+    bars <- data_attimo %>%
+        inner_join(select(filter(data_scamp, is_full_dataset), dataset, window, time_scamp_s = time_s)) %>%
+        filter(motifs == 10, repetitions == 200) %>%
+        as_tbl_json(json.column = "motif_pairs") %>%
+        gather_array() %>%
+        spread_all() %>%
+        rename(motif_idx = array.index) %>%
+        as_tibble() %>%
+        inner_join(select(data_measures, dataset, window, motif_idx, rc1)) %>%
+        mutate(
+            confirmation_time = as.numeric(confirmation_time),
+            preprocessing = as.numeric(preprocessing)
+        ) %>% # select(dataset, confirmation_time, preprocessing) %>% view()
+        ggplot(aes(y = confirmation_time, x = dist)) +
+        geom_rect(
+            mapping = aes(ymax = preprocessing, ymin = 0),
+            xmin = -Inf,
+            xmax = Inf,
+            fill = "#f78a36",
+            alpha = 0.3,
+            data = function(d) {
+                group_by(d, dataset) %>% slice(1)
+            },
+        ) +
+        geom_point() +
+        scale_y_continuous(limits = c(0, NA)) +
+        scale_x_continuous(position = "top") +
+        facet_wrap(vars(dataset), ncol = 1, scales = "free", strip.position = "left") +
+        labs(
+            x = "distance",
+            y = "time (s)"
+        ) +
+        coord_flip() +
+        theme_paper() +
+        theme(
+            # axis.line.y = element_blank(),
+            # axis.text.y = element_blank(),
+            # axis.title.y = element_blank(),
+            # axis.ticks.y = element_blank(),
+            # panel.grid.major.y = element_line(color = "gray"),
+            # axis.line.x = element_blank(),
+            # axis.text.x = element_blank(),
+            # axis.ticks.x = element_blank(),
+            # panel.spacing = unit(3, "mm")
+        )
+
+    scamp <- data_scamp %>%
+        filter(is_full_dataset) %>%
+        ggplot(aes(x = factor(0), y = factor(0))) +
+        geom_text(
+            aes(label = scales::number(time_s, accuracy = 0.1, suffix = " s")),
+            size = 3,
+            hjust = 0.5
+        ) +
+        facet_wrap(vars(dataset), ncol = 1) +
+        labs(title = "SCAMP") +
+        theme_void() +
+        theme(
+            strip.background = element_blank(),
+            strip.text = element_blank(),
+            plot.title = element_text(hjust = 0.5, size = 9)
+            # plot.margin = unit(0, "mm")
+        )
+
+    # distrs <- data_distances %>%
+    #     ggplot(aes(distance)) +
+    #     geom_density() +
+    #     coord_flip() +
+    #     facet_wrap(vars(dataset), scales = "free", ncol = 1)
+    # theme_void()
+
+    bars + distrs + plot_layout(widths = c(5, 1))
+}
+
+
+plot_distributions <- function(data_measures, data_distances) {
+    data_distances %>%
+        group_by(dataset) %>%
+        slice_min(distance, n = 100) %>%
+        ggplot(aes(distance)) +
+        geom_density() +
+        geom_vline(
+            data = data_measures,
+            mapping = aes(xintercept = dist)
+        ) +
+        # geom_rug(length = unit(0.3, "npc"), color = "red") +
+        facet_wrap(
+            vars(dataset),
+            scales = "free",
+            ncol = 1
+        ) +
+        theme_paper() +
+        theme(
+            strip.text = element_text(hjust = 0)
+        )
 }

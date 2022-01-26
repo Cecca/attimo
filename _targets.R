@@ -91,31 +91,31 @@ list(
         img_motifs_10,
         ggsave(
             "imgs/10-motifs.png",
-            plot = plot_motifs_10_alt(data_attimo, data_scamp, data_measures),
+            plot = plot_motifs_10_alt2(data_attimo, data_scamp, data_distances, data_measures),
             width = 5,
-            height = 4,
+            height = 8,
             dpi = 300
         )
     ),
 
     # Figure profile -------------------------------------------------------
-    tar_target(
-        fig_profile,
-        data_attimo %>%
-            filter(dataset == "HumanY", motifs == 1, repetitions == 100, window == 18000) %>%
-            head(1) %>%
-            plot_profile()
-    ),
-    tar_target(
-        img_profile,
-        ggsave(
-            "imgs/profile.png",
-            plot = fig_profile,
-            width = 10,
-            height = 1.5,
-            dpi = 300
-        )
-    ),
+    # tar_target(
+    #     fig_profile,
+    #     data_attimo %>%
+    #         filter(dataset == "HumanY", motifs == 1, repetitions == 100, window == 18000) %>%
+    #         head(1) %>%
+    #         plot_profile()
+    # ),
+    # tar_target(
+    #     img_profile,
+    #     ggsave(
+    #         "imgs/profile.png",
+    #         plot = fig_profile,
+    #         width = 10,
+    #         height = 1.5,
+    #         dpi = 300
+    #     )
+    # ),
 
     # Figure repetitions ----------------------------------------------------
     tar_target(
