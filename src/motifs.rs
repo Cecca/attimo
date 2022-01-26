@@ -433,7 +433,7 @@ fn explore_tries(
     column_buffer: &mut Vec<(HashValue, u32)>,
     buckets: &mut Vec<Range<usize>>,
 ) -> Result<(), f64> {
-    let buffer_capacity = ts.w * topk;
+    let buffer_capacity = ts.w * topk * 10;
     println!("Buffer capacity {}", buffer_capacity);
     let mut candidates = Buffer::new(buffer_capacity);
 
@@ -669,6 +669,7 @@ fn explore_tries(
                 m.distance
             };
             depth = level_for_distance(d, depth);
+            pbar.println(format!("Next candidate at distance {:.4}, going at depth {}", d, depth));
             assert!(depth < orig_depth, "we are not making progress in depth");
         } else {
             depth -= 1;

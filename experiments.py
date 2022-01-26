@@ -183,7 +183,7 @@ def run_attimo():
     repetitions = 50
     delta = 0.001
     for seed in [14514]: #, 1346, 2524]:
-        for repetitions in [200]:
+        for repetitions in [400]:
         # for repetitions in [50, 75, 100, 200]:
             for motifs in [10]:
                 for dataset, window in datasets:
@@ -236,8 +236,6 @@ def run_attimo():
                     motif_pairs = pd.read_csv('/tmp/motifs.csv', names=['a', 'b','dist', 'confirmation_time']).to_json(orient='records')
                     with open("/tmp/attimo.json") as fp:
                         log = json.dumps([json.loads(l) for l in fp.readlines()])
-                    assert len(motif_pairs) == motifs
-
                     os.remove("/tmp/attimo.json")
                     os.remove("/tmp/motifs.csv")
 
