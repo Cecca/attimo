@@ -599,12 +599,13 @@ fn explore_tries(
             //// that is not dominated by the current solution
             while let Some(m) = candidates.top()? {
                 if rep >= threshold_fn(m.distance, depth) {
-                    let m = candidates.pop().unwrap().unwrap();
+                    let mut m = candidates.pop().unwrap().unwrap();
                     if output
                         .iter()
                         .find(|confirmed| confirmed.dominates(&m, ts, c, exclusion_zone))
                         .is_none()
                     {
+                        m.elapsed.replace(start.elapsed());
                         pbar.println(format!(
                             "Found motif at distance {:.4} ({} -- {}) after {:?} (depth {} repetition {})",
                             m.distance,
