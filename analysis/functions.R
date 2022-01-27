@@ -25,6 +25,10 @@ allowed_combinations <- tibble::tribble(
     "ASTRO", 100
 )
 
+reorder_datasets <- function(df) {
+    mutate(df, dataset = factor(dataset, c("EMG", "freezer", "ASTRO", "GAP", "ECG", "HumanY"), ordered = T))
+}
+
 add_prefix_info <- function(dat) {
     dat %>%
         mutate(
@@ -105,7 +109,8 @@ load_attimo <- function() {
     DBI::dbDisconnect(conn)
     inner_join(table, mem, by = "expid") %>%
         inner_join(dists, by = "expid") %>%
-        inner_join(phases)
+        inner_join(phases) %>%
+        reorder_datasets()
 }
 
 load_scamp <- function() {
@@ -114,7 +119,8 @@ load_scamp <- function() {
         collect() %>%
         add_prefix_info() %>%
         semi_join(allowed_combinations) %>%
-        mutate(algorithm = "scamp")
+        mutate(algorithm = "scamp") %>%
+        reorder_datasets()
     DBI::dbDisconnect(conn)
     tbl
 }
@@ -125,7 +131,8 @@ load_ll <- function() {
         collect() %>%
         add_prefix_info() %>%
         semi_join(allowed_combinations) %>%
-        mutate(algorithm = "ll")
+        mutate(algorithm = "ll") %>%
+        reorder_datasets()
     DBI::dbDisconnect(conn)
     tbl
 }
@@ -140,6 +147,22 @@ get_motif_instances <- function(data_attimo) {
         as_tibble() %>%
         rename(motif_idx = array.index) %>%
         distinct(path, dataset, window, motif_idx, a, b, dist)
+}
+
+get_data_depths <- function(data_attimo) {
+    data_attimo %>%
+        as_tbl_json(json.column = "log") %>%
+        gather_array() %>%
+        spread_all() %>%
+        mutate(ts = lubridate::ymd_hms(ts)) %>%
+        group_by(expid) %>%
+        mutate(start_time = min(ts)) %>%
+        filter(msg == "level completed") %>%
+        as_tibble() %>%
+        select(expid, dataset, window, depth, ts, start_time) %>%
+        mutate(elapsed_s = (ts - start_time) / lubridate::dseconds(1)) %>%
+        group_by(expid, dataset, window, depth) %>%
+        slice_max(elapsed_s)
 }
 
 plot_scalability_n <- function(plotdata) {
@@ -373,7 +396,7 @@ latex_info <- function(data_motif_measures) {
 do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, file_out) {
     bind_rows(
         data_attimo %>%
-            filter(repetitions == 100) %>%
+            filter(repetitions == 200) %>%
             select(
                 algorithm, hostname, dataset, is_full_dataset, threads, window,
                 repetitions, motifs, delta, time_s, distances_fraction
@@ -386,10 +409,9 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, file_out) {
             data_ll, algorithm, hostname, dataset, is_full_dataset, window,
             time_s
         )
-    ) %T>%
-        print(n = 1000) %>%
+    ) %>%
         filter(is_full_dataset) %>%
-        mutate(dataset = str_c(dataset, " (", window, ")")) %>%
+        # mutate(dataset = str_c(dataset, " (", window, ")")) %>%
         mutate(
             time_s = scales::number(time_s, accuracy = 0.1),
             distances_fraction = scales::scientific(
@@ -405,9 +427,8 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, file_out) {
         ) %>%
         select(dataset, algorithm, time_s) %>%
         pivot_wider(names_from = algorithm, values_from = time_s) %>%
+        reorder_datasets() %>%
         arrange(dataset) %>%
-        # drop_na() %>%
-        print() %>%
         kbl(
             format = "latex", booktabs = T, linesep = "", align = "lrrr",
             escape = F,
@@ -416,7 +437,7 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, file_out) {
             performed to find the solution."
         ) %>%
         kable_styling() %>%
-        add_header_above(c("dataset (window) " = 1, "Time (s)" = 3)) %>%
+        add_header_above(c(" " = 1, "Time (s)" = 3)) %>%
         write_file(file_out)
 }
 
@@ -620,7 +641,10 @@ plot_motifs_10_alt <- function(data_attimo, data_scamp, data_measures) {
     bars + scamp + plot_layout(widths = c(5, 1))
 }
 
-plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_distances, data_measures) {
+plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_depths, data_measures) {
+    data_depths <- semi_join(data_depths, data_attimo)
+    print(data_depths)
+    print(distinct(data_attimo, expid))
     bars <- data_attimo %>%
         inner_join(select(filter(data_scamp, is_full_dataset), dataset, window, time_scamp_s = time_s)) %>%
         filter(motifs == 10, repetitions == 200) %>%
@@ -645,9 +669,14 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_distances, data_me
                 group_by(d, dataset) %>% slice(1)
             },
         ) +
+        # geom_hline(
+        #     mapping = aes(yintercept = elapsed_s),
+        #     data = data_depths,
+        #     linetype = "dotted"
+        # ) +
         geom_point() +
         scale_y_continuous(limits = c(0, NA)) +
-        scale_x_continuous(position = "top") +
+        scale_x_continuous(limits = c(NA, NA), position = "top") +
         facet_wrap(vars(dataset), ncol = 1, scales = "free", strip.position = "left") +
         labs(
             x = "distance",
@@ -685,14 +714,7 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_distances, data_me
             # plot.margin = unit(0, "mm")
         )
 
-    # distrs <- data_distances %>%
-    #     ggplot(aes(distance)) +
-    #     geom_density() +
-    #     coord_flip() +
-    #     facet_wrap(vars(dataset), scales = "free", ncol = 1)
-    # theme_void()
-
-    bars + distrs + plot_layout(widths = c(5, 1))
+    scamp + bars + plot_layout(widths = c(1, 5))
 }
 
 

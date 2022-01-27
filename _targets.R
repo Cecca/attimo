@@ -33,6 +33,10 @@ list(
         read_csv("gpucluster.csv") %>% mutate(algorithm = "scamp", hostname = "gpucluster")
     ),
     tar_target(
+        data_depths,
+        get_data_depths(data_attimo)
+    ),
+    tar_target(
         data_measures,
         dataset_measures(data_attimo, data_distances)
     ),
@@ -91,7 +95,7 @@ list(
         img_motifs_10,
         ggsave(
             "imgs/10-motifs.png",
-            plot = plot_motifs_10_alt2(data_attimo, data_scamp, data_distances, data_measures),
+            plot = plot_motifs_10_alt2(data_attimo, data_scamp, data_depths, data_measures),
             width = 5,
             height = 8,
             dpi = 300
