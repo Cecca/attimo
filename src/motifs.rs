@@ -202,8 +202,8 @@ impl std::fmt::Debug for TopK {
         for (i, m) in self.top.iter().enumerate() {
             writeln!(
                 f,
-                "  {} ::: {} -- {}  ({:.4})",
-                i, m.idx_a, m.idx_b, m.distance
+                "  {} ::: {} -- {}  ({:.4}) ({:?})",
+                i, m.idx_a, m.idx_b, m.distance, m.elapsed
             )?;
         }
 
@@ -229,9 +229,16 @@ impl TopK {
     //// and which is also overlapping.
     pub fn insert(&mut self, motif: Motif) {
         let mut i = 0;
-        while i < self.top.len() && self.top[i].distance < motif.distance {
-            //// If this is the case, we don't insert the motif, and return.
+        while i < self.top.len() {
+            if self.top[i].distance >= motif.distance {
+                if motif.overlaps(&self.top[i], self.exclusion_zone) {
+                    //// If this is the case, we don't insert the motif, and return.
+                    return;
+                }
+                break;
+            }
             if motif.overlaps(&self.top[i], self.exclusion_zone) {
+                //// If this is the case, we don't insert the motif, and return.
                 return;
             }
             i += 1;
@@ -255,6 +262,7 @@ impl TopK {
         i += 1;
         while i < self.top.len() {
             if self.top[i].overlaps(&motif, self.exclusion_zone) {
+                assert!(self.top[i].elapsed.is_none());
                 self.top.remove(i);
             } else {
                 i += 1;
@@ -265,6 +273,9 @@ impl TopK {
 
         //// Finally, we retain only `k` elements
         if self.top.len() > self.k {
+            for m in &self.top[self.k..] {
+                assert!(m.elapsed.is_none());
+            }
             self.top.truncate(self.k);
         }
     }
@@ -295,10 +306,18 @@ impl TopK {
     }
 
     pub fn num_confirmed(&self) -> usize {
+        self.confirmed().count()
+    }
+
+    pub fn confirmed(&self) -> impl Iterator<Item=Motif> + '_ {
         self.top
             .iter()
             .filter(|m| m.elapsed.is_some())
-            .count()
+            .map(|m| *m)
+    }
+
+    fn for_each(&mut self, f: impl FnMut(&mut Motif)) {
+        self.top.iter_mut().for_each(f)
     }
 
     pub fn to_vec(&self) -> Vec<Motif> {
@@ -333,7 +352,6 @@ impl TopK {
 pub fn motifs(
     ts: &WindowedTimeseries,
     topk: usize,
-    c: f64,
     repetitions: usize,
     delta: f64,
     max_correlation: Option<f64>,
@@ -386,33 +404,20 @@ pub fn motifs(
     //// This vector holds the boundaries between buckets. We reuse the allocations
     let mut buckets = Vec::new();
 
-    let mut min_dist = min_dist.clone();
-    while output.len() < topk {
-        match explore_tries(
-            ts,
-            Arc::clone(&pools),
-            &cnt_dist,
-            topk,
-            delta,
-            c,
-            exclusion_zone,
-            min_dist,
-            max_dist,
-            start,
-            &mut output,
-            &mut column_buffer,
-            &mut buckets,
-        ) {
-            Ok(()) => (),
-            Err(forgotten_distance) => {
-                println!(
-                    "Truncation made us forget distance {} and above, restarting",
-                    forgotten_distance
-                );
-                min_dist.replace(forgotten_distance);
-            }
-        }
-    }
+    explore_tries(
+        ts,
+        Arc::clone(&pools),
+        &cnt_dist,
+        topk,
+        delta,
+        exclusion_zone,
+        min_dist,
+        max_dist,
+        start,
+        &mut output,
+        &mut column_buffer,
+        &mut buckets,
+    ); 
 
     let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
     let cnt_dist = cnt_dist.load(Ordering::SeqCst);
@@ -440,7 +445,6 @@ fn explore_tries(
     cnt_dist: &AtomicUsize,
     topk: usize,
     delta: f64,
-    c: f64,
     exclusion_zone: usize,
     min_dist: Option<f64>,
     max_dist: Option<f64>,
@@ -448,7 +452,7 @@ fn explore_tries(
     output: &mut TopK,
     column_buffer: &mut Vec<(HashValue, u32)>,
     buckets: &mut Vec<Range<usize>>,
-) -> Result<(), f64> {
+) {
     let mut queues = Vec::with_capacity(ts.num_subsequences());
     for _ in 0..ts.num_subsequences() {
         queues.push(Arc::new(BTreeSet::<(OrderedF64, u32)>::new()));
@@ -595,23 +599,24 @@ fn explore_tries(
             let mindist = output.last_confirmed().map(|m| m.distance).unwrap_or(0.0);
             // println!("Last confirmed at distance {}", mindist);
             queues.for_each_while(mindist, |(d, idx_a, idx_b)| {
-                let th = threshold_fn(d, depth);
-                let elapsed = if th <= rep {
-                    Some(start.elapsed())
-                } else {
-                    None
-                };
-                // pbar.println(format!("Adding motif at d={} (confirmed {})", d, elapsed.is_some()));
+                // let th = threshold_fn(d, depth);
                 output.insert(Motif {
                     idx_a: idx_a as usize,
                     idx_b: idx_b as usize,
                     collision_probability: hasher.collision_probability_at(d),
                     distance: d,
-                    elapsed,
+                    elapsed: None,
                 });
-                th > rep
+                true
             });
-            // println!("{:?}", output);
+
+            output.for_each(|m| {
+                if m.elapsed.is_none() {
+                    if threshold_fn(m.distance, depth) <= rep {
+                        m.elapsed.replace(start.elapsed());
+                    }
+                }
+            });
 
             //// Now we check the stopping condition. If we have seen enough
             //// repetitions to make it unlikely (where _unlikely_ is quantified
@@ -621,12 +626,12 @@ fn explore_tries(
             //// We check the condition even if no update happened, because there is
             //// one more repetition that could have made us pass the threshold.
             if output.num_confirmed() == topk {
-                return Ok(());
+                return;
             }
             if let Some(max_dist) = max_dist {
                 let threshold = threshold_fn(max_dist, depth);
                 if rep >= threshold {
-                    return Ok(());
+                    return;
                 }
             }
         }
@@ -656,12 +661,12 @@ fn explore_tries(
                 "Next candidate at distance {:.4}, going at depth {}",
                 d, depth
             ));
+            pbar.println(format!("{:?}", output));
             assert!(depth < orig_depth, "we are not making progress in depth");
         } else {
             depth -= 1;
         }
     }
-    Ok(())
 }
 
 #[cfg(test)]
