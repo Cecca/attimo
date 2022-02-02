@@ -15,8 +15,6 @@ use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
 use std::cell::RefCell;
-use std::cell::UnsafeCell;
-use std::collections::BTreeSet;
 use std::ops::Range;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -86,21 +84,6 @@ impl PartialOrd for Motif {
 //// `exclusion_zone` from each other, then the motifs overlap and one of them
 //// shall be discarded.
 impl Motif {
-    fn dominates(
-        &self,
-        other: &Self,
-        ts: &WindowedTimeseries,
-        c: f64,
-        exclusion_zone: usize,
-    ) -> bool {
-        let threshold = c * self.distance;
-        (self.overlaps(other, exclusion_zone) && self.distance < other.distance)
-            || zeucl(ts, self.idx_a, other.idx_a) < threshold
-            || zeucl(ts, self.idx_a, other.idx_b) < threshold
-            || zeucl(ts, self.idx_b, other.idx_a) < threshold
-            || zeucl(ts, self.idx_b, other.idx_b) < threshold
-    }
-
     /// Tells whether the two motifs overlap, in order to avoid storing trivial matches
     fn overlaps(&self, other: &Self, exclusion_zone: usize) -> bool {
         let mut idxs = [self.idx_a, self.idx_b, other.idx_a, other.idx_b];
@@ -109,84 +92,6 @@ impl Motif {
         idxs[0] + exclusion_zone > idxs[1]
             || idxs[1] + exclusion_zone > idxs[2]
             || idxs[2] + exclusion_zone > idxs[3]
-    }
-}
-
-/// A collection of topk buffers that allows uncoordinated concurrent access.
-pub struct TopKCollection {
-    n: usize,
-    k: usize,
-    stride: usize,
-    inner: Vec<UnsafeCell<(f64, u32)>>,
-}
-unsafe impl Send for TopKCollection {}
-unsafe impl Sync for TopKCollection {}
-
-impl TopKCollection {
-    fn new(n: usize, k: usize) -> Self {
-        let stride = k;
-        let mut inner = Vec::new();
-        inner.resize_with(n * stride, || (f64::INFINITY, u32::MAX).into());
-        Self {
-            n,
-            k,
-            stride,
-            inner,
-        }
-    }
-
-    unsafe fn insert(&self, i: usize, j: u32, d: f64) {
-        let baseidx = i * self.stride;
-        let slice = &self.inner[baseidx..baseidx + self.k];
-        if d >= (*slice[self.k - 1].get()).0 {
-            // The element does not fit into the top k
-            return;
-        }
-        let mut pos = 0;
-        while pos < self.k {
-            if (*slice[pos].get()).0 > d {
-                // We found the position of insertion
-                break;
-            }
-            pos += 1;
-        }
-        assert!(pos < self.k);
-
-        // Insert the item in position and move the other one position down
-        let tmp: UnsafeCell<(f64, u32)> = (d, j).into();
-        while pos < self.k {
-            slice[pos].get().swap(tmp.get());
-            pos += 1;
-        }
-        debug_assert!(slice.is_sorted_by(|a, b| {
-            let (ad, ai) = *a.get();
-            let (bd, bi) = *b.get();
-            let o = ad.partial_cmp(&bd).unwrap();
-            if o.is_eq() {
-                Some(ai.cmp(&bi))
-            } else {
-                Some(o)
-            }
-        }))
-    }
-
-    fn for_each_while(&self, mindist: f64, mut f: impl FnMut((f64, u32, u32)) -> bool) {
-        for i in 0..self.n {
-            let baseidx = i * self.stride;
-            let slice = &self.inner[baseidx..baseidx + self.k];
-            for pair in slice {
-                // SAFETY: TODO discuss
-                let (d, j) = unsafe { *pair.get() };
-                if !d.is_finite() {
-                    break;
-                }
-                if d.is_finite() && mindist <= d {
-                    if !f((d, i as u32, j)) {
-                        break;
-                    }
-                }
-            }
-        }
     }
 }
 
