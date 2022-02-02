@@ -14,17 +14,14 @@ use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
-use std::cell::RefCell;
 use std::cell::UnsafeCell;
 use std::collections::BTreeSet;
 use std::ops::Range;
-use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
-use thread_local::ThreadLocal;
 
 #[derive(Debug, PartialEq, PartialOrd)]
 struct OrderedF64(f64);
@@ -117,20 +114,22 @@ impl Motif {
 pub struct TopKCollection {
     n: usize,
     k: usize,
+    stride: usize,
     inner: Vec<UnsafeCell<(f64, u32)>>,
 }
 unsafe impl Send for TopKCollection {}
 unsafe impl Sync for TopKCollection {}
 
 impl TopKCollection {
-    pub fn new(n: usize, k: usize) -> Self {
+    fn new(n: usize, k: usize) -> Self {
+        let stride = k;
         let mut inner = Vec::new();
-        inner.resize_with(n * k, || (f64::INFINITY, u32::MAX).into());
-        Self { n, k, inner }
+        inner.resize_with(n * stride, || (f64::INFINITY, u32::MAX).into());
+        Self { n, k, stride, inner }
     }
 
-    pub unsafe fn insert(&self, i: usize, j: u32, d: f64) {
-        let baseidx = i * self.k;
+    unsafe fn insert(&self, i: usize, j: u32, d: f64) {
+        let baseidx = i * self.stride;
         let slice = &self.inner[baseidx..baseidx + self.k];
         if d >= (*slice[self.k - 1].get()).0 {
             // The element does not fit into the top k
@@ -152,7 +151,7 @@ impl TopKCollection {
             slice[pos].get().swap(tmp.get());
             pos += 1;
         }
-        assert!(slice.is_sorted_by(|a, b| {
+        debug_assert!(slice.is_sorted_by(|a, b| {
             let (ad, ai) = *a.get();
             let (bd, bi) = *b.get();
             let o = ad.partial_cmp(&bd).unwrap();
@@ -164,9 +163,9 @@ impl TopKCollection {
         }))
     }
 
-    pub fn for_each_while(&self, mindist: f64, mut f: impl FnMut((f64, u32, u32)) -> bool) {
+    fn for_each_while(&self, mindist: f64, mut f: impl FnMut((f64, u32, u32)) -> bool) {
         for i in 0..self.n {
-            let baseidx = i * self.k;
+            let baseidx = i * self.stride;
             let slice = &self.inner[baseidx..baseidx + self.k];
             for pair in slice {
                 // SAFETY: TODO discuss
@@ -175,26 +174,9 @@ impl TopKCollection {
                     break;
                 }
                 if d.is_finite() && mindist <= d {
-                    f((d, i as u32, j));
-                    // if !f((d, i as u32, j)) {
-                    //     break;
-                    // }
-                } 
-            }
-        }
-    }
-
-    pub fn for_each(&self, mindist: f64, maxdist: f64, mut f: impl FnMut((f64, u32, u32))) {
-        for i in 0..self.n {
-            let baseidx = i * self.k;
-            let slice = &self.inner[baseidx..baseidx + self.k];
-            for pair in slice {
-                // SAFETY: TODO discuss
-                let (d, j) = unsafe { *pair.get() };
-                if d.is_finite() && mindist <= d && d <= maxdist {
-                    f((d, i as u32, j));
-                } else if !d.is_finite() || d > maxdist {
-                    break;
+                    if !f((d, i as u32, j)) {
+                        break;
+                    }
                 }
             }
         }
@@ -218,7 +200,11 @@ pub struct TopK {
 impl std::fmt::Debug for TopK {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (i, m) in self.top.iter().enumerate() {
-            writeln!(f, "  {} ::: {} -- {}  ({:.4})", i, m.idx_a, m.idx_b, m.distance)?;
+            writeln!(
+                f,
+                "  {} ::: {} -- {}  ({:.4})",
+                i, m.idx_a, m.idx_b, m.distance
+            )?;
         }
 
         Ok(())
@@ -277,7 +263,7 @@ impl TopK {
 
         debug_assert!(self.top.is_sorted());
 
-        //// Finally, we ratain only `k` elements
+        //// Finally, we retain only `k` elements
         if self.top.len() > self.k {
             self.top.truncate(self.k);
         }
@@ -298,6 +284,21 @@ impl TopK {
             .filter(|m| m.elapsed.is_none())
             .next()
             .map(|m| *m)
+    }
+
+    pub fn last_confirmed(&self) -> Option<Motif> {
+        self.top
+            .iter()
+            .filter(|m| m.elapsed.is_some())
+            .last()
+            .map(|m| *m)
+    }
+
+    pub fn num_confirmed(&self) -> usize {
+        self.top
+            .iter()
+            .filter(|m| m.elapsed.is_some())
+            .count()
     }
 
     pub fn to_vec(&self) -> Vec<Motif> {
@@ -507,7 +508,6 @@ fn explore_tries(
             let snap_subsequences = rep_timer.elapsed();
             let n_buckets = buckets.len();
 
-
             //// Each thread works on these many buckets at one time, to reduce the
             //// overhead of scheduling.
             let chunk_size = std::cmp::max(1, n_buckets / (4 * rayon::current_num_threads()));
@@ -592,20 +592,23 @@ fn explore_tries(
             pbar.inc(1);
 
             // Add to the output all the new pairs that have been confirmed
-            let mindist = output.k_th().map(|m| m.distance).unwrap_or(0.0);
-            queues.for_each_while(0.0, |(d, idx_a, idx_b)| {
+            let mindist = output.last_confirmed().map(|m| m.distance).unwrap_or(0.0);
+            // println!("Last confirmed at distance {}", mindist);
+            queues.for_each_while(mindist, |(d, idx_a, idx_b)| {
                 let th = threshold_fn(d, depth);
-                // println!("d={:.4} {}", d, th);
-                if th <= rep {
-                    pbar.println(format!("Adding motif at d={}", d));
-                    output.insert(Motif {
-                        idx_a: idx_a as usize,
-                        idx_b: idx_b as usize,
-                        collision_probability: hasher.collision_probability_at(d),
-                        distance: d,
-                        elapsed: None
-                    });
-                }
+                let elapsed = if th <= rep {
+                    Some(start.elapsed())
+                } else {
+                    None
+                };
+                // pbar.println(format!("Adding motif at d={} (confirmed {})", d, elapsed.is_some()));
+                output.insert(Motif {
+                    idx_a: idx_a as usize,
+                    idx_b: idx_b as usize,
+                    collision_probability: hasher.collision_probability_at(d),
+                    distance: d,
+                    elapsed,
+                });
                 th > rep
             });
             // println!("{:?}", output);
@@ -617,8 +620,7 @@ fn explore_tries(
             //// we stop the computation.
             //// We check the condition even if no update happened, because there is
             //// one more repetition that could have made us pass the threshold.
-            // if let Some(m) = top.k_th() {
-            if output.len() >= topk {
+            if output.num_confirmed() == topk {
                 return Ok(());
             }
             if let Some(max_dist) = max_dist {
@@ -642,9 +644,7 @@ fn explore_tries(
         //// are going to evaluate more pairs, but we will not miss any pair that would have been evaluated at
         //// deeper levels.
         previous_depth.replace(depth as usize);
-        if let Some(m) = output
-            .k_th()
-        {
+        if let Some(m) = output.first_not_confirmed() {
             let orig_depth = depth;
             let d = if let Some(max_dist) = max_dist {
                 std::cmp::min_by(max_dist, m.distance, |a, b| a.partial_cmp(b).unwrap())
