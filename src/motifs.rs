@@ -609,6 +609,7 @@ fn explore_tries(
                     if threshold_fn(m.distance, depth) <= rep {
                         m.elapsed.replace(start.elapsed());
                         pbar.println(format!("Confirm {} -- {} @ {:.4} ({:?})", m.idx_a, m.idx_b, m.distance, m.elapsed.unwrap()));
+                        println!("Confirm {} -- {} @ {:.4} ({:?})", m.idx_a, m.idx_b, m.distance, m.elapsed.unwrap());
                     }
                 }
             });
