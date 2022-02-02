@@ -14,6 +14,7 @@ use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
+use std::cell::RefCell;
 use std::cell::UnsafeCell;
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -22,6 +23,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
+use thread_local::ThreadLocal;
 
 #[derive(Debug, PartialEq, PartialOrd)]
 struct OrderedF64(f64);
@@ -125,7 +127,12 @@ impl TopKCollection {
         let stride = k;
         let mut inner = Vec::new();
         inner.resize_with(n * stride, || (f64::INFINITY, u32::MAX).into());
-        Self { n, k, stride, inner }
+        Self {
+            n,
+            k,
+            stride,
+            inner,
+        }
     }
 
     unsafe fn insert(&self, i: usize, j: u32, d: f64) {
@@ -220,10 +227,6 @@ impl TopK {
         }
     }
 
-    fn len(&self) -> usize {
-        self.top.len()
-    }
-
     //// When inserting into the data structure, we first check, in order of distance,
     //// if there is a pair whose defining motif is closer than the one being inserted,
     //// and which is also overlapping.
@@ -280,7 +283,8 @@ impl TopK {
         }
     }
 
-    //// This function is used to access the k-th motif, if we already found it.
+    //// This function is used to access the k-th motif, if
+    //// we already found it, even if not confirmed yet
     pub fn k_th(&self) -> Option<Motif> {
         if self.top.len() == self.k {
             self.top.last().map(|mot| *mot)
@@ -309,11 +313,8 @@ impl TopK {
         self.confirmed().count()
     }
 
-    pub fn confirmed(&self) -> impl Iterator<Item=Motif> + '_ {
-        self.top
-            .iter()
-            .filter(|m| m.elapsed.is_some())
-            .map(|m| *m)
+    pub fn confirmed(&self) -> impl Iterator<Item = Motif> + '_ {
+        self.top.iter().filter(|m| m.elapsed.is_some()).map(|m| *m)
     }
 
     fn for_each(&mut self, f: impl FnMut(&mut Motif)) {
@@ -322,6 +323,12 @@ impl TopK {
 
     pub fn to_vec(&self) -> Vec<Motif> {
         self.top.clone().into_iter().collect()
+    }
+
+    pub fn add_all(&mut self, other: &mut TopK) {
+        for m in other.top.drain(..) {
+            self.insert(m);
+        }
     }
 }
 
@@ -417,7 +424,7 @@ pub fn motifs(
         &mut output,
         &mut column_buffer,
         &mut buckets,
-    ); 
+    );
 
     let total_distances = ts.num_subsequences() * (ts.num_subsequences() - 1) / 2;
     let cnt_dist = cnt_dist.load(Ordering::SeqCst);
@@ -453,11 +460,7 @@ fn explore_tries(
     column_buffer: &mut Vec<(HashValue, u32)>,
     buckets: &mut Vec<Range<usize>>,
 ) {
-    let mut queues = Vec::with_capacity(ts.num_subsequences());
-    for _ in 0..ts.num_subsequences() {
-        queues.push(Arc::new(BTreeSet::<(OrderedF64, u32)>::new()));
-    }
-    let queues = TopKCollection::new(ts.num_subsequences(), topk);
+    let mut tl_top = ThreadLocal::new();
 
     let repetitions = pools.hasher.repetitions;
     let hasher = Arc::clone(&pools.hasher);
@@ -519,6 +522,7 @@ fn explore_tries(
             (0..n_buckets / chunk_size)
                 .into_par_iter()
                 .for_each(|chunk_i| {
+                    let tl_top = tl_top.get_or(|| RefCell::new(TopK::new(topk, exclusion_zone)));
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
                         let bucket = &column_buffer[buckets[i].clone()];
                         let bpbar = if bucket.len() > 1000000 {
@@ -559,13 +563,14 @@ fn explore_tries(
                                             if d.is_finite() && d > min_dist.unwrap_or(-1.0) {
                                                 rep_cnt_dists.fetch_add(1, Ordering::SeqCst);
 
-                                                //// Accesses at queues are non overlapping between threads. This is
-                                                //// because in each repetition any index is given to one and only one
-                                                //// thread. Therefore synchronization is not needed when accessing the
-                                                //// queues array.
-                                                unsafe {
-                                                    queues.insert(a_idx, b_idx as u32, d);
-                                                }
+                                                let m = Motif {
+                                                    idx_a: a_idx as usize,
+                                                    idx_b: b_idx as usize,
+                                                    collision_probability: hasher.collision_probability_at(d),
+                                                    distance: d,
+                                                    elapsed: None,
+                                                };
+                                                tl_top.borrow_mut().insert(m);
                                             }
                                         }
                                     } else {
@@ -595,25 +600,15 @@ fn explore_tries(
             cnt_dist.fetch_add(rep_cnt_dists.load(Ordering::SeqCst), Ordering::SeqCst);
             pbar.inc(1);
 
-            // Add to the output all the new pairs that have been confirmed
-            let mindist = output.last_confirmed().map(|m| m.distance).unwrap_or(0.0);
-            // println!("Last confirmed at distance {}", mindist);
-            queues.for_each_while(mindist, |(d, idx_a, idx_b)| {
-                // let th = threshold_fn(d, depth);
-                output.insert(Motif {
-                    idx_a: idx_a as usize,
-                    idx_b: idx_b as usize,
-                    collision_probability: hasher.collision_probability_at(d),
-                    distance: d,
-                    elapsed: None,
-                });
-                true
-            });
+            // Add to the output all the new top pairs that have been found
+            tl_top.iter_mut().for_each(|top| output.add_all(&mut top.borrow_mut()));
 
+            // Confirm the pairs that can be confirmed in this iteration
             output.for_each(|m| {
                 if m.elapsed.is_none() {
                     if threshold_fn(m.distance, depth) <= rep {
                         m.elapsed.replace(start.elapsed());
+                        pbar.println(format!("Confirm {} -- {} @ {:.4} ({:?})", m.idx_a, m.idx_b, m.distance, m.elapsed.unwrap()));
                     }
                 }
             });
@@ -661,8 +656,6 @@ fn explore_tries(
                 "Next candidate at distance {:.4}, going at depth {}",
                 d, depth
             ));
-            pbar.println(format!("{:?}", output));
-            assert!(depth < orig_depth, "we are not making progress in depth");
         } else {
             depth -= 1;
         }
@@ -689,7 +682,7 @@ mod test {
             let ts: Vec<f64> = loadts("data/ECG-10000.csv", None).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
 
-            let motif = *motifs(&ts, 1, 1.0, 20, 0.001, None, None, 12435)
+            let motif = *motifs(&ts, 1,  20, 0.001, None, None, 12435)
                 .first()
                 .unwrap();
             println!("{}", motif.distance);
@@ -710,7 +703,7 @@ mod test {
             let ts = WindowedTimeseries::new(ts, w, true);
             assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
 
-            let motif = *motifs(&ts, 1, 1.0, 20, 0.001, None, None, 12435)
+            let motif = *motifs(&ts, 1, 20, 0.001, None, None, 12435)
                 .first()
                 .unwrap();
             println!("Motif distance {}", motif.distance);
