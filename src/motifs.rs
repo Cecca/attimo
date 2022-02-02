@@ -656,6 +656,7 @@ fn explore_tries(
                 "Next candidate at distance {:.4}, going at depth {}",
                 d, depth
             ));
+            assert!(depth < orig_depth, "we are not making any progress");
         } else {
             depth -= 1;
         }
