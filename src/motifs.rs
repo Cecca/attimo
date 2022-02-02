@@ -686,7 +686,7 @@ mod test {
             let motif = *motifs(&ts, 1,  20, 0.001, None, None, 12435)
                 .first()
                 .unwrap();
-            println!("{}", motif.distance);
+            println!("{} -- {} actual {} expected {}", motif.idx_a, motif.idx_b, motif.distance, d);
             assert!((motif.idx_a as isize - a as isize).abs() < w as isize);
             assert!((motif.idx_b as isize - b as isize).abs() < w as isize);
             assert!(motif.distance <= d + 0.00001);

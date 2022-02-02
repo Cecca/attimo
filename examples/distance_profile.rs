@@ -38,7 +38,7 @@ fn main() -> Result<()> {
     let ts = WindowedTimeseries::new(loadts(&args.path, None)?, args.window, false);
 
     println!("[{:?}] Computing distance profile", timer.elapsed());
-    let dp = ts.distance_profile(args.from, &ts.fft_data());
+    let dp = ts.distance_profile(args.from);
 
     let thresh = args.threshold.unwrap_or(f64::INFINITY);
 
