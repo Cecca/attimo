@@ -163,7 +163,6 @@ impl TopK {
         i += 1;
         while i < self.top.len() {
             if self.top[i].overlaps(&motif, self.exclusion_zone) {
-                assert!(self.top[i].elapsed.is_none());
                 self.top.remove(i);
             } else {
                 i += 1;
