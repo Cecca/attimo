@@ -15,13 +15,27 @@ use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
 use std::cell::RefCell;
+use std::cell::UnsafeCell;
+use std::collections::BTreeSet;
 use std::ops::Range;
+use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use thread_local::ThreadLocal;
+
+#[derive(Debug, PartialEq, PartialOrd)]
+struct OrderedF64(f64);
+
+impl Eq for OrderedF64 {}
+
+impl Ord for OrderedF64 {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
 
 //// ## Support data structures
 //// ### Motifs
@@ -99,107 +113,91 @@ impl Motif {
     }
 }
 
-pub struct Buffer {
-    capacity: usize,
-    inner: Vec<Motif>,
-    sorted: bool,
-    /// The minimum distance we had to discard when truncating the buffer.
-    /// We use this information to check whether we are losing some information
-    min_forgotten_distance: Option<f64>,
+/// A collection of topk buffers that allows uncoordinated concurrent access.
+pub struct TopKCollection {
+    n: usize,
+    k: usize,
+    inner: Vec<UnsafeCell<(f64, u32)>>,
 }
+unsafe impl Send for TopKCollection {}
+unsafe impl Sync for TopKCollection {}
 
-impl Buffer {
-    fn new(capacity: usize) -> Buffer {
-        Self {
-            capacity,
-            inner: Vec::with_capacity(2 * capacity),
-            sorted: false,
-            min_forgotten_distance: None,
+impl TopKCollection {
+    pub fn new(n: usize, k: usize) -> Self {
+        let mut inner = Vec::new();
+        inner.resize_with(n * k, || (f64::INFINITY, u32::MAX).into());
+        Self { n, k, inner }
+    }
+
+    pub unsafe fn insert(&self, i: usize, j: u32, d: f64) {
+        let baseidx = i * self.k;
+        let slice = &self.inner[baseidx..baseidx + self.k];
+        if d >= (*slice[self.k - 1].get()).0 {
+            // The element does not fit into the top k
+            return;
         }
-    }
-
-    fn push(&mut self, m: Motif) {
-        self.truncate();
-        self.sorted = false;
-        self.inner.push(m);
-    }
-
-    fn truncate(&mut self) {
-        if self.inner.len() >= 2 * self.capacity {
-            self.inner.sort_unstable();
-            self.inner.dedup();
-            let trunc_dist = self.inner[self.capacity].distance;
-            self.inner.truncate(self.capacity);
-            self.sorted = false;
-            self.min_forgotten_distance.replace(
-                self.min_forgotten_distance
-                    .map(|d| std::cmp::min_by(d, trunc_dist, |a, b| a.partial_cmp(b).unwrap()))
-                    .unwrap_or(trunc_dist),
-            );
-        }
-    }
-
-    fn ensure_sorted(&mut self) {
-        if !self.sorted {
-            self.inner.sort_unstable_by(|m1, m2| m1.cmp(m2).reverse());
-            self.inner.dedup();
-            self.sorted = true;
-        }
-    }
-
-    fn top(&mut self) -> Result<Option<&Motif>, f64> {
-        self.ensure_sorted();
-        let m = self.inner.last();
-        if let Some(m) = m {
-            if m.distance >= self.min_forgotten_distance.unwrap_or(f64::INFINITY) {
-                return Err(self.min_forgotten_distance.unwrap());
+        let mut pos = 0;
+        while pos < self.k {
+            if (*slice[pos].get()).0 > d {
+                // We found the position of insertion
+                break;
             }
+            pos += 1;
         }
-        Ok(m)
-    }
+        assert!(pos < self.k);
 
-    fn pop(&mut self) -> Result<Option<Motif>, f64> {
-        self.ensure_sorted();
-        let m = self.inner.pop();
-        if let Some(m) = m {
-            if m.distance >= self.min_forgotten_distance.unwrap_or(f64::INFINITY) {
-                return Err(self.min_forgotten_distance.unwrap());
+        // Insert the item in position and move the other one position down
+        let tmp: UnsafeCell<(f64, u32)> = (d, j).into();
+        while pos < self.k {
+            slice[pos].get().swap(tmp.get());
+            pos += 1;
+        }
+        assert!(slice.is_sorted_by(|a, b| {
+            let (ad, ai) = *a.get();
+            let (bd, bi) = *b.get();
+            let o = ad.partial_cmp(&bd).unwrap();
+            if o.is_eq() {
+                Some(ai.cmp(&bi))
+            } else {
+                Some(o)
             }
-        }
-        Ok(m)
+        }))
     }
 
-    fn merge(&mut self, other: &mut Self, pred: impl Fn(&Motif) -> bool) {
-        loop {
-            match other.pop() {
-                Ok(Some(m)) => {
-                    if pred(&m) {
-                        self.push(m)
-                    }
+    pub fn for_each_while(&self, mindist: f64, mut f: impl FnMut((f64, u32, u32)) -> bool) {
+        for i in 0..self.n {
+            let baseidx = i * self.k;
+            let slice = &self.inner[baseidx..baseidx + self.k];
+            for pair in slice {
+                // SAFETY: TODO discuss
+                let (d, j) = unsafe { *pair.get() };
+                if !d.is_finite() {
+                    break;
                 }
-                Ok(None) => break,
-                Err(d) => {
-                    self.min_forgotten_distance.replace(std::cmp::min_by(
-                        d,
-                        self.min_forgotten_distance.unwrap_or(f64::INFINITY),
-                        |a, b| a.partial_cmp(b).unwrap(),
-                    ));
+                if d.is_finite() && mindist <= d {
+                    f((d, i as u32, j));
+                    // if !f((d, i as u32, j)) {
+                    //     break;
+                    // }
+                } 
+            }
+        }
+    }
+
+    pub fn for_each(&self, mindist: f64, maxdist: f64, mut f: impl FnMut((f64, u32, u32))) {
+        for i in 0..self.n {
+            let baseidx = i * self.k;
+            let slice = &self.inner[baseidx..baseidx + self.k];
+            for pair in slice {
+                // SAFETY: TODO discuss
+                let (d, j) = unsafe { *pair.get() };
+                if d.is_finite() && mindist <= d && d <= maxdist {
+                    f((d, i as u32, j));
+                } else if !d.is_finite() || d > maxdist {
                     break;
                 }
             }
         }
-        // while let Some(m) = other.pop()? {
-        //     if pred(&m) {
-        //         self.push(m);
-        //     }
-        // }
-        self.sorted = false;
-    }
-
-    fn retain(&mut self, f: impl FnMut(&Motif) -> bool) {
-        self.truncate();
-        self.sorted = false;
-        self.inner.retain(f)
     }
 }
 
@@ -217,6 +215,16 @@ pub struct TopK {
     top: Vec<Motif>,
 }
 
+impl std::fmt::Debug for TopK {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, m) in self.top.iter().enumerate() {
+            writeln!(f, "  {} ::: {} -- {}  ({:.4})", i, m.idx_a, m.idx_b, m.distance)?;
+        }
+
+        Ok(())
+    }
+}
+
 impl TopK {
     pub fn new(k: usize, exclusion_zone: usize) -> Self {
         Self {
@@ -224,6 +232,10 @@ impl TopK {
             exclusion_zone,
             top: Vec::new(),
         }
+    }
+
+    fn len(&self) -> usize {
+        self.top.len()
     }
 
     //// When inserting into the data structure, we first check, in order of distance,
@@ -365,7 +377,7 @@ pub fn motifs(
 
     let cnt_dist = AtomicUsize::new(0);
 
-    let mut output: Vec<Motif> = Vec::with_capacity(topk);
+    let mut output = TopK::new(topk, exclusion_zone);
 
     info!("tries exploration"; "tag" => "phase");
     //// This vector holds the (sorted) hashed subsequences, and their index
@@ -392,7 +404,10 @@ pub fn motifs(
         ) {
             Ok(()) => (),
             Err(forgotten_distance) => {
-                println!("Truncation made us forget distance {} and above, restarting", forgotten_distance);
+                println!(
+                    "Truncation made us forget distance {} and above, restarting",
+                    forgotten_distance
+                );
                 min_dist.replace(forgotten_distance);
             }
         }
@@ -415,7 +430,7 @@ pub fn motifs(
         total_distances,
         (cnt_dist as f64 / total_distances as f64) * 100.0,
     );
-    output
+    output.to_vec()
 }
 
 fn explore_tries(
@@ -429,13 +444,15 @@ fn explore_tries(
     min_dist: Option<f64>,
     max_dist: Option<f64>,
     start: Instant,
-    output: &mut Vec<Motif>,
+    output: &mut TopK,
     column_buffer: &mut Vec<(HashValue, u32)>,
     buckets: &mut Vec<Range<usize>>,
 ) -> Result<(), f64> {
-    let buffer_capacity = ts.w * topk * 10;
-    println!("Buffer capacity {}", buffer_capacity);
-    let mut candidates = Buffer::new(buffer_capacity);
+    let mut queues = Vec::with_capacity(ts.num_subsequences());
+    for _ in 0..ts.num_subsequences() {
+        queues.push(Arc::new(BTreeSet::<(OrderedF64, u32)>::new()));
+    }
+    let queues = TopKCollection::new(ts.num_subsequences(), topk);
 
     let repetitions = pools.hasher.repetitions;
     let hasher = Arc::clone(&pools.hasher);
@@ -444,12 +461,6 @@ fn explore_tries(
     let threshold_fn = |d: f64, depth: isize| {
         let p = hasher.collision_probability_at(d);
         ((1.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize
-    };
-    let overlaps_with_output = |output: &[Motif], m: &Motif| {
-        output
-            .iter()
-            .find(|out| out.overlaps(m, exclusion_zone))
-            .is_some()
     };
     //// Find the level for which the given distance has a good probability of being
     //// found withing the allowed number of repetitions
@@ -496,7 +507,6 @@ fn explore_tries(
             let snap_subsequences = rep_timer.elapsed();
             let n_buckets = buckets.len();
 
-            let mut tl_candidates = ThreadLocal::new();
 
             //// Each thread works on these many buckets at one time, to reduce the
             //// overhead of scheduling.
@@ -505,7 +515,6 @@ fn explore_tries(
             (0..n_buckets / chunk_size)
                 .into_par_iter()
                 .for_each(|chunk_i| {
-                    let tl_candidates = tl_candidates.get_or(|| RefCell::new(Buffer::new(buffer_capacity)));
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
                         let bucket = &column_buffer[buckets[i].clone()];
                         let bpbar = if bucket.len() > 1000000 {
@@ -546,18 +555,12 @@ fn explore_tries(
                                             if d.is_finite() && d > min_dist.unwrap_or(-1.0) {
                                                 rep_cnt_dists.fetch_add(1, Ordering::SeqCst);
 
-                                                //// This is the collision probability for this distance
-                                                let p = hasher.collision_probability_at(d);
-
-                                                let m = Motif {
-                                                    idx_a: a_idx,
-                                                    idx_b: b_idx,
-                                                    distance: d,
-                                                    elapsed: None,
-                                                    collision_probability: p,
-                                                };
-                                                if !overlaps_with_output(&output, &m) {
-                                                    tl_candidates.borrow_mut().push(m);
+                                                //// Accesses at queues are non overlapping between threads. This is
+                                                //// because in each repetition any index is given to one and only one
+                                                //// thread. Therefore synchronization is not needed when accessing the
+                                                //// queues array.
+                                                unsafe {
+                                                    queues.insert(a_idx, b_idx as u32, d);
                                                 }
                                             }
                                         }
@@ -588,43 +591,24 @@ fn explore_tries(
             cnt_dist.fetch_add(rep_cnt_dists.load(Ordering::SeqCst), Ordering::SeqCst);
             pbar.inc(1);
 
-            //// Merge the candidate lists, ignoring the candidates overlapping with the current solution
-            for cands in tl_candidates.iter_mut() {
-                candidates.merge(&mut cands.borrow_mut(), |m| {
-                    !overlaps_with_output(&output, m)
-                });
-            }
-
-            //// See if there is any pair that can be confirmed at the current repetition,
-            //// that is not dominated by the current solution
-            while let Some(m) = candidates.top()? {
-                if rep >= threshold_fn(m.distance, depth) {
-                    let mut m = candidates.pop().unwrap().unwrap();
-                    if output
-                        .iter()
-                        .find(|confirmed| confirmed.dominates(&m, ts, c, exclusion_zone))
-                        .is_none()
-                    {
-                        m.elapsed.replace(start.elapsed());
-                        pbar.println(format!(
-                            "Found motif at distance {:.4} ({} -- {}) after {:?} (depth {} repetition {})",
-                            m.distance,
-                            m.idx_a,
-                            m.idx_b,
-                            start.elapsed(),
-                            depth,
-                            rep
-                        ));
-                        candidates.retain(|cand| !cand.overlaps(&m, exclusion_zone));
-                        output.push(m);
-                    }
-                    if output.len() >= topk {
-                        break;
-                    }
-                } else {
-                    break;
+            // Add to the output all the new pairs that have been confirmed
+            let mindist = output.k_th().map(|m| m.distance).unwrap_or(0.0);
+            queues.for_each_while(0.0, |(d, idx_a, idx_b)| {
+                let th = threshold_fn(d, depth);
+                // println!("d={:.4} {}", d, th);
+                if th <= rep {
+                    pbar.println(format!("Adding motif at d={}", d));
+                    output.insert(Motif {
+                        idx_a: idx_a as usize,
+                        idx_b: idx_b as usize,
+                        collision_probability: hasher.collision_probability_at(d),
+                        distance: d,
+                        elapsed: None
+                    });
                 }
-            }
+                th > rep
+            });
+            // println!("{:?}", output);
 
             //// Now we check the stopping condition. If we have seen enough
             //// repetitions to make it unlikely (where _unlikely_ is quantified
@@ -658,9 +642,8 @@ fn explore_tries(
         //// are going to evaluate more pairs, but we will not miss any pair that would have been evaluated at
         //// deeper levels.
         previous_depth.replace(depth as usize);
-        if let Some(m) = candidates
-            .top()
-            .expect("We forgot a pair that might be useful now!")
+        if let Some(m) = output
+            .k_th()
         {
             let orig_depth = depth;
             let d = if let Some(max_dist) = max_dist {
@@ -669,7 +652,10 @@ fn explore_tries(
                 m.distance
             };
             depth = level_for_distance(d, depth);
-            pbar.println(format!("Next candidate at distance {:.4}, going at depth {}", d, depth));
+            pbar.println(format!(
+                "Next candidate at distance {:.4}, going at depth {}",
+                d, depth
+            ));
             assert!(depth < orig_depth, "we are not making progress in depth");
         } else {
             depth -= 1;

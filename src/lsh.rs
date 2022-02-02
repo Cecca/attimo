@@ -115,6 +115,13 @@ impl<'a, T> UnsafeSlice<'a, T> {
         let ptr = self.slice[i].get();
         *ptr = value;
     }
+
+    /// SAFETY: It is UB if two threads write to the same index without
+    /// synchronization.
+    pub unsafe fn update(&self, i: usize, mut f: impl FnMut(*mut T)) {
+        let ptr = self.slice[i].get();
+        f(ptr);
+    }
 }
 
 //// This data structure contains all the information needed to generate the hash values for all the repeititions
