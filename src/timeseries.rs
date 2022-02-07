@@ -26,10 +26,10 @@ impl WindowedTimeseries {
             println!("Computing fast rolling statistics");
             rolling_stat(&ts, w)
         };
-        println!(
-            " . [{:?}] Computed mean and std and squared norms",
-            timer.elapsed()
-        );
+        // println!(
+        //     " . [{:?}] Computed mean and std and squared norms",
+        //     timer.elapsed()
+        // );
 
         slog_scope::info!("stats computation";
             "tag" => "profiling",
