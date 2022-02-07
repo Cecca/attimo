@@ -20,10 +20,10 @@ impl WindowedTimeseries {
 
         //// First we compute rolling statistics
         let (rolling_avg, rolling_sd) = if precise {
-            println!("Compute slow rolling statistics");
+            // println!("Compute slow rolling statistics");
             rolling_stat_slow(&ts, w)
         } else {
-            println!("Computing fast rolling statistics");
+            // println!("Computing fast rolling statistics");
             rolling_stat(&ts, w)
         };
         // println!(

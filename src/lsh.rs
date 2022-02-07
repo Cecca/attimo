@@ -126,6 +126,7 @@ impl<'a, T> UnsafeSlice<'a, T> {
 
 //// This data structure contains all the information needed to generate the hash values for all the repeititions
 //// for all the subsequences.
+#[derive(Clone)]
 pub struct HashCollection {
     pub hasher: Arc<Hasher>,
     n_subsequences: usize,
@@ -354,6 +355,7 @@ impl HashCollection {
 }
 
 /// Data structure to do LSH of subsequences.
+#[derive(Clone)]
 pub struct Hasher {
     pub dimension: usize,
     pub tensor_repetitions: usize,
