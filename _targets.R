@@ -30,7 +30,11 @@ list(
     ),
     tar_target(
         data_gpucluster,
-        read_csv("gpucluster.csv") %>% mutate(algorithm = "scamp", hostname = "gpucluster")
+        read_csv("gpucluster.csv") %>%
+            fix_names() %>%
+            add_prefix_info() %>%
+            mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
+            select(dataset, w, algorithm, time_s)
     ),
     tar_target(
         data_depths,
@@ -87,7 +91,7 @@ list(
     # Time comparison -----------------------------------------------
     tar_target(
         tab_time_comparison,
-        do_tab_time_comparison(data_attimo, data_scamp, data_ll, "imgs/time-comparison.tex")
+        do_tab_time_comparison(data_attimo, data_scamp, data_ll, data_gpucluster, "imgs/time-comparison.tex")
     ),
 
     # Figure motifs 10 -----------------------------------------------------

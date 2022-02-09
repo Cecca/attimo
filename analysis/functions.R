@@ -1,6 +1,9 @@
 theme_paper <- function() {
     theme_classic() +
-        theme(strip.background = element_blank())
+        theme(
+            strip.background = element_blank(),
+            text = element_text(family = "Helvetica")
+        )
 }
 
 dataset_info <- function() {
@@ -11,7 +14,8 @@ dataset_info <- function() {
         "EMG", 543893,
         "HumanY", 26415045,
         "GAP", 2049279,
-        "freezer", 7430755
+        "freezer", 7430755,
+        "Seismic", 100000000
     )
 }
 
@@ -22,17 +26,29 @@ allowed_combinations <- tibble::tribble(
     "EMG", 500,
     "ECG", 1000,
     "freezer", 5000,
-    "ASTRO", 100
+    "ASTRO", 100,
+    "Seismic", 100
 )
 
+fix_names <- function(df) {
+    df %>%
+        mutate(
+            path = dataset,
+            dataset = if_else(str_detect(dataset, "VCAB"), "Seismic", dataset),
+        )
+}
+
 reorder_datasets <- function(df) {
-    mutate(df, dataset = factor(dataset, c("EMG", "freezer", "ASTRO", "GAP", "ECG", "HumanY"), ordered = T))
+    df %>%
+        mutate(
+            dataset = factor(dataset, c("EMG", "freezer", "ASTRO", "GAP", "ECG", "HumanY", "Seismic"), ordered = T)
+        )
 }
 
 add_prefix_info <- function(dat) {
     dat %>%
         mutate(
-            path = dataset,
+            path = if_else(is.na(path), dataset, path),
             dataset = str_remove(dataset, "data/") %>%
                 str_remove("-\\d+") %>%
                 str_remove(".(csv|txt)")
@@ -45,7 +61,8 @@ add_prefix_info <- function(dat) {
                 as.integer(n),
                 prefix
             ),
-            is_full_dataset = !str_detect(path, "-\\d+")
+            is_full_dataset = !str_detect(path, "-\\d+"),
+            is_full_dataset = if_else(dataset == "Seismic", T, is_full_dataset)
         )
 }
 
@@ -54,6 +71,7 @@ load_attimo <- function() {
     table <- tbl(conn, "attimo") %>%
         filter(version == max(version, na.rm = T)) %>%
         collect() %>%
+        fix_names() %>%
         mutate(
             algorithm = "attimo",
             expid = row_number()
@@ -117,8 +135,9 @@ load_scamp <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "scamp") %>%
         collect() %>%
+        fix_names() %>%
         add_prefix_info() %>%
-        semi_join(allowed_combinations) %>%
+        right_join(allowed_combinations) %>%
         mutate(algorithm = "scamp") %>%
         reorder_datasets()
     DBI::dbDisconnect(conn)
@@ -129,6 +148,7 @@ load_ll <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "ll") %>%
         collect() %>%
+        fix_names() %>%
         add_prefix_info() %>%
         semi_join(allowed_combinations) %>%
         mutate(algorithm = "ll") %>%
@@ -393,7 +413,7 @@ latex_info <- function(data_motif_measures) {
         write_file("imgs/dataset-info.tex")
 }
 
-do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, file_out) {
+do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluster, file_out) {
     bind_rows(
         data_attimo %>%
             filter(repetitions == 200) %>%
@@ -408,7 +428,8 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, file_out) {
         select(
             data_ll, algorithm, hostname, dataset, is_full_dataset, window,
             time_s
-        )
+        ),
+        data_gpucluster %>% mutate(is_full_dataset = T)
     ) %>%
         filter(is_full_dataset) %>%
         # mutate(dataset = str_c(dataset, " (", window, ")")) %>%
@@ -444,7 +465,8 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, file_out) {
 compute_distance_distibution <- function(data_attimo) {
     do_compute <- function(dataset, path, window) {
         out <- paste0(path, ".", window, ".dists")
-        if (!file.exists(out)) {
+        if (!file.exists(out) || !file.exists(paste0(out, ".gz"))) {
+            print(paste("Compute", out))
             system2(
                 "target/release/examples/distances",
                 c(
@@ -454,6 +476,9 @@ compute_distance_distibution <- function(data_attimo) {
                     "--samples", "10000000"
                 )
             )
+        }
+        if (file.exists(paste0(out, ".gz"))) {
+            out <- paste0(out, ".gz")
         }
         dat <- readr::read_csv(out) %>%
             mutate(dataset = dataset) %>%
@@ -469,7 +494,7 @@ compute_distance_distibution <- function(data_attimo) {
 
 compute_measures <- function(path, window, idxs) {
     out <- paste0(path, ".", window, ".measures")
-    if (!file.exists(out)) {
+    if (!file.exists(out) || !file.exists(paste0(out, ".gz"))) {
         system2(
             "target/release/examples/measures",
             c(
@@ -479,6 +504,9 @@ compute_measures <- function(path, window, idxs) {
                 idxs
             )
         )
+    }
+    if (file.exists(paste0(out, ".gz"))) {
+        out <- paste0(out, ".gz")
     }
     dat <- readr::read_csv(out) %>%
         mutate(
@@ -643,17 +671,28 @@ plot_motifs_10_alt <- function(data_attimo, data_scamp, data_measures) {
 
 plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_depths, data_measures) {
     data_depths <- semi_join(data_depths, data_attimo)
-    print(data_depths)
-    print(distinct(data_attimo, expid))
     bars <- data_attimo %>%
-        inner_join(select(filter(data_scamp, is_full_dataset), dataset, window, time_scamp_s = time_s)) %>%
-        filter(motifs == 10, repetitions == 200) %>%
+        left_join(select(filter(data_scamp, is_full_dataset), dataset, window, time_scamp_s = time_s)) %>%
+        filter(motifs == 10) %>%
+        filter((repetitions == 200) | (dataset == "Seismic")) %>%
+        # print()
         as_tbl_json(json.column = "motif_pairs") %>%
         gather_array() %>%
         spread_all() %>%
         rename(motif_idx = array.index) %>%
         as_tibble() %>%
-        inner_join(select(data_measures, dataset, window, motif_idx, rc1)) %>%
+        mutate(
+            time_scamp_s_hline = if_else(
+                (time_scamp_s < 1000) & (motif_idx == 1),
+                time_scamp_s,
+                as.double(NA)
+            ),
+            time_scamp_s_label = if_else(
+                time_scamp_s >= 1000 & (motif_idx == 1),
+                time_scamp_s,
+                as.double(NA)
+            )
+        ) %>%
         mutate(
             confirmation_time = as.numeric(confirmation_time),
             preprocessing = as.numeric(preprocessing)
@@ -669,15 +708,42 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_depths, data_measu
                 group_by(d, dataset) %>% slice(1)
             },
         ) +
-        # geom_hline(
-        #     mapping = aes(yintercept = elapsed_s),
-        #     data = data_depths,
-        #     linetype = "dotted"
-        # ) +
         geom_point() +
+        geom_hline(
+            aes(yintercept = time_scamp_s_hline),
+            linetype = "dotted",
+        ) +
+        geom_text(
+            aes(
+                label = scales::number(
+                    time_scamp_s_hline,
+                    accuracy = 1,
+                    prefix = "SCAMP: ",
+                    suffix = " s"
+                ),
+                x = dist,
+                y = time_scamp_s_hline + 10
+            ),
+            hjust = 0,
+            vjust = 0
+        ) +
+        geom_text(
+            aes(
+                label = scales::number(
+                    time_scamp_s_label,
+                    accuracy = 1,
+                    prefix = "SCAMP: ",
+                    suffix = " s →"
+                ),
+                x = dist# * 1.2
+            ),
+            y = 500,
+            hjust = 1,
+            vjust = 0
+        ) +
         scale_y_continuous(limits = c(0, NA)) +
         scale_x_continuous(limits = c(NA, NA), position = "top") +
-        facet_wrap(vars(dataset), ncol = 1, scales = "free", strip.position = "left") +
+        facet_wrap(vars(dataset), ncol = 1, scales = "free_y", strip.position = "left") +
         labs(
             x = "distance",
             y = "time (s)"
@@ -693,28 +759,10 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_depths, data_measu
             # axis.line.x = element_blank(),
             # axis.text.x = element_blank(),
             # axis.ticks.x = element_blank(),
-            # panel.spacing = unit(3, "mm")
+            panel.spacing = unit(5, "mm")
         )
 
-    scamp <- data_scamp %>%
-        filter(is_full_dataset) %>%
-        ggplot(aes(x = factor(0), y = factor(0))) +
-        geom_text(
-            aes(label = scales::number(time_s, accuracy = 0.1, suffix = " s")),
-            size = 3,
-            hjust = 0.5
-        ) +
-        facet_wrap(vars(dataset), ncol = 1) +
-        labs(title = "SCAMP") +
-        theme_void() +
-        theme(
-            strip.background = element_blank(),
-            strip.text = element_blank(),
-            plot.title = element_text(hjust = 0.5, size = 9)
-            # plot.margin = unit(0, "mm")
-        )
-
-    scamp + bars + plot_layout(widths = c(1, 5))
+    bars
 }
 
 
