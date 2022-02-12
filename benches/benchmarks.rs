@@ -198,17 +198,23 @@ pub fn bench_first_collision(c: &mut Criterion) {
         let h = Arc::new(Hasher::new(w, repetitions, 16.0, 12345));
         let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
 
-        c.bench_function(&format!("ops/first_collision/{}/ECG/far", depth), |bencher| {
-            bencher.iter(|| {
-                pools.first_collision(0, 1340, depth);
-            });
-        });
+        c.bench_function(
+            &format!("ops/first_collision/{}/ECG/far", depth),
+            |bencher| {
+                bencher.iter(|| {
+                    pools.first_collision(0, 1340, depth);
+                });
+            },
+        );
 
-        c.bench_function(&format!("ops/first_collision/{}/ECG/close", depth), |bencher| {
-            bencher.iter(|| {
-                pools.first_collision(1172, 6112, depth);
-            });
-        });
+        c.bench_function(
+            &format!("ops/first_collision/{}/ECG/close", depth),
+            |bencher| {
+                bencher.iter(|| {
+                    pools.first_collision(1172, 6112, depth);
+                });
+            },
+        );
 
         let w = 18000;
         let ts = loadts("data/HumanY.txt", Some(1000000)).unwrap();
@@ -217,17 +223,23 @@ pub fn bench_first_collision(c: &mut Criterion) {
         let h = Arc::new(Hasher::new(w, repetitions, 16.0, 12345));
         let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
 
-        c.bench_function(&format!("ops/first_collision/{}/HumanY/far", depth), |bencher| {
-            bencher.iter(|| {
-                pools.first_collision(0, 130040, depth);
-            });
-        });
+        c.bench_function(
+            &format!("ops/first_collision/{}/HumanY/far", depth),
+            |bencher| {
+                bencher.iter(|| {
+                    pools.first_collision(0, 130040, depth);
+                });
+            },
+        );
 
-        c.bench_function(&format!("ops/first_collision/{}/HumanY/close", depth), |bencher| {
-            bencher.iter(|| {
-                pools.first_collision(35154, 56012, depth);
-            });
-        });
+        c.bench_function(
+            &format!("ops/first_collision/{}/HumanY/close", depth),
+            |bencher| {
+                bencher.iter(|| {
+                    pools.first_collision(35154, 56012, depth);
+                });
+            },
+        );
 
         let w = 100;
         let ts = loadts("data/ASTRO.csv", None).unwrap();
@@ -236,17 +248,23 @@ pub fn bench_first_collision(c: &mut Criterion) {
         let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
         let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
 
-        c.bench_function(&format!("ops/first_collision/{}/ASTRO/far", depth), |bencher| {
-            bencher.iter(|| {
-                pools.first_collision(0, 50000, depth);
-            });
-        });
+        c.bench_function(
+            &format!("ops/first_collision/{}/ASTRO/far", depth),
+            |bencher| {
+                bencher.iter(|| {
+                    pools.first_collision(0, 50000, depth);
+                });
+            },
+        );
 
-        c.bench_function(&format!("ops/first_collision/{}/ASTRO/close", depth), |bencher| {
-            bencher.iter(|| {
-                pools.first_collision(609810, 888455, depth);
-            });
-        });
+        c.bench_function(
+            &format!("ops/first_collision/{}/ASTRO/close", depth),
+            |bencher| {
+                bencher.iter(|| {
+                    pools.first_collision(609810, 888455, depth);
+                });
+            },
+        );
     }
 }
 

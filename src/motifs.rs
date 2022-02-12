@@ -23,6 +23,28 @@ use std::time::Duration;
 use std::time::Instant;
 use thread_local::ThreadLocal;
 
+pub enum Repetitions {
+    Exact(usize),
+    Bounded(usize)
+}
+
+impl Repetitions {
+    fn get_upper_bound(&self) -> Option<usize> {
+        match self {
+            Repetitions::Exact(_) => None,
+            Repetitions::Bounded(reps) => Some(*reps),
+        }
+    }
+
+    fn get_exact(&self) -> Option<usize> {
+        match self {
+            Repetitions::Exact(reps) => Some(*reps),
+            Repetitions::Bounded(_) => None,
+        }
+    }
+}
+
+
 #[derive(Debug, PartialEq, PartialOrd)]
 struct OrderedF64(f64);
 
@@ -256,7 +278,7 @@ impl TopK {
 pub fn motifs(
     ts: &WindowedTimeseries,
     topk: usize,
-    repetitions: usize,
+    repetitions: Repetitions,
     delta: f64,
     max_correlation: Option<f64>,
     min_correlation: Option<f64>,
@@ -266,15 +288,6 @@ pub fn motifs(
 
     //// We set the exclusion zone to the motif length, so that motifs cannot overlap at all.
     let exclusion_zone = ts.w;
-    info!("Motifs setup";
-        "topk" => topk,
-        "repetitions" => repetitions,
-        "delta" => delta,
-        "seed" => seed,
-        "max_correlation" => max_correlation,
-        "min_correlation" => min_correlation,
-        "exclusion_zone" => exclusion_zone
-    );
 
     let max_dist = min_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
     let min_dist = max_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
@@ -283,7 +296,13 @@ pub fn motifs(
         min_dist, max_dist
     );
 
-    let hasher_width = Hasher::estimate_width(&ts, topk, min_dist, seed);
+    let (hasher_width, estimated_repetitions) = Hasher::estimate_width(&ts, topk, min_dist, repetitions.get_upper_bound(), seed);
+    let repetitions = if let Some(reps) = repetitions.get_exact() {
+        reps
+    } else {
+        println!("Using automatically estimated repetitions {}", estimated_repetitions.unwrap());
+        estimated_repetitions.unwrap()
+    };
     info!("Computed hasher width"; "hasher_width" => hasher_width);
 
     info!("hash computation"; "tag" => "phase");
@@ -498,14 +517,22 @@ fn explore_tries(
             pbar.inc(1);
 
             // Add to the output all the new top pairs that have been found
-            tl_top.iter_mut().for_each(|top| output.add_all(&mut top.borrow_mut()));
+            tl_top
+                .iter_mut()
+                .for_each(|top| output.add_all(&mut top.borrow_mut()));
 
             // Confirm the pairs that can be confirmed in this iteration
             output.for_each(|m| {
                 if m.elapsed.is_none() {
                     if threshold_fn(m.distance, depth) <= rep {
                         m.elapsed.replace(start.elapsed());
-                        pbar.println(format!("Confirm {} -- {} @ {:.4} ({:?})", m.idx_a, m.idx_b, m.distance, m.elapsed.unwrap()));
+                        pbar.println(format!(
+                            "Confirm {} -- {} @ {:.4} ({:?})",
+                            m.idx_a,
+                            m.idx_b,
+                            m.distance,
+                            m.elapsed.unwrap()
+                        ));
                     }
                 }
             });
@@ -564,7 +591,7 @@ fn explore_tries(
 mod test {
     use crate::{load::loadts, timeseries::WindowedTimeseries};
 
-    use super::motifs;
+    use super::*;
 
     #[test]
     fn test_ecg_10000() {
@@ -580,10 +607,13 @@ mod test {
             let ts: Vec<f64> = loadts("data/ECG-10000.csv", None).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
 
-            let motif = *motifs(&ts, 1,  20, 0.001, None, None, 12435)
+            let motif = *motifs(&ts, 1, Repetitions::Exact(20), 0.001, None, None, 12435)
                 .first()
                 .unwrap();
-            println!("{} -- {} actual {} expected {}", motif.idx_a, motif.idx_b, motif.distance, d);
+            println!(
+                "{} -- {} actual {} expected {}",
+                motif.idx_a, motif.idx_b, motif.distance, d
+            );
             assert!((motif.idx_a as isize - a as isize).abs() < w as isize);
             assert!((motif.idx_b as isize - b as isize).abs() < w as isize);
             assert!(motif.distance <= d + 0.00001);
@@ -601,7 +631,7 @@ mod test {
             let ts = WindowedTimeseries::new(ts, w, true);
             // assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
 
-            let motif = *motifs(&ts, 1, 20, 0.001, None, None, 12435)
+            let motif = *motifs(&ts, 1, Repetitions::Exact(20), 0.001, None, None, 12435)
                 .first()
                 .unwrap();
             println!("Motif distance {}", motif.distance);

@@ -261,7 +261,8 @@ impl WindowedTimeseries {
                         self.mean(i),
                         self.sd(i)
                     ) - dp[i])
-                        .abs() <= 0.0000000001,
+                        .abs()
+                        <= 0.0000000001,
                     "i = {} w = {} dp[i] = {} zdot = {} zeucl = {}",
                     i,
                     self.w,
