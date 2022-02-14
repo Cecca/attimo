@@ -183,7 +183,7 @@ def run_attimo():
     threads = NUM_CPUS
     repetitions = 50
     delta = 0.001
-    for seed in [14514]: #, 1346, 2524]:
+    for seed in [14514, 1346, 2524]:
         # for repetitions in [100]:
         for repetitions in [50, 75, 100]:
             for motifs in [10]:

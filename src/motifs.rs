@@ -301,6 +301,7 @@ pub fn motifs(
         reps
     } else {
         println!("Using automatically estimated repetitions {}", estimated_repetitions.unwrap());
+        info!("Estimated repetitions"; "estimated_repetitions" => estimated_repetitions.unwrap());
         estimated_repetitions.unwrap()
     };
     info!("Computed hasher width"; "hasher_width" => hasher_width);

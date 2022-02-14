@@ -37,6 +37,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
+use std::collections::HashMap;
 use std::ops::Range;
 use std::time::Duration;
 use std::{
@@ -466,7 +467,6 @@ impl Hasher {
                                         });
                                     }
                                     if topk.k_th().is_some() {
-                                        println!("{:#?}", topk.to_vec());
                                         return Some(topk.k_th().unwrap().distance);
                                     }
                                 }
@@ -475,11 +475,10 @@ impl Hasher {
                     }
                 }
                 pair_probing_time += timer.elapsed();
-                println!("{:#?}", topk.to_vec());
                 println!(
                     "Found {} motifs with {} distance computations",
                     topk.to_vec().len(),
-                    cnt_dists
+                    cnt_dists,
                 );
                 return None;
             };
@@ -534,49 +533,66 @@ impl Hasher {
             ((1.0 / 0.001f64).ln() / p.powi(depth as i32)).ceil() as usize
         };
 
-        let costs: Vec<(usize, Duration)> = (3..=K)
-            .map(|prefix| {
-                let timer = Instant::now();
-                probe_collection.group_subsequences(
-                    prefix,
-                    0,
-                    ts.w,
-                    &mut probe_column,
-                    &mut probe_buckets,
-                );
-                let elapsed_repetition_overhead = timer.elapsed();
-                let mut cnt_collisions = 0usize;
-                for bucket in &probe_buckets {
-                    let bucket = &probe_column[bucket.clone()];
-                    for (_, a_idx) in bucket {
-                        for (_, b_idx) in bucket {
-                            if (a_idx + ts.w as u32) < *b_idx {
-                                cnt_collisions += 1;
-                            }
+        let mut estimate_cost = |prefix| {
+            // println!("  Estimate for {}", prefix);
+            let timer = Instant::now();
+            probe_collection.group_subsequences(
+                prefix,
+                0,
+                ts.w,
+                &mut probe_column,
+                &mut probe_buckets,
+            );
+            let elapsed_repetition_overhead = timer.elapsed();
+            let mut cnt_collisions = 0usize;
+            for bucket in &probe_buckets {
+                let bucket = &probe_column[bucket.clone()];
+                for (_, a_idx) in bucket {
+                    // cnt_collisions += bucket.iter().skip_while(|(_, b_idx)| (*a_idx + ts.w as u32) >= *b_idx).count();
+                    for (_, b_idx) in bucket {
+                        if (a_idx + ts.w as u32) < *b_idx {
+                            cnt_collisions += 1;
                         }
                     }
                 }
+            }
+            if cnt_collisions <= u32::MAX as usize {
                 let estimate = cnt_collisions as u32 * per_pair_cost + elapsed_repetition_overhead;
-                (prefix, estimate)
-            })
-            .collect();
+                // println!("    estimate: {:?}", estimate);
+                Some(estimate)
+            } else {
+                println!("    too many collisions: {}", cnt_collisions);
+                None
+            }
+        };
 
-        let cost_for_repetitions = |repetitions| {
+        let mut costs: HashMap<usize, Option<Duration>> = HashMap::new();
+
+        let mut cost_for_repetitions = |repetitions| {
             let mut total_time = Duration::from_secs(0);
-            for (prefix, estimate) in costs.iter().rev() {
-                let threshold = threshold_fn(kth_upper_bound, *prefix as isize);
+            for prefix in (1..=K).rev() {
+                let estimate = costs.entry(prefix).or_insert_with(|| estimate_cost(prefix));
+                if estimate.is_none() {
+                    return None;
+                }
+                let estimate = estimate.unwrap();
+                let threshold = threshold_fn(kth_upper_bound, prefix as isize);
+                // println!("threshold {} bound {}", threshold, kth_upper_bound);
                 if threshold <= repetitions {
-                    total_time += *estimate * threshold as u32;
+                    total_time += estimate * threshold as u32;
                     break;
                 } else {
-                    total_time += *estimate * repetitions as u32;
+                    total_time += estimate * repetitions as u32;
                 }
             }
-            return total_time;
+            // println!(" . Cost for {} repetitions: {:?}", repetitions, total_time);
+            return Some(total_time);
         };
 
         let best_repetitions = (10..max_repetitions)
             .map(|reps| (reps, cost_for_repetitions(reps)))
+            .filter(|pair| pair.1.is_some())
+            .map(|(prefix, estimate)| (prefix, estimate.unwrap()))
             .min_by_key(|pair| pair.1)
             .unwrap();
         println!(
