@@ -29,8 +29,25 @@ list(
         load_ll()
     ),
     tar_target(
+        data_scalability,
+        bind_rows(
+            data_attimo %>%
+                filter(!is.na(perc_size)) %>%
+                select(algorithm, dataset, perc_size, time_s),
+            read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
+                fix_names() %>%
+                add_prefix_info() %>%
+                mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
+                select(algorithm, dataset, perc_size, time_s)
+        )
+    ),
+    tar_target(
         data_gpucluster,
-        read_csv("gpucluster.csv") %>% mutate(algorithm = "scamp", hostname = "gpucluster")
+        read_csv("gpucluster.csv") %>%
+            fix_names() %>%
+            add_prefix_info() %>%
+            mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
+            select(dataset, w, algorithm, time_s)
     ),
     tar_target(
         data_depths,
@@ -51,35 +68,22 @@ list(
     ),
 
     # Figure motifs ------------------------------------------------------------
-    tar_target(
-        imgs_motifs,
-        plot_motifs(data_motif_occurences)
-    ),
+    # tar_target(
+    #     imgs_motifs,
+    #     plot_motifs(data_motif_occurences)
+    # ),
 
     # Figure scalability -------------------------------------------------------
     tar_target(
         fig_scalability_n,
-        bind_rows(
-            select(
-                data_attimo, algorithm, hostname, dataset, prefix, threads, window,
-                repetitions, motifs, delta, time_s
-            ) %>% filter(motifs == 1),
-            select(
-                data_scamp, algorithm, hostname, dataset, prefix,
-                threads, window, time_s
-            ),
-            select(
-                data_ll, algorithm, hostname, dataset, prefix, window,
-                time_s
-            )
-        ) %>% plot_scalability_n()
+        plot_scalability_n_alt(data_scalability)
     ),
     tar_target(
         img_scalability_n,
         ggsave("imgs/scalability_n.png",
             plot = fig_scalability_n,
-            width = 8,
-            height = 4,
+            width = 5,
+            height = 3,
             dpi = 300
         )
     ),
@@ -87,7 +91,7 @@ list(
     # Time comparison -----------------------------------------------
     tar_target(
         tab_time_comparison,
-        do_tab_time_comparison(data_attimo, data_scamp, data_ll, "imgs/time-comparison.tex")
+        do_tab_time_comparison(data_attimo, data_scamp, data_ll, data_gpucluster, "imgs/time-comparison.tex")
     ),
 
     # Figure motifs 10 -----------------------------------------------------
