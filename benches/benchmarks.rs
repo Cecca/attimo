@@ -143,6 +143,48 @@ pub fn bench_sort_usize(c: &mut Criterion) {
     group.finish()
 }
 
+pub fn bench_sort_hashes(c: &mut Criterion) {
+    use rayon::prelude::*;
+    let mut group = c.benchmark_group("sorting hashes");
+    let w = 1000;
+    let repetitions = 1;
+
+    let ts = loadts("data/ECG.csv", None).unwrap();
+    let ts = WindowedTimeseries::new(ts, w, false);
+
+    let h = Arc::new(Hasher::new(w, repetitions, 16.0, 12345));
+    let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
+    let vals: Vec<HashValue> = (0..ts.num_subsequences())
+        .map(|i| pools.hash_value(i, K, 0))
+        .collect();
+
+    group.bench_function("rust unstable sort", |b| {
+        b.iter_batched(
+            || vals.clone(),
+            |mut vals| vals.sort_unstable(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.bench_function("radix sort", |b| {
+        b.iter_batched(
+            || vals.clone(),
+            |mut vals| vals.radix_sort(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.bench_function("rayon sort", |b| {
+        b.iter_batched(
+            || vals.clone(),
+            |mut vals| vals.par_sort_unstable(),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
+    group.finish()
+}
+
 pub fn bench_zdot(c: &mut Criterion) {
     let n = 3000;
     let mut rng = Xoroshiro128Plus::seed_from_u64(342);
@@ -275,6 +317,7 @@ criterion_group!(
     bench_hash_ts,
     // bench_sort_usize,
     // bench_sort_u8,
+    bench_sort_hashes,
     bench_zdot,
     bench_first_collision,
     bench_zeucl

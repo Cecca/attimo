@@ -50,7 +50,7 @@ add_prefix_info <- function(dat) {
         mutate(
             path = if_else(is.na(path), dataset, path),
             dataset = str_remove(dataset, "data/") %>%
-                str_remove("-\\d+") %>%
+                str_remove("-(perc)?\\d+") %>%
                 str_remove(".(csv|txt)")
         ) %>%
         left_join(dataset_info()) %>%
@@ -61,8 +61,9 @@ add_prefix_info <- function(dat) {
                 as.integer(n),
                 prefix
             ),
-            is_full_dataset = !str_detect(path, "-\\d+"),
-            is_full_dataset = if_else(dataset == "Seismic", T, is_full_dataset)
+            perc_size = as.double(str_match(path, "-perc(\\d+)")[, 2]) / 100,
+            is_full_dataset = !str_detect(path, "-(perc)?\\d+")
+            # is_full_dataset = if_else(dataset == "Seismic", T, is_full_dataset)
         )
 }
 
@@ -416,7 +417,7 @@ latex_info <- function(data_motif_measures) {
 do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluster, file_out) {
     bind_rows(
         data_attimo %>%
-            filter(repetitions == 200) %>%
+            filter((repetitions == 200) | (dataset == "Seismic")) %>%
             select(
                 algorithm, hostname, dataset, is_full_dataset, threads, window,
                 repetitions, motifs, delta, time_s, distances_fraction
@@ -450,15 +451,16 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, data_gpuclu
         pivot_wider(names_from = algorithm, values_from = time_s) %>%
         reorder_datasets() %>%
         arrange(dataset) %>%
+        select(dataset, attimo, `scamp-gpu`, scamp, ll) %>%
         kbl(
-            format = "latex", booktabs = T, linesep = "", align = "lrrr",
+            format = "latex", booktabs = T, linesep = "", align = "lrrrr",
             escape = F,
             caption = "Time to find the top motif at different window lengths. For \\our,
             the number in parentheses reports the fraction of distance computations over ${n \\choose 2}$
             performed to find the solution."
         ) %>%
         kable_styling() %>%
-        add_header_above(c(" " = 1, "Time (s)" = 3)) %>%
+        add_header_above(c(" " = 1, "Time (s)" = 4)) %>%
         write_file(file_out)
 }
 
@@ -487,6 +489,7 @@ compute_distance_distibution <- function(data_attimo) {
     }
 
     data_attimo %>%
+        filter(is_full_dataset) %>%
         distinct(path, dataset, window) %>%
         rowwise() %>%
         summarise(do_compute(dataset, path, window))
@@ -735,7 +738,7 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_depths, data_measu
                     prefix = "SCAMP: ",
                     suffix = " s →"
                 ),
-                x = dist# * 1.2
+                x = dist # * 1.2
             ),
             y = 500,
             hjust = 1,
@@ -785,5 +788,66 @@ plot_distributions <- function(data_measures, data_distances) {
         theme_paper() +
         theme(
             strip.text = element_text(hjust = 0)
+        )
+}
+
+plot_scalability_n_alt <- function(data_scalability) {
+    plotdata <- data_scalability %>% filter(dataset == "Seismic")
+
+    speedups <- plotdata %>%
+        pivot_wider(names_from = "algorithm", values_from = "time_s") %>%
+        filter(perc_size > 0.4) %>%
+        mutate(
+            speedup = `scamp-gpu` / attimo,
+            y = (`scamp-gpu` + attimo) / 2
+        )
+
+    ggplot(plotdata, aes(perc_size, time_s, color = algorithm)) +
+        geom_point() +
+        geom_line() +
+        geom_text_repel(
+            aes(label = scales::number(time_s, accuracy = 1)), 
+            show.legend = F,
+            data = function(d) {filter(d, perc_size > 0.4)},
+            size = 3,
+            hjust = 0
+        ) +
+        geom_segment(
+            aes(
+                xend = perc_size,
+                y = attimo,
+                yend = `scamp-gpu`
+            ),
+            color = "black",
+            linetype = "dotted",
+            data = speedups
+        ) +
+        geom_label(
+            aes(
+                y = y,
+                label = scales::number(speedup, prefix = "x", accuracy = 1)
+            ),
+            color = "black",
+            data = speedups,
+            size=3
+        ) +
+        # geom_text_repel(
+        #     aes(label = algorithm), 
+        #     data = function(d){filter(d, perc_size == 1)},
+        #     show.legend = F, 
+        #     direction = 'x',
+        #     hjust = 1
+        #     # nudge_x = 0.2
+        # ) +
+        scale_y_continuous(labels = scales::number_format()) +
+        scale_x_continuous(labels = scales::percent_format()) +
+        scale_color_manual(values = c("#5778a4", "#e49444")) +
+        labs(
+            x = "Size percentage",
+            y = "Total time (s)"
+        ) +
+        theme_paper() +
+        theme(
+            legend.position = c(0.2, 0.8)
         )
 }
