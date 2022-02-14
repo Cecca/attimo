@@ -134,6 +134,9 @@ pub struct HashCollection {
     // The stride in the first dimension is `K * n_subsequences`, and the stride in the
     // second dimension is `K`. In the third dimension, the first `K_HALF` elements
     // are the left pool, the second are the right pool
+    // TODO: More cache-friendly layout. The first index should be the repetition, the second should 
+    // be the index of the subsequence. We should store the left and right hashes in two separate arrays
+    // to pack more data in a cache line, speeding up the
     pools: Vec<u8>,
 }
 
