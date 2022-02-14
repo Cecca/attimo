@@ -20,16 +20,16 @@ impl WindowedTimeseries {
 
         //// First we compute rolling statistics
         let (rolling_avg, rolling_sd) = if precise {
-            println!("Compute slow rolling statistics");
+            // println!("Compute slow rolling statistics");
             rolling_stat_slow(&ts, w)
         } else {
-            println!("Computing fast rolling statistics");
+            // println!("Computing fast rolling statistics");
             rolling_stat(&ts, w)
         };
-        println!(
-            " . [{:?}] Computed mean and std and squared norms",
-            timer.elapsed()
-        );
+        // println!(
+        //     " . [{:?}] Computed mean and std and squared norms",
+        //     timer.elapsed()
+        // );
 
         slog_scope::info!("stats computation";
             "tag" => "profiling",
@@ -261,7 +261,8 @@ impl WindowedTimeseries {
                         self.mean(i),
                         self.sd(i)
                     ) - dp[i])
-                        .abs() <= 0.0000000001,
+                        .abs()
+                        <= 0.0000000001,
                     "i = {} w = {} dp[i] = {} zdot = {} zeucl = {}",
                     i,
                     self.w,

@@ -1,7 +1,9 @@
 use std::cmp::Reverse;
 use std::rc::Rc;
+use std::sync::Arc;
 
-use attimo::distance::zdot;
+use attimo::distance::{zdot, zeucl};
+use attimo::load::loadts;
 use attimo::sort::*;
 use attimo::{lsh::*, timeseries::WindowedTimeseries};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -25,14 +27,13 @@ pub fn bench_construct_ts(c: &mut Criterion) {
     let w = 200;
 
     c.bench_function("construct windowed time series", |b| {
-        b.iter(|| WindowedTimeseries::new(ts.clone(), black_box(w)))
+        b.iter(|| WindowedTimeseries::new(ts.clone(), black_box(w), false))
     });
 }
 
 pub fn bench_sliding_dot_product(c: &mut Criterion) {
     use rand::prelude::*;
     use rand_distr::StandardNormal;
-    use rand_xoshiro::Xoroshiro128Plus;
 
     let mut group = c.benchmark_group("Sliding dot product");
 
@@ -58,12 +59,11 @@ pub fn bench_sliding_dot_product(c: &mut Criterion) {
             &n,
             |b, n| {
                 let ts = WindowedTimeseries::gen_randomwalk(*n, w, 12345);
-                let fft_data = ts.fft_data();
 
                 let rng = Xoroshiro128Plus::seed_from_u64(12344);
                 let v: Vec<f64> = rng.sample_iter(StandardNormal).take(w).collect();
                 let mut output = vec![0.0; ts.num_subsequences()];
-                b.iter(|| ts.sliding_dot_product(&v, &fft_data, &mut output))
+                b.iter(|| ts.sliding_dot_product(&v, &mut output))
             },
         );
     }
@@ -76,16 +76,15 @@ pub fn bench_hash_ts(c: &mut Criterion) {
     group.sample_size(10);
     let w = 500;
     let ts = WindowedTimeseries::gen_randomwalk(1000000, w, 12345);
-    let hasher = Hasher::new(w, 200, 10.0, 12345);
+    let hasher = Arc::new(Hasher::new(w, 200, 10.0, 12345));
     group.bench_function("hash time series", |b| {
-        b.iter(|| HashCollection::from_ts(&ts, &hasher))
+        b.iter(|| HashCollection::from_ts(&ts, Arc::clone(&hasher)))
     });
     group.finish()
 }
 
 pub fn bench_sort_u8(c: &mut Criterion) {
     use rand::prelude::*;
-    use rand_distr::Uniform;
     use rand_xoshiro::Xoshiro256PlusPlus;
 
     let mut group = c.benchmark_group("sorting u8");
@@ -116,7 +115,6 @@ pub fn bench_sort_u8(c: &mut Criterion) {
 
 pub fn bench_sort_usize(c: &mut Criterion) {
     use rand::prelude::*;
-    use rand_distr::Uniform;
     use rand_xoshiro::Xoshiro256PlusPlus;
 
     let mut group = c.benchmark_group("sorting usize");
@@ -145,69 +143,6 @@ pub fn bench_sort_usize(c: &mut Criterion) {
     group.finish()
 }
 
-pub fn bench_sort_hashes(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sorting hashes");
-    let w = 500;
-    let ts = WindowedTimeseries::gen_randomwalk(1000000, w, 12345);
-    let h = Hasher::new(w, 200, 10.0, 12345);
-    let hasher = HashCollection::from_ts(&ts, &h);
-    let hashes: Vec<HashValue> = (0..ts.num_subsequences())
-        .map(|i| hasher.hash_value(i, 0))
-        .collect();
-
-    group.bench_function("rust unstable sort", |b| {
-        b.iter_batched(
-            || hashes.clone(),
-            |mut hashes| hashes.sort_unstable(),
-            criterion::BatchSize::LargeInput,
-        )
-    });
-
-    group.bench_function("radix sort", |b| {
-        b.iter_batched(
-            || hashes.clone(),
-            |mut hashes| hashes.radix_sort(),
-            criterion::BatchSize::LargeInput,
-        )
-    });
-
-    group.finish()
-}
-
-// pub fn bench_sort_uniform_hashes(c: &mut Criterion) {
-//     let mut group = c.benchmark_group("sorting hashes uniform");
-//     let n = 1000000;
-//     let mut rng = Xoroshiro128PlusPlus::seed_from_u64(1234);
-//     let uniform = Uniform::new(i8::MIN, i8::MAX);
-//     let hashes: Vec<HashValue> = (0..n)
-//         .map(|_| {
-//             let mut hashes: [i8; 32] = [0; 32];
-//             for (i, x) in uniform.sample_iter(&mut rng).take(32).enumerate() {
-//                 hashes[i] = x;
-//             }
-//             HashValue { hashes }
-//         })
-//         .collect(); // uniform.sample_iter(&mut rng).take(n).collect();
-
-//     group.bench_function("rust unstable sort", |b| {
-//         b.iter_batched(
-//             || hashes.clone(),
-//             |mut hashes| hashes.sort_unstable(),
-//             criterion::BatchSize::LargeInput,
-//         )
-//     });
-
-//     group.bench_function("radix sort", |b| {
-//         b.iter_batched(
-//             || hashes.clone(),
-//             |mut hashes| hashes.radix_sort(),
-//             criterion::BatchSize::LargeInput,
-//         )
-//     });
-
-//     group.finish()
-// }
-
 pub fn bench_zdot(c: &mut Criterion) {
     let n = 3000;
     let mut rng = Xoroshiro128Plus::seed_from_u64(342);
@@ -229,34 +164,108 @@ pub fn bench_zdot(c: &mut Criterion) {
     });
 }
 
+pub fn bench_zeucl(c: &mut Criterion) {
+    let ts = loadts("data/ECG.csv", Some(10000)).unwrap();
+    let ts = WindowedTimeseries::new(ts, 1000, false);
+
+    c.bench_function("ops/zeucl/ECG", move |bencher| {
+        bencher.iter(|| zeucl(&ts, 0, 1340))
+    });
+
+    let ts = loadts("data/HumanY.txt", Some(1000000)).unwrap();
+    let ts = WindowedTimeseries::new(ts, 18000, false);
+
+    c.bench_function("ops/zeucl/HumanY", move |bencher| {
+        bencher.iter(|| zeucl(&ts, 0, 130040))
+    });
+
+    let ts = loadts("data/ASTRO.csv", None).unwrap();
+    let ts = WindowedTimeseries::new(ts, 100, false);
+
+    c.bench_function("ops/zeucl/ASTRO", move |bencher| {
+        bencher.iter(|| zeucl(&ts, 0, 50000))
+    });
+}
+
 pub fn bench_first_collision(c: &mut Criterion) {
     let repetitions = 200;
-    let depth = 16;
 
-    let w = 300;
-    let ts = WindowedTimeseries::gen_randomwalk(1000000, w, 12345);
+    for depth in [32, 16] {
+        let w = 1000;
+        let ts = loadts("data/ECG.csv", Some(10000)).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, false);
 
-    let h = Hasher::new(w, repetitions, 10.0, 12345);
-    let pools = HashCollection::from_ts(&ts, &h);
-    let mut hash_matrix = pools.get_hash_matrix();
-    hash_matrix.reset_hashes();
+        let h = Arc::new(Hasher::new(w, repetitions, 16.0, 12345));
+        let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
 
-    let mut buckets = hash_matrix.buckets_vec(depth, 0);
-    buckets.sort_by_key(|bucket| Reverse(bucket.0.len()));
-    // Take the largest bucket
-    let bucket = &buckets[0];
-    let bucket: Vec<usize> = bucket.1.iter().map(|(_, i)| *i + bucket.0.start).collect();
-    println!("Bucket with {} elements", bucket.len());
+        c.bench_function(
+            &format!("ops/first_collision/{}/ECG/far", depth),
+            |bencher| {
+                bencher.iter(|| {
+                    pools.first_collision(0, 1340, depth);
+                });
+            },
+        );
 
-    c.bench_function("first collision", move |bencher| {
-        bencher.iter(|| {
-            for i in 0..bucket.len() {
-                for j in i..bucket.len() {
-                    pools.first_collision(i, j, depth);
-                }
-            }
-        });
-    });
+        c.bench_function(
+            &format!("ops/first_collision/{}/ECG/close", depth),
+            |bencher| {
+                bencher.iter(|| {
+                    pools.first_collision(1172, 6112, depth);
+                });
+            },
+        );
+
+        let w = 18000;
+        let ts = loadts("data/HumanY.txt", Some(1000000)).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, false);
+
+        let h = Arc::new(Hasher::new(w, repetitions, 16.0, 12345));
+        let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
+
+        c.bench_function(
+            &format!("ops/first_collision/{}/HumanY/far", depth),
+            |bencher| {
+                bencher.iter(|| {
+                    pools.first_collision(0, 130040, depth);
+                });
+            },
+        );
+
+        c.bench_function(
+            &format!("ops/first_collision/{}/HumanY/close", depth),
+            |bencher| {
+                bencher.iter(|| {
+                    pools.first_collision(35154, 56012, depth);
+                });
+            },
+        );
+
+        let w = 100;
+        let ts = loadts("data/ASTRO.csv", None).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, false);
+
+        let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
+        let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
+
+        c.bench_function(
+            &format!("ops/first_collision/{}/ASTRO/far", depth),
+            |bencher| {
+                bencher.iter(|| {
+                    pools.first_collision(0, 50000, depth);
+                });
+            },
+        );
+
+        c.bench_function(
+            &format!("ops/first_collision/{}/ASTRO/close", depth),
+            |bencher| {
+                bencher.iter(|| {
+                    pools.first_collision(609810, 888455, depth);
+                });
+            },
+        );
+    }
 }
 
 criterion_group!(
@@ -264,11 +273,10 @@ criterion_group!(
     bench_sliding_dot_product,
     bench_construct_ts,
     bench_hash_ts,
-    bench_sort_hashes,
-    bench_sort_uniform_hashes,
-    bench_sort_usize,
-    bench_sort_u8,
+    // bench_sort_usize,
+    // bench_sort_u8,
     bench_zdot,
-    bench_first_collision
+    bench_first_collision,
+    bench_zeucl
 );
 criterion_main!(benches);

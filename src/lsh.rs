@@ -38,6 +38,7 @@ use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
 use std::ops::Range;
+use std::time::Duration;
 use std::{
     cell::{RefCell, UnsafeCell},
     sync::Arc,
@@ -126,6 +127,7 @@ impl<'a, T> UnsafeSlice<'a, T> {
 
 //// This data structure contains all the information needed to generate the hash values for all the repeititions
 //// for all the subsequences.
+#[derive(Clone)]
 pub struct HashCollection {
     pub hasher: Arc<Hasher>,
     n_subsequences: usize,
@@ -357,6 +359,7 @@ impl HashCollection {
 }
 
 /// Data structure to do LSH of subsequences.
+#[derive(Clone)]
 pub struct Hasher {
     pub dimension: usize,
     pub tensor_repetitions: usize,
@@ -415,9 +418,18 @@ impl Hasher {
         ts: &WindowedTimeseries,
         k: usize,
         min_dist: Option<f64>,
+        max_repetitions: Option<usize>,
         seed: u64,
-    ) -> f64 {
+    ) -> (f64, Option<usize>) {
         let timer = Instant::now();
+
+        let mut probe_column = Vec::new();
+        let mut probe_buckets = Vec::new();
+
+        let mut pair_probing_time = Duration::from_secs(0);
+        let mut probed_pairs = 0usize;
+
+        let mut kth_upper_bound = None;
         let mut r = 1.0;
         loop {
             println!("Build probe buckets with r={}", r);
@@ -429,19 +441,12 @@ impl Hasher {
                 "built probe collection";
                 "fraction_oob" => fraction_oob
             );
-            let mut probe_column = Vec::new();
-            let mut probe_buckets = Vec::new();
-            probe_collection.group_subsequences(
-                K,
-                0,
-                ts.w,
-                &mut probe_column,
-                &mut probe_buckets,
-            );
+            probe_collection.group_subsequences(K, 0, ts.w, &mut probe_column, &mut probe_buckets);
             info!("grouped subsequences");
 
-            let has_collision = || {
+            let mut has_collision = || {
                 let mut topk = crate::motifs::TopK::new(k, ts.w);
+                let timer = Instant::now();
                 let mut cnt_dists = 0;
                 for bucket in probe_buckets.iter() {
                     let bucket = &probe_column[bucket.clone()];
@@ -450,12 +455,11 @@ impl Hasher {
                         for (_, b_idx) in bucket.iter() {
                             let b_idx = *b_idx as usize;
                             if a_idx + ts.w < b_idx {
+                                probed_pairs += 1;
                                 if probe_collection.first_collision(a_idx, b_idx, K).is_some() {
                                     let d = crate::distance::zeucl(&ts, a_idx, b_idx);
                                     cnt_dists += 1;
                                     if d > min_dist.unwrap_or(-1.0) {
-                                        // println!("There is a collision at distance {} for quantization width {}", d, r);
-                                        // return true;
                                         topk.insert(Motif {
                                             distance: d,
                                             collision_probability: f64::NAN,
@@ -466,24 +470,28 @@ impl Hasher {
                                     }
                                     if topk.k_th().is_some() {
                                         println!("{:#?}", topk.to_vec());
-                                        return true;
+                                        return Some(topk.k_th().unwrap().distance);
                                     }
                                 }
                             }
                         }
                     }
                 }
+                pair_probing_time += timer.elapsed();
                 println!("{:#?}", topk.to_vec());
                 println!(
                     "Found {} motifs with {} distance computations",
                     topk.to_vec().len(),
                     cnt_dists
                 );
-                return false;
+                return None;
             };
 
-            if has_collision() && fraction_oob < 0.1 {
-                break;
+            if let Some(kth) = has_collision() {
+                if fraction_oob < 0.1 {
+                    kth_upper_bound.replace(kth);
+                    break;
+                }
             } else {
                 r *= 2.0;
             }
@@ -491,7 +499,95 @@ impl Hasher {
         }
         info!("width estimation"; "time_s" => timer.elapsed().as_secs_f64(), "width" => r, "tag" => "profiling");
 
-        return r;
+        let per_pair_cost = std::cmp::max(
+            pair_probing_time / probed_pairs as u32,
+            Duration::from_nanos(200),
+        );
+
+        let estimated_repetitions = max_repetitions.map(|max_repetitions| {
+            Self::estimate_repetitions(
+                ts,
+                kth_upper_bound.unwrap(),
+                r,
+                max_repetitions,
+                seed,
+                per_pair_cost,
+            )
+        });
+
+        return (r, estimated_repetitions);
+    }
+
+    /// Compute an estimate of the number of repetitions that minimizes the total running time
+    fn estimate_repetitions(
+        ts: &WindowedTimeseries,
+        kth_upper_bound: f64,
+        r: f64,
+        max_repetitions: usize,
+        seed: u64,
+        per_pair_cost: Duration,
+    ) -> usize {
+        let mut probe_column = Vec::new();
+        let mut probe_buckets = Vec::new();
+        let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
+        let probe_collection = HashCollection::from_ts(&ts, Arc::clone(&probe_hasher));
+
+        let threshold_fn = |d: f64, depth: isize| {
+            let p = probe_hasher.collision_probability_at(d);
+            ((1.0 / 0.001f64).ln() / p.powi(depth as i32)).ceil() as usize
+        };
+
+        let costs: Vec<(usize, Duration)> = (3..=K)
+            .map(|prefix| {
+                let timer = Instant::now();
+                probe_collection.group_subsequences(
+                    prefix,
+                    0,
+                    ts.w,
+                    &mut probe_column,
+                    &mut probe_buckets,
+                );
+                let elapsed_repetition_overhead = timer.elapsed();
+                let mut cnt_collisions = 0usize;
+                for bucket in &probe_buckets {
+                    let bucket = &probe_column[bucket.clone()];
+                    for (_, a_idx) in bucket {
+                        for (_, b_idx) in bucket {
+                            if (a_idx + ts.w as u32) < *b_idx {
+                                cnt_collisions += 1;
+                            }
+                        }
+                    }
+                }
+                let estimate = cnt_collisions as u32 * per_pair_cost + elapsed_repetition_overhead;
+                (prefix, estimate)
+            })
+            .collect();
+
+        let cost_for_repetitions = |repetitions| {
+            let mut total_time = Duration::from_secs(0);
+            for (prefix, estimate) in costs.iter().rev() {
+                let threshold = threshold_fn(kth_upper_bound, *prefix as isize);
+                if threshold <= repetitions {
+                    total_time += *estimate * threshold as u32;
+                    break;
+                } else {
+                    total_time += *estimate * repetitions as u32;
+                }
+            }
+            return total_time;
+        };
+
+        let best_repetitions = (10..max_repetitions)
+            .map(|reps| (reps, cost_for_repetitions(reps)))
+            .min_by_key(|pair| pair.1)
+            .unwrap();
+        println!(
+            "Best repetitions {} with estimated completion time {:?}",
+            best_repetitions.0, best_repetitions.1
+        );
+
+        best_repetitions.0
     }
 
     fn get_vector(&self, repetition: usize, concat: usize) -> &'_ [f64] {
