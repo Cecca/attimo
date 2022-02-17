@@ -143,12 +143,12 @@ def prefix(path, n):
 
 def get_datasets():
     return [
-        # ("data/ECG.csv", 1000),
-        # ("data/GAP.csv", 600),
-        # ("data/EMG.csv", 500),
-        # ("data/freezer.txt", 5000),
-        # ("data/ASTRO.csv", 100),
-        # ("data/HumanY.txt", 18000),
+        ("data/ECG.csv", 1000),
+        ("data/GAP.csv", 600),
+        ("data/EMG.csv", 500),
+        ("data/freezer.txt", 5000),
+        ("data/ASTRO.csv", 100),
+        ("data/HumanY.txt", 18000),
         (prefix("data/VCAB_BP2_580_days.txt", 100000000), 100)
     ]
 
@@ -184,9 +184,9 @@ def run_attimo():
     repetitions = 50
     delta = 0.001
     for seed in [14514, 1346, 2524]:
-        # for repetitions in [100]:
-        for repetitions in [50, 75, 100]:
-            for motifs in [10]:
+        for repetitions in [100]:
+        # for repetitions in [25, 50, 100]:
+            for motifs in [1]:
                 for dataset, window in datasets:
                     print("==== Looking for", motifs, "in", dataset,
                           "window",window)
