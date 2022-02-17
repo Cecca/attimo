@@ -25,7 +25,7 @@ use thread_local::ThreadLocal;
 
 pub enum Repetitions {
     Exact(usize),
-    Bounded(usize)
+    Bounded(usize),
 }
 
 impl Repetitions {
@@ -43,7 +43,6 @@ impl Repetitions {
         }
     }
 }
-
 
 #[derive(Debug, PartialEq, PartialOrd)]
 struct OrderedF64(f64);
@@ -296,12 +295,15 @@ pub fn motifs(
         min_dist, max_dist
     );
 
-    let (hasher_width, estimated_repetitions) = Hasher::estimate_width(&ts, topk, min_dist, repetitions.get_upper_bound(), seed);
+    let (hasher_width, estimated_repetitions) =
+        Hasher::estimate_width(&ts, topk, min_dist, repetitions.get_upper_bound(), seed);
     let repetitions = if let Some(reps) = repetitions.get_exact() {
         reps
     } else {
-        println!("Using automatically estimated repetitions {}", estimated_repetitions.unwrap());
-        info!("Estimated repetitions"; "estimated_repetitions" => estimated_repetitions.unwrap());
+        println!(
+            "Using automatically estimated repetitions {}",
+            estimated_repetitions.unwrap()
+        );
         estimated_repetitions.unwrap()
     };
     info!("Computed hasher width"; "hasher_width" => hasher_width);
@@ -382,22 +384,35 @@ fn explore_tries(
     let repetitions = pools.hasher.repetitions;
     let hasher = Arc::clone(&pools.hasher);
 
-    //// This function is used in the stopping condition
-    let threshold_fn = |d: f64, depth: isize| {
-        let p = hasher.collision_probability_at(d);
-        ((1.0 / delta).ln() / p.powi(depth as i32)).ceil() as usize
+    let stopping_condition = |d: f64, prefix: isize, previous: Option<usize>, repetition: usize| {
+        // the repetitions start from 0, but in the calculation we need them to start form 1
+        let repetition = repetition + 1;
+        if prefix == K as isize {
+            (1.0 - hasher.collision_probability_at(d).powi(prefix as i32)).powi(repetition as i32)
+                <= delta
+        } else if let Some(previous) = previous {
+            let cur = (1.0 - hasher.collision_probability_at(d).powi(prefix as i32))
+                .powi(repetition as i32);
+            let prev = (1.0 - hasher.collision_probability_at(d).powi(previous as i32))
+                .powi((repetitions - repetition) as i32);
+            cur * prev <= delta
+        } else {
+            panic!()
+        }
     };
     //// Find the level for which the given distance has a good probability of being
     //// found withing the allowed number of repetitions
-    let level_for_distance = |d: f64, mut depth: isize| {
-        while depth >= 0 {
-            let threshold = threshold_fn(d, depth);
-            if threshold < repetitions {
-                break;
+    let level_for_distance = |d: f64, mut prefix: isize| {
+        let initial = prefix as usize;
+        while prefix >= 0 {
+            for rep in 0..repetitions {
+                if stopping_condition(d, prefix, Some(initial), rep) {
+                    return prefix;
+                }
             }
-            depth -= 1;
+            prefix -= 1;
         }
-        depth
+        panic!()
     };
 
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
@@ -525,7 +540,7 @@ fn explore_tries(
             // Confirm the pairs that can be confirmed in this iteration
             output.for_each(|m| {
                 if m.elapsed.is_none() {
-                    if threshold_fn(m.distance, depth) <= rep {
+                    if stopping_condition(m.distance, depth, previous_depth, rep) {
                         m.elapsed.replace(start.elapsed());
                         pbar.println(format!(
                             "Confirm {} -- {} @ {:.4} ({:?})",
@@ -549,8 +564,7 @@ fn explore_tries(
                 return;
             }
             if let Some(max_dist) = max_dist {
-                let threshold = threshold_fn(max_dist, depth);
-                if rep >= threshold {
+                if stopping_condition(max_dist, depth, previous_depth, rep) {
                     return;
                 }
             }

@@ -101,7 +101,7 @@ list(
             "imgs/10-motifs.png",
             plot = plot_motifs_10_alt2(data_attimo, data_scamp, data_depths, data_measures),
             width = 5,
-            height = 8,
+            height = 6,
             dpi = 300
         )
     ),
@@ -135,8 +135,8 @@ list(
         ggsave(
             "imgs/repetitions.png",
             plot = fig_repetitions,
-            width = 5,
-            height = 5,
+            width = 10,
+            height = 1.7,
             dpi = 300
         )
     ),

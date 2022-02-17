@@ -41,7 +41,7 @@ fix_names <- function(df) {
 reorder_datasets <- function(df) {
     df %>%
         mutate(
-            dataset = factor(dataset, c("EMG", "freezer", "ASTRO", "GAP", "ECG", "HumanY", "Seismic"), ordered = T)
+            dataset = factor(dataset, c("EMG", "freezer", "ASTRO", "GAP", "Seismic", "ECG", "HumanY"), ordered = T)
         )
 }
 
@@ -62,8 +62,8 @@ add_prefix_info <- function(dat) {
                 prefix
             ),
             perc_size = as.double(str_match(path, "-perc(\\d+)")[, 2]) / 100,
-            is_full_dataset = !str_detect(path, "-(perc)?\\d+")
-            # is_full_dataset = if_else(dataset == "Seismic", T, is_full_dataset)
+            is_full_dataset = !str_detect(path, "-(perc)?\\d+"),
+            is_full_dataset = if_else(path == "data/VCAB_BP2_580_days-100000000.txt", T, is_full_dataset)
         )
 }
 
@@ -433,7 +433,6 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, data_gpuclu
         data_gpucluster %>% mutate(is_full_dataset = T)
     ) %>%
         filter(is_full_dataset) %>%
-        # mutate(dataset = str_c(dataset, " (", window, ")")) %>%
         mutate(
             time_s = scales::number(time_s, accuracy = 0.1),
             distances_fraction = scales::scientific(
@@ -489,7 +488,7 @@ compute_distance_distibution <- function(data_attimo) {
     }
 
     data_attimo %>%
-        filter(is_full_dataset) %>%
+        filter(is_full_dataset | (path == "data/VCAB_BP2_580_days-100000000.txt")) %>%
         distinct(path, dataset, window) %>%
         rowwise() %>%
         summarise(do_compute(dataset, path, window))
@@ -553,6 +552,8 @@ dataset_measures <- function(data_attimo, data_distances) {
 plot_memory_time <- function(data_attimo) {
     data_attimo %>%
         filter(motifs == 10) %>%
+        group_by(dataset, window, repetitions) %>%
+        summarise(time_s = mean(time_s), preprocessing = mean(preprocessing)) %>%
         group_by(dataset, window) %>%
         mutate(
             labelpos = time_s + 0.1 * max(time_s),
@@ -568,7 +569,7 @@ plot_memory_time <- function(data_attimo) {
             x = "repetitions",
             y = "total time (s)"
         ) +
-        facet_wrap(vars(str_c(dataset, " (", window, ")")), ncol = 3, scales = "free") +
+        facet_wrap(vars(dataset), ncol = 7, scales = "free") +
         coord_cartesian(clip = "off") +
         theme_paper() +
         theme(
@@ -678,6 +679,9 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_depths, data_measu
         left_join(select(filter(data_scamp, is_full_dataset), dataset, window, time_scamp_s = time_s)) %>%
         filter(motifs == 10) %>%
         filter((repetitions == 200) | (dataset == "Seismic")) %>%
+        group_by(dataset, window) %>%
+        slice_min(time_s) %>%
+        ungroup() %>%
         # print()
         as_tbl_json(json.column = "motif_pairs") %>%
         gather_array() %>%
