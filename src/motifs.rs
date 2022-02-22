@@ -385,23 +385,6 @@ fn explore_tries(
     let hasher = Arc::clone(&pools.hasher);
 
     let stopping_condition = |d: f64, prefix: isize, previous: Option<usize>, repetition: usize| {
-        // the repetitions start from 0, but in the calculation we need them to start form 1
-        let repetition = repetition + 1;
-        if prefix == K as isize {
-            (1.0 - hasher.collision_probability_at(d).powi(prefix as i32)).powi(repetition as i32)
-                <= delta
-        } else if let Some(previous) = previous {
-            let cur = (1.0 - hasher.collision_probability_at(d).powi(prefix as i32))
-                .powi(repetition as i32);
-            let prev = (1.0 - hasher.collision_probability_at(d).powi(previous as i32))
-                .powi((repetitions - repetition) as i32);
-            cur * prev <= delta / (topk as f64)
-        } else {
-            panic!()
-        }
-    };
-
-    let stopping_condition = |d: f64, prefix: isize, previous: Option<usize>, repetition: usize| {
         let p = hasher.collision_probability_at(d);
         let i_half = prefix as f64 / 2.0;
         let sqrt = (repetitions as f64).sqrt().ceil() as i32;
@@ -422,10 +405,8 @@ fn explore_tries(
         } else {
             let lu_i = 1.0 - (1.0 - p.powf(i_half)).powi( j_left );
             let ru_i = 1.0 - (1.0 - p.powf(i_half)).powi( j_right );
-            info!("parts"; "lu_i" => lu_i, "ru_i" => ru_i);
             1.0 - lu_i*ru_i
         };
-        info!("failure prob"; "failure probability" => failure_p);
         failure_p <= delta / (topk as f64)
     };
 
@@ -620,11 +601,14 @@ fn explore_tries(
                 m.distance
             };
             depth = level_for_distance(d, depth);
+            if depth == orig_depth {
+                depth -= 1;
+            }
             pbar.println(format!(
                 "Next candidate at distance {:.4}, going at depth {}",
                 d, depth
             ));
-            assert!(depth < orig_depth, "we are not making any progress");
+            // assert!(depth < orig_depth, "we are not making any progress");
         } else {
             depth -= 1;
         }

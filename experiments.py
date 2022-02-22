@@ -282,7 +282,7 @@ def run_attimo():
     datasets = get_datasets()
     threads = NUM_CPUS
     repetitions = 50
-    delta = 0.001
+    delta = 0.01
     for seed in [14514]:#, 1346, 2524]:
         for repetitions in [200]:
         # for repetitions in [50, 100, 200]:

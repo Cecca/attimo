@@ -12,7 +12,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const VERSION: u32 = 19;
+const VERSION: u32 = 20;
 
 #[global_allocator]
 static A: CountingAllocator = CountingAllocator;
