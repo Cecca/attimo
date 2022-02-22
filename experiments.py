@@ -143,13 +143,13 @@ def prefix(path, n):
 
 def get_datasets():
     return [
-        ("data/ECG.csv", 1000),
-        ("data/GAP.csv", 600),
+        # ("data/GAP.csv", 600),
         ("data/EMG.csv", 500),
-        ("data/freezer.txt", 5000),
-        ("data/ASTRO.csv", 100),
-        ("data/HumanY.txt", 18000),
-        (prefix("data/VCAB_BP2_580_days.txt", 100000000), 100)
+        # ("data/freezer.txt", 5000),
+        # ("data/ASTRO.csv", 100),
+        ("data/ECG.csv", 1000),
+        # ("data/HumanY.txt", 18000),
+        # (prefix("data/VCAB_BP2_580_days.txt", 100000000), 100)
     ]
 
 def remove_trivial(df, w):
@@ -174,6 +174,106 @@ def remove_trivial(df, w):
     return df[df['trivial'] == False]
 
 
+def run_attimo_recall():
+    gitsha = sp.check_output(shlex.split("git rev-parse HEAD"))
+    sp.check_call(shlex.split("cargo install --force --locked --path ."))
+    version = int(sp.check_output(["attimo", "--version"]))
+    db = get_db()
+    datasets = get_datasets()
+    threads = NUM_CPUS
+    repetitions = 200
+    delta = 0.001
+    motifs = 10
+    for seed in range(1, 11):
+        for delta in [0.001, 0.01, 0.1, 0.2, 0.5]:
+            for dataset, window in datasets:
+                print("==== Looking for", motifs, "in", dataset,
+                      "window",window)
+                # Check if already run
+                execid = db.execute("""
+                    select rowid from attimo
+                    where hostname=:hostname
+                    and version=:version
+                    and dataset=:dataset
+                    and threads=:threads
+                    and repetitions=:repetitions
+                    and delta=:delta
+                    and seed=:seed
+                    and window=:window
+                    and motifs=:motifs
+                    """,
+                    {
+                        "hostname": HOSTNAME,
+                        "version": version,
+                        "dataset": dataset,
+                        "threads": threads,
+                        "repetitions": repetitions,
+                        "delta": delta,
+                        "seed": seed,
+                        "window": window,
+                        "motifs":motifs,
+                    }
+                ).fetchone()
+                if execid is not None:
+                    print("experiment already executed (attimo id={})".format(execid[0]))
+                    continue
+
+                start = time.time()
+                sp.run([
+                    "attimo",
+                    "--window", str(window),
+                    "--motifs", str(motifs),
+                    "--repetitions", str(repetitions),
+                    "--delta", str(delta),
+                    "--seed", str(seed),
+                    "--min-correlation", "0.9",
+                    "--log-path", "/tmp/attimo.json",
+                    "--output", "/tmp/motifs.csv",
+                    dataset
+                ]).check_returncode()
+                end = time.time()
+                elapsed = end - start
+                motif_pairs = pd.read_csv('/tmp/motifs.csv', names=['a', 'b','dist', 'confirmation_time']).to_json(orient='records')
+                with open("/tmp/attimo.json") as fp:
+                    log = json.dumps([json.loads(l) for l in fp.readlines()])
+                os.remove("/tmp/attimo.json")
+                os.remove("/tmp/motifs.csv")
+
+                db.execute("""
+                    INSERT INTO attimo VALUES (
+                        :hostname,
+                        :gitsha,
+                        :version,
+                        :dataset,
+                        :threads,
+                        :repetitions,
+                        :delta,
+                        :seed,
+                        :window,
+                        :motifs,
+                        :time_s,
+                        :log,
+                        :motif_pairs
+                    );
+                    """,
+                    {
+                        "hostname": HOSTNAME,
+                        "gitsha": gitsha,
+                        "version": version,
+                        "dataset": dataset,
+                        "threads": threads,
+                        "repetitions": repetitions,
+                        "delta": delta,
+                        "seed": seed,
+                        "window": window,
+                        "motifs":motifs,
+                        "time_s": elapsed,
+                        "log": log,
+                        "motif_pairs": motif_pairs
+                    }
+                )
+
+
 def run_attimo():
     gitsha = sp.check_output(shlex.split("git rev-parse HEAD"))
     sp.check_call(shlex.split("cargo install --force --locked --path ."))
@@ -183,9 +283,9 @@ def run_attimo():
     threads = NUM_CPUS
     repetitions = 50
     delta = 0.001
-    for seed in [14514, 1346, 2524]:
-        for repetitions in [100]:
-        # for repetitions in [25, 50, 100]:
+    for seed in [14514]:#, 1346, 2524]:
+        for repetitions in [200]:
+        # for repetitions in [50, 100, 200]:
             for motifs in [1]:
                 for dataset, window in datasets:
                     print("==== Looking for", motifs, "in", dataset,
@@ -570,7 +670,8 @@ def scalability_attimo():
 
 if __name__ == "__main__":
     # scalability_attimo()
-    run_attimo()
+    # run_attimo()
+    run_attimo_recall()
     # run_scamp()
     # run_ll()
     # run_mk()
