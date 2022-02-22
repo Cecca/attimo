@@ -490,6 +490,8 @@ impl Hasher {
                 if fraction_oob < 0.1 {
                     kth_upper_bound.replace(kth);
                     break;
+                } else {
+                    r *= 2.0;
                 }
             } else {
                 r *= 2.0;
