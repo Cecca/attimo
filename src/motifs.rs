@@ -395,11 +395,40 @@ fn explore_tries(
                 .powi(repetition as i32);
             let prev = (1.0 - hasher.collision_probability_at(d).powi(previous as i32))
                 .powi((repetitions - repetition) as i32);
-            cur * prev <= delta
+            cur * prev <= delta / (topk as f64)
         } else {
             panic!()
         }
     };
+
+    let stopping_condition = |d: f64, prefix: isize, previous: Option<usize>, repetition: usize| {
+        let p = hasher.collision_probability_at(d);
+        let i_half = prefix as f64 / 2.0;
+        let sqrt = (repetitions as f64).sqrt().ceil() as i32;
+        let j_left = repetition as i32 / sqrt;
+        let j_right = repetition as i32 % sqrt;
+        let failure_p = if let Some(previous) = previous {
+            let prev_half = previous as f64 / 2.0;
+            let lu_i  = 1.0 - (1.0 - p.powf(i_half)).powi( j_left );
+            let ru_i  = 1.0 - (1.0 - p.powf(i_half)).powi( j_right );
+            let lu_ip = 1.0 - (1.0 - p.powf(prev_half)).powi( j_left );
+            let ru_ip = 1.0 - (1.0 - p.powf(prev_half)).powi( j_right );
+            let ll_ip = 1.0 - (1.0 - p.powf(prev_half)).powi( sqrt - j_left );
+            let rl_ip = 1.0 - (1.0 - p.powf(prev_half)).powi( sqrt - j_right );
+            (1.0 - lu_i*ru_i) * 
+                (1.0 - lu_ip*rl_ip) *
+                (1.0 - ll_ip*ru_ip) *
+                (1.0 - ll_ip*rl_ip)
+        } else {
+            let lu_i = 1.0 - (1.0 - p.powf(i_half)).powi( j_left );
+            let ru_i = 1.0 - (1.0 - p.powf(i_half)).powi( j_right );
+            info!("parts"; "lu_i" => lu_i, "ru_i" => ru_i);
+            1.0 - lu_i*ru_i
+        };
+        info!("failure prob"; "failure probability" => failure_p);
+        failure_p <= delta / (topk as f64)
+    };
+
     //// Find the level for which the given distance has a good probability of being
     //// found withing the allowed number of repetitions
     let level_for_distance = |d: f64, mut prefix: isize| {
