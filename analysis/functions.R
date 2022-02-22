@@ -158,6 +158,52 @@ load_ll <- function() {
     tbl
 }
 
+add_recall <- function(data_attimo, data_scamp) {
+    ground <- data_scamp %>%
+        filter(is_full_dataset) %>%
+        as_tbl_json(json.column = "motif_pairs") %>%
+        gather_array() %>%
+        spread_all() %>% 
+        as_tibble() %>%
+        select(path, dataset, window, motif_idx = array.index, ground_a = a, ground_b = b) %>%
+        distinct()
+
+    compute_recall <- function(dataset_name, window_size, motifs_json) {
+        mots <- tidyjson::gather_array(motifs_json) %>%
+            tidyjson::spread_all()
+
+        baseline <- ground %>% 
+            filter(dataset == dataset_name, window == window_size, motif_idx <= nrow(mots)) %>%
+            select(ground_a, ground_b)
+        if (nrow(baseline) == 0) {
+            return(NA)
+        }
+
+        actual_a <- mots %>% pull(a)
+        actual_b <- mots %>% pull(b)
+
+        cnt <- 0
+
+        for (i in 1:nrow(baseline)) {
+            ground_a <- baseline[[i, "ground_a"]]
+            ground_b <- baseline[[i, "ground_b"]]
+            found_a <- abs(ground_a - actual_a) <= window_size
+            found_b <- abs(ground_b - actual_b) <= window_size
+            found <- found_a && found_b
+            if (found) {
+                cnt <- cnt + 1
+            }
+        }
+
+        cnt / nrow(mots)
+    }
+
+    data_attimo %>%
+        ungroup() %>%
+        rowwise() %>%
+        mutate(recall = compute_recall(dataset, window, motif_pairs))
+}
+
 get_motif_instances <- function(data_attimo) {
     data_attimo %>%
         filter(!str_detect(path, "-\\d+")) %>%
@@ -433,6 +479,9 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, data_gpuclu
         data_gpucluster %>% mutate(is_full_dataset = T)
     ) %>%
         filter(is_full_dataset) %>%
+        group_by(dataset, algorithm) %>%
+        slice_min(time_s) %>%
+        ungroup() %>%
         mutate(
             time_s = scales::number(time_s, accuracy = 0.1),
             distances_fraction = scales::scientific(

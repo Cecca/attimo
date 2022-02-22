@@ -33,6 +33,7 @@ list(
         bind_rows(
             data_attimo %>%
                 filter(!is.na(perc_size)) %>%
+                filter(delta == 0.001) %>%
                 select(algorithm, dataset, perc_size, time_s),
             read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
                 fix_names() %>%
@@ -91,7 +92,7 @@ list(
     # Time comparison -----------------------------------------------
     tar_target(
         tab_time_comparison,
-        do_tab_time_comparison(data_attimo, data_scamp, data_ll, data_gpucluster, "imgs/time-comparison.tex")
+        do_tab_time_comparison(filter(data_attimo, delta == 0.001), data_scamp, data_ll, data_gpucluster, "imgs/time-comparison.tex")
     ),
 
     # Figure motifs 10 -----------------------------------------------------
@@ -99,7 +100,7 @@ list(
         img_motifs_10,
         ggsave(
             "imgs/10-motifs.png",
-            plot = plot_motifs_10_alt2(data_attimo, data_scamp, data_depths, data_measures),
+            plot = plot_motifs_10_alt2(filter(data_attimo, delta == 0.001), data_scamp, data_depths, data_measures),
             width = 5,
             height = 6,
             dpi = 300
@@ -128,7 +129,7 @@ list(
     # Figure repetitions ----------------------------------------------------
     tar_target(
         fig_repetitions,
-        plot_memory_time(data_attimo)
+        plot_memory_time(filter(data_attimo, delta == 0.001))
     ),
     tar_target(
         img_repetitions,
