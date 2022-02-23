@@ -144,7 +144,7 @@ def prefix(path, n):
 def get_datasets():
     return [
         ("data/GAP.csv", 600),
-        ("data/EMG.csv", 500),
+        # ("data/EMG.csv", 500),
         ("data/freezer.txt", 5000),
         ("data/ASTRO.csv", 100),
         ("data/ECG.csv", 1000),
@@ -283,7 +283,7 @@ def run_attimo():
     threads = NUM_CPUS
     delta = 0.01
     for seed in [14514]:#, 1346, 2524]:
-        for repetitions in [400, 800, 200]:
+        for repetitions in [400, 800, 1600]:
         # for repetitions in [50, 100, 200]:
             for motifs in [10]:
                 for dataset, window in datasets:
