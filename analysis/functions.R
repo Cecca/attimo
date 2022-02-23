@@ -1,3 +1,5 @@
+baselines <- jsonlite::read_json("baselines.json")
+
 theme_paper <- function() {
     theme_classic() +
         theme(
@@ -159,23 +161,12 @@ load_ll <- function() {
 }
 
 add_recall <- function(data_attimo, data_scamp) {
-    ground <- data_scamp %>%
-        filter(is_full_dataset) %>%
-        as_tbl_json(json.column = "motif_pairs") %>%
-        gather_array() %>%
-        spread_all() %>% 
-        as_tibble() %>%
-        select(path, dataset, window, motif_idx = array.index, ground_a = a, ground_b = b) %>%
-        distinct()
-
     compute_recall <- function(dataset_name, window_size, motifs_json) {
         mots <- tidyjson::gather_array(motifs_json) %>%
             tidyjson::spread_all()
 
-        baseline <- ground %>% 
-            filter(dataset == dataset_name, window == window_size, motif_idx <= nrow(mots)) %>%
-            select(ground_a, ground_b)
-        if (nrow(baseline) == 0) {
+        baseline <- baselines[[as.character(dataset_name)]]
+        if (is.null(baseline)) {
             return(NA)
         }
 
@@ -184,12 +175,12 @@ add_recall <- function(data_attimo, data_scamp) {
 
         cnt <- 0
 
-        for (i in 1:nrow(baseline)) {
-            ground_a <- baseline[[i, "ground_a"]]
-            ground_b <- baseline[[i, "ground_b"]]
-            found_a <- abs(ground_a - actual_a) <= window_size
-            found_b <- abs(ground_b - actual_b) <= window_size
-            found <- found_a && found_b
+        for (i in 1:length(baseline)) {
+            ground_a <- baseline[[i]][[1]]
+            ground_b <- baseline[[i]][[2]]
+            found_a <- sum(abs(ground_a - actual_a) <= window_size) > 0
+            found_b <- sum(abs(ground_b - actual_b) <= window_size) > 0
+            found <- found_a || found_b
             if (found) {
                 cnt <- cnt + 1
             }
@@ -199,9 +190,11 @@ add_recall <- function(data_attimo, data_scamp) {
     }
 
     data_attimo %>%
+        filter(motifs == 10) %>%
         ungroup() %>%
         rowwise() %>%
-        mutate(recall = compute_recall(dataset, window, motif_pairs))
+        mutate(recall = compute_recall(dataset, window, motif_pairs)) %>%
+        select(dataset, window, recall)
 }
 
 get_motif_instances <- function(data_attimo) {
@@ -504,7 +497,7 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, data_gpuclu
             format = "latex", booktabs = T, linesep = "", align = "lrrrr",
             escape = F,
             caption = "Time to find the top motif at different window lengths. For \\our,
-            the number in parentheses reports the fraction of distance computations over ${n \\choose 2}$
+            the number in parentheses reports the fraction of distance computations
             performed to find the solution."
         ) %>%
         kable_styling() %>%
