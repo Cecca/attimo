@@ -392,20 +392,20 @@ fn explore_tries(
         let j_right = repetition as i32 % sqrt;
         let failure_p = if let Some(previous) = previous {
             let prev_half = previous as f64 / 2.0;
-            let lu_i  = 1.0 - (1.0 - p.powf(i_half)).powi( j_left );
-            let ru_i  = 1.0 - (1.0 - p.powf(i_half)).powi( j_right );
-            let lu_ip = 1.0 - (1.0 - p.powf(prev_half)).powi( j_left );
-            let ru_ip = 1.0 - (1.0 - p.powf(prev_half)).powi( j_right );
-            let ll_ip = 1.0 - (1.0 - p.powf(prev_half)).powi( sqrt - j_left );
-            let rl_ip = 1.0 - (1.0 - p.powf(prev_half)).powi( sqrt - j_right );
-            (1.0 - lu_i*ru_i) * 
-                (1.0 - lu_ip*rl_ip) *
-                (1.0 - ll_ip*ru_ip) *
-                (1.0 - ll_ip*rl_ip)
+            let lu_i = 1.0 - (1.0 - p.powf(i_half)).powi(j_left);
+            let ru_i = 1.0 - (1.0 - p.powf(i_half)).powi(j_right);
+            let lu_ip = 1.0 - (1.0 - p.powf(prev_half)).powi(j_left);
+            let ru_ip = 1.0 - (1.0 - p.powf(prev_half)).powi(j_right);
+            let ll_ip = 1.0 - (1.0 - p.powf(prev_half)).powi(sqrt - j_left);
+            let rl_ip = 1.0 - (1.0 - p.powf(prev_half)).powi(sqrt - j_right);
+            (1.0 - lu_i * ru_i)
+                * (1.0 - lu_ip * rl_ip)
+                * (1.0 - ll_ip * ru_ip)
+                * (1.0 - ll_ip * rl_ip)
         } else {
-            let lu_i = 1.0 - (1.0 - p.powf(i_half)).powi( j_left );
-            let ru_i = 1.0 - (1.0 - p.powf(i_half)).powi( j_right );
-            1.0 - lu_i*ru_i
+            let lu_i = 1.0 - (1.0 - p.powf(i_half)).powi(j_left);
+            let ru_i = 1.0 - (1.0 - p.powf(i_half)).powi(j_right);
+            1.0 - lu_i * ru_i
         };
         failure_p <= delta / (topk as f64)
     };
@@ -669,6 +669,94 @@ mod test {
             assert!(motif.distance <= d);
             assert!((motif.idx_a as isize - a as isize).abs() < w as isize);
             assert!((motif.idx_b as isize - b as isize).abs() < w as isize);
+        }
+    }
+
+    #[test]
+    fn test_ecg_top10() {
+        // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
+        let top10 = [
+            (7137166, 7414106, 0.3013925657),
+            (7377870, 7383302, 0.343015406),
+            (7553828, 7587436, 0.3612951315),
+            (6779076, 7379224, 0.3880223353),
+            (7238944, 7264944, 0.3938163096),
+            (7574696, 7611520, 0.3942701023),
+            (7094136, 7220980, 0.3981813093),
+            (6275400, 6298896, 0.3989290683),
+            (6625400, 7479248, 0.4026470338),
+            (6961239, 7385163, 0.4042721064),
+        ];
+
+        let w = 1000;
+        let ts: Vec<f64> = loadts("data/ECG.csv", None).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, false);
+
+        let motifs = motifs(&ts, 10, Repetitions::Exact(200), 0.01, None, None, 12435);
+        for (a, b, dist) in top10 {
+            // look for this in the motifs, allowing up to w displacement
+            println!("looking for ({a} {b} {dist})");
+            let mut found = false;
+            for motif in &motifs {
+                found |= (motif.idx_a as isize - a as isize).abs() <= w as isize;
+                found |= (motif.idx_b as isize - b as isize).abs() <= w as isize;
+                if found {
+                    println!(
+                        "   found at ({} {} {})",
+                        motif.idx_a, motif.idx_b, motif.distance
+                    );
+                    break;
+                }
+            }
+            assert!(
+                found,
+                "Could not find ({}, {}, {}) in {:?}",
+                a, b, dist, motifs
+            );
+        }
+    }
+
+    #[test]
+    fn test_astro_top10() {
+        // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
+        let top10 = [
+            (609810, 888455, 1.264327903),
+            (502518, 656063, 1.312459673),
+            (321598, 423427, 1.368041725),
+            (342595, 625081, 1.403194924),
+            (218448, 1006871, 1.442935122),
+            (192254, 466432, 1.523167513),
+            (527024, 533903, 1.526611152),
+            (520191, 743708, 1.558780057),
+            (192097, 193569, 1.583277835),
+            (267982, 512333, 1.617081054),
+        ];
+
+        let w = 100;
+        let ts: Vec<f64> = loadts("data/ASTRO.csv", None).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, false);
+
+        let motifs = motifs(&ts, 10, Repetitions::Exact(800), 0.01, None, None, 12435);
+        for (a, b, dist) in top10 {
+            // look for this in the motifs, allowing up to w displacement
+            println!("looking for ({a} {b} {dist})");
+            let mut found = false;
+            for motif in &motifs {
+                found |= (motif.idx_a as isize - a as isize).abs() <= w as isize;
+                found |= (motif.idx_b as isize - b as isize).abs() <= w as isize;
+                if found {
+                    println!(
+                        "   found at ({} {} {})",
+                        motif.idx_a, motif.idx_b, motif.distance
+                    );
+                    break;
+                }
+            }
+            assert!(
+                found,
+                "Could not find ({}, {}, {}) in {:?}",
+                a, b, dist, motifs
+            );
         }
     }
 }
