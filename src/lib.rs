@@ -10,3 +10,4 @@ pub mod lsh;
 pub mod motifs;
 pub mod sort;
 pub mod timeseries;
+mod flat_trie;
