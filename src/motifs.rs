@@ -157,7 +157,7 @@ impl TopK {
     //// and which is also overlapping.
     pub fn insert(&mut self, motif: Motif) {
         let mut i = 0;
-        while i < self.top.len() && self.top[i].distance < motif.distance {
+        while i < self.top.len() && self.top[i].distance <= motif.distance {
             if motif.overlaps(&self.top[i], self.exclusion_zone) {
                 //// If this is the case, we don't insert the motif, and return.
                 return;
@@ -463,7 +463,8 @@ fn explore_tries(
             (0..n_buckets / chunk_size)
                 .into_par_iter()
                 .for_each(|chunk_i| {
-                    let tl_top = tl_top.get_or(|| RefCell::new(TopK::new(topk, exclusion_zone)));
+                    // let tl_top = tl_top.get_or(|| RefCell::new(TopK::new(topk, exclusion_zone)));
+                    let tl_top = tl_top.get_or(|| RefCell::new(output.clone()));
 
                     // counters
                     let mut cands = 0;
@@ -547,6 +548,9 @@ fn explore_tries(
             tl_top
                 .iter_mut()
                 .for_each(|top| output.add_all(&mut top.borrow_mut()));
+            tl_top.iter_mut().for_each(|top| {
+                top.replace(output.clone());
+            });
 
             // Confirm the pairs that can be confirmed in this iteration
             output.for_each(|m| {
