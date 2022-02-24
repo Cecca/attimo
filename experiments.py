@@ -143,12 +143,12 @@ def prefix(path, n):
 
 def get_datasets():
     return [
-        ("data/GAP.csv", 600),
-        # ("data/EMG.csv", 500),
-        ("data/freezer.txt", 5000),
-        ("data/ASTRO.csv", 100),
+        # ("data/GAP.csv", 600),
+        ## ("data/EMG.csv", 500),
+        # ("data/freezer.txt", 5000),
+        # ("data/ASTRO.csv", 100),
         ("data/ECG.csv", 1000),
-        ("data/HumanY.txt", 18000),
+        # ("data/HumanY.txt", 18000),
         # (prefix("data/VCAB_BP2_580_days.txt", 100000000), 100)
     ]
 
@@ -181,11 +181,10 @@ def run_attimo_recall():
     db = get_db()
     datasets = get_datasets()
     threads = NUM_CPUS
-    repetitions = 200
-    delta = 0.001
+    repetitions = 400
     motifs = 10
     for seed in range(1, 11):
-        for delta in [0.001, 0.01, 0.1, 0.2, 0.5]:
+        for delta in [0.01, 0.1, 0.2]:
             for dataset, window in datasets:
                 print("==== Looking for", motifs, "in", dataset,
                       "window",window)
@@ -283,12 +282,12 @@ def run_attimo():
     threads = NUM_CPUS
     delta = 0.01
     for seed in [14514]:#, 1346, 2524]:
-        for repetitions in [400, 800, 1600]:
-        # for repetitions in [50, 100, 200]:
+        # for repetitions in [400, 800, 1600]:
+        for repetitions in [200]:
             for motifs in [10]:
                 for dataset, window in datasets:
                     print("==== Looking for", motifs, "in", dataset,
-                          "window",window)
+                          "window",window, "with repetitions", repetitions)
                     # Check if already run
                     execid = db.execute("""
                         select rowid from attimo
@@ -669,8 +668,8 @@ def scalability_attimo():
 
 if __name__ == "__main__":
     # scalability_attimo()
-    run_attimo()
-    # run_attimo_recall()
+    # run_attimo()
+    run_attimo_recall()
     # run_scamp()
     # run_ll()
     # run_mk()
