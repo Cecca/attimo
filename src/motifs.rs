@@ -5,7 +5,6 @@
 //// The data structure used for the task is adaptive to the data, and is configured
 //// to respect the limits of the system in terms of memory.
 
-use crate::alloc_cnt;
 use crate::allocator::allocated;
 use crate::distance::*;
 use crate::lsh::*;
@@ -325,7 +324,7 @@ pub fn motifs(
 
     info!("tries exploration"; "tag" => "phase");
     //// This vector holds the (sorted) hashed subsequences, and their index
-    let mut column_buffer = Vec::new();
+    // let mut column_buffer = Vec::new();
     //// This vector holds the boundaries between buckets. We reuse the allocations
     let mut buckets = Vec::new();
 
@@ -340,7 +339,7 @@ pub fn motifs(
         max_dist,
         start,
         &mut output,
-        &mut column_buffer,
+        // &mut column_buffer,
         &mut buckets,
     );
 
@@ -375,10 +374,11 @@ fn explore_tries(
     max_dist: Option<f64>,
     start: Instant,
     output: &mut TopK,
-    column_buffer: &mut Vec<(HashValue, u32)>,
+    // column_buffer: &mut Vec<(HashValue, u32)>,
     buckets: &mut Vec<Range<usize>>,
 ) {
     let mut tl_top = ThreadLocal::new();
+    let tries = pools.flat_tries();
 
     let repetitions = pools.hasher.repetitions;
     let hasher = Arc::clone(&pools.hasher);
@@ -450,9 +450,13 @@ fn explore_tries(
             let spurious_collisions_cnt = AtomicUsize::new(0);
             let rep_candidate_pairs = AtomicUsize::new(0);
             let rep_timer = Instant::now();
-            alloc_cnt!("column_buffer"; {
-                pools.group_subsequences(depth as usize, rep, exclusion_zone, column_buffer, buckets);
-            });
+            // alloc_cnt!("column_buffer"; {
+            //     pools.group_subsequences(depth as usize, rep, exclusion_zone, column_buffer, buckets);
+            // });
+
+            // get subsequences
+            tries[rep].groups_at(depth as u8, buckets);
+
             let snap_subsequences = rep_timer.elapsed();
             let n_buckets = buckets.len();
 
@@ -472,13 +476,13 @@ fn explore_tries(
                     let mut spurious = 0;
 
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
-                        let bucket = &column_buffer[buckets[i].clone()];
+                        let bucket = tries[rep].slice(buckets[i].clone());
 
-                        for (_, a_idx) in bucket.iter() {
+                        for a_idx in bucket.iter() {
                             let a_idx = *a_idx as usize;
                             // let a_already_checked = rep_bounds[a_idx].clone();
                             // let a_hash_idx = hash_range.start + a_offset;
-                            for (_, b_idx) in bucket.iter() {
+                            for b_idx in bucket.iter() {
                                 let b_idx = *b_idx as usize;
                                 //// Here we handle trivial matches: we don't consider a pair if the difference between
                                 //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
@@ -641,7 +645,7 @@ mod test {
             let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
 
-            let motif = *motifs(&ts, 1, Repetitions::Exact(20), 0.001, None, None, 12435)
+            let motif = *motifs(&ts, 1, Repetitions::Exact(100), 0.001, None, None, 12435)
                 .first()
                 .unwrap();
             println!(
