@@ -1,5 +1,6 @@
 use std::{cmp::Ordering, ops::Range};
 
+use rayon::prelude::*;
 use crate::lsh::K;
 
 /// A trie leveraging the property that all the strings it contains have the
@@ -13,9 +14,9 @@ pub struct FlatTrie {
 }
 
 impl FlatTrie {
-    pub fn new<K: LexiCmp>(kv_pairs: &mut [(K, u32)]) -> Self {
+    pub fn new<K: LexiCmp+Send>(kv_pairs: &mut [(K, u32)]) -> Self {
         // arrange the keys lexicographically
-        kv_pairs.sort_by(|a, b| a.0.lexi_cmp(&b.0));
+        kv_pairs.sort_unstable_by(|a, b| a.0.lexi_cmp(&b.0));
         let mut common = Vec::with_capacity(kv_pairs.len());
         let mut indices = Vec::with_capacity(kv_pairs.len());
 

@@ -330,18 +330,18 @@ impl HashCollection {
     pub fn flat_tries(&self) -> Vec<FlatTrie> {
         let timer = Instant::now();
         let n = self.n_subsequences;
-        let mut output = Vec::with_capacity(self.hasher.repetitions);
-        let mut buf = Vec::with_capacity(n);
-        for rep in 0..self.hasher.repetitions {
-            for i in 0..self.n_subsequences {
+
+        let tl_buf = ThreadLocal::new();
+        let output = (0..self.hasher.repetitions).into_par_iter().map(|rep| {
+            let mut buf = tl_buf.get_or(|| RefCell::new(Vec::with_capacity(n))).borrow_mut();
+            for i in 0..n {
                 buf.push((self.extended_hash_value(i,  rep), i as u32));
             }
-            output.push(FlatTrie::new(&mut buf));
-        }
+            FlatTrie::new(&mut buf)
+        }).collect();
         let elapsed = timer.elapsed();
         info!("building flat tries";
             "tag" => "profiling",
-            "n_buckets" => output.len(),
             "time_s" => elapsed.as_secs_f64()
         );
         output
