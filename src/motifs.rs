@@ -764,4 +764,52 @@ mod test {
             );
         }
     }
+
+    #[test]
+    fn test_freezer_top10() {
+        // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
+        // In this example, however, we find a set of motifs which are at shorter distance than
+        // the ones returned by SCAMP, because SCAMP allows to search only among the nearest neighbor pairs.
+        // In this dataset, however, the 8-th and 9-th motifs are formed between subsequences 
+        // which are nearest neighbor of the other.
+        let top10 = [
+            (1834102, 3705031, 4.195242485),
+            (3698075, 4733298, 5.765751866),
+            (2352367, 4186991, 7.077046765),
+            (3993450, 4002563, 7.318316307),
+            (4618976, 4812738, 9.207241828),
+            (1408089, 1697587, 10.56533893),
+            (5169982, 6429402, 11.46242184),
+            (723608, 1825768, 11.94925582),
+            (5230708, 6641806, 12.46052708),
+            (191377, 6339277, 12.50717434),
+        ];
+
+        let w = 5000;
+        let ts: Vec<f64> = loadts("data/freezer.txt", None).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, false);
+
+        let motifs = motifs(&ts, 10, Repetitions::Exact(400), 0.01, None, None, 12435);
+        for (a, b, dist) in top10 {
+            // look for this in the motifs, allowing up to w displacement
+            println!("looking for ({a} {b} {dist})");
+            let mut found = false;
+            for motif in &motifs {
+                found |= (motif.idx_a as isize - a as isize).abs() <= w as isize;
+                found |= (motif.idx_b as isize - b as isize).abs() <= w as isize;
+                if found {
+                    println!(
+                        "   found at ({} {} {})",
+                        motif.idx_a, motif.idx_b, motif.distance
+                    );
+                    break;
+                }
+            }
+            assert!(
+                found,
+                "Could not find ({}, {}, {}) in {:?}",
+                a, b, dist, motifs
+            );
+        }
+    }
 }
