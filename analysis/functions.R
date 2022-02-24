@@ -75,6 +75,7 @@ load_attimo <- function() {
         filter(version == max(version, na.rm = T)) %>%
         collect() %>%
         fix_names() %>%
+        filter(!str_detect(dataset, "EMG")) %>%
         mutate(
             algorithm = "attimo",
             expid = row_number()
@@ -138,6 +139,7 @@ load_scamp <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "scamp") %>%
         collect() %>%
+        filter(!str_detect(dataset, "EMG")) %>%
         fix_names() %>%
         add_prefix_info() %>%
         right_join(allowed_combinations) %>%
@@ -151,6 +153,7 @@ load_ll <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "ll") %>%
         collect() %>%
+        filter(!str_detect(dataset, "EMG")) %>%
         fix_names() %>%
         add_prefix_info() %>%
         semi_join(allowed_combinations) %>%
@@ -193,8 +196,7 @@ add_recall <- function(data_attimo, data_scamp) {
         filter(motifs == 10) %>%
         ungroup() %>%
         rowwise() %>%
-        mutate(recall = compute_recall(dataset, window, motif_pairs)) %>%
-        select(dataset, window, recall)
+        mutate(recall = compute_recall(dataset, window, motif_pairs))
 }
 
 get_motif_instances <- function(data_attimo) {
@@ -456,7 +458,7 @@ latex_info <- function(data_motif_measures) {
 do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluster, file_out) {
     bind_rows(
         data_attimo %>%
-            filter((repetitions == 200) | (dataset == "Seismic")) %>%
+            filter((repetitions == 800) | (dataset == "Seismic")) %>%
             select(
                 algorithm, hostname, dataset, is_full_dataset, threads, window,
                 repetitions, motifs, delta, time_s, distances_fraction
@@ -715,12 +717,13 @@ plot_motifs_10_alt <- function(data_attimo, data_scamp, data_measures) {
     bars + scamp + plot_layout(widths = c(5, 1))
 }
 
-plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_depths, data_measures) {
-    data_depths <- semi_join(data_depths, data_attimo)
-    bars <- data_attimo %>%
+plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_measures) {
+    # data_depths <- semi_join(data_depths, data_attimo)
+    
+    pdata <- data_attimo %>%
         left_join(select(filter(data_scamp, is_full_dataset), dataset, window, time_scamp_s = time_s)) %>%
         filter(motifs == 10) %>%
-        filter((repetitions == 200) | (dataset == "Seismic")) %>%
+        filter((repetitions == 400) | (dataset == "Seismic")) %>%
         group_by(dataset, window) %>%
         slice_min(time_s) %>%
         ungroup() %>%
@@ -745,8 +748,11 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_depths, data_measu
         mutate(
             confirmation_time = as.numeric(confirmation_time),
             preprocessing = as.numeric(preprocessing)
-        ) %>% # select(dataset, confirmation_time, preprocessing) %>% view()
-        ggplot(aes(y = confirmation_time, x = dist)) +
+        ) 
+
+    maxval <- pdata %>% summarise(max(time_s)) %>% pull()
+
+    bars <- ggplot(pdata, aes(y = confirmation_time, x = dist)) +
         geom_rect(
             mapping = aes(ymax = preprocessing, ymin = 0),
             xmin = -Inf,
@@ -767,7 +773,7 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_depths, data_measu
                 label = scales::number(
                     time_scamp_s_hline,
                     accuracy = 1,
-                    prefix = "SCAMP: ",
+                    prefix = "Scamp: ",
                     suffix = " s"
                 ),
                 x = dist,
@@ -781,12 +787,13 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_depths, data_measu
                 label = scales::number(
                     time_scamp_s_label,
                     accuracy = 1,
-                    prefix = "SCAMP: ",
+                    prefix = "Scamp: ",
                     suffix = " s →"
                 ),
                 x = dist # * 1.2
             ),
-            y = 500,
+            # y = 500,
+            y = maxval,
             hjust = 1,
             vjust = 0
         ) +
@@ -896,4 +903,27 @@ plot_scalability_n_alt <- function(data_scalability) {
         theme(
             legend.position = c(0.2, 0.8)
         )
+}
+
+plot_mem <- function(data_attimo) {
+    plotdata <- data_attimo %>%
+        filter(motifs == 10, repetitions >= 200) %>%
+        mutate(bytes_per_subsequence = max_mem_bytes / n)
+
+    ggplot(plotdata, aes(repetitions, bytes_per_subsequence)) +
+        geom_point(size=0.5) +
+        geom_point(stat="summary") +
+        geom_line(stat="summary") +
+        geom_text(
+            aes(label=scales::number_bytes(stat(y), accuracy=0.01)),
+            nudge_y = 300,
+            size = 3,
+            stat="summary"
+        ) +
+        scale_x_continuous(expand = expansion(mult=0.1)) +
+        labs(
+            x = "Repetitions",
+            y = "Bytes per subsequence"
+        ) +
+        theme_paper()
 }

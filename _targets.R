@@ -1,5 +1,8 @@
 # This file is akin to a Makefile for the analysis in R.
 
+# the default delta value to be considered
+delta_val = 0.01
+
 library(targets)
 source("analysis/functions.R")
 options(tidyverse.quiet = TRUE)
@@ -33,7 +36,7 @@ list(
         bind_rows(
             data_attimo %>%
                 filter(!is.na(perc_size)) %>%
-                filter(delta == 0.001) %>%
+                filter(delta == delta_val) %>%
                 select(algorithm, dataset, perc_size, time_s),
             read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
                 fix_names() %>%
@@ -50,10 +53,10 @@ list(
             mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
             select(dataset, w, algorithm, time_s)
     ),
-    tar_target(
-        data_depths,
-        get_data_depths(data_attimo)
-    ),
+    # tar_target(
+    #     data_depths,
+    #     get_data_depths(data_attimo)
+    # ),
     tar_target(
         data_measures,
         dataset_measures(data_attimo, data_distances)
@@ -75,24 +78,20 @@ list(
     # ),
 
     # Figure scalability -------------------------------------------------------
-    tar_target(
-        fig_scalability_n,
-        plot_scalability_n_alt(data_scalability)
-    ),
-    tar_target(
-        img_scalability_n,
-        ggsave("imgs/scalability_n.png",
-            plot = fig_scalability_n,
-            width = 5,
-            height = 3,
-            dpi = 300
-        )
-    ),
+    # tar_target(
+    #     img_scalability_n,
+    #     ggsave("imgs/scalability_n.png",
+    #         plot = plot_scalability_n_alt(data_scalability),
+    #         width = 5,
+    #         height = 3,
+    #         dpi = 300
+    #     )
+    # ),
 
     # Time comparison -----------------------------------------------
     tar_target(
         tab_time_comparison,
-        do_tab_time_comparison(filter(data_attimo, delta == 0.001), data_scamp, data_ll, data_gpucluster, "imgs/time-comparison.tex")
+        do_tab_time_comparison(filter(data_attimo, delta == delta_val), data_scamp, data_ll, data_gpucluster, "imgs/time-comparison.tex")
     ),
 
     # Figure motifs 10 -----------------------------------------------------
@@ -100,36 +99,29 @@ list(
         img_motifs_10,
         ggsave(
             "imgs/10-motifs.png",
-            plot = plot_motifs_10_alt2(filter(data_attimo, delta == 0.001), data_scamp, data_depths, data_measures),
+            plot = plot_motifs_10_alt2(filter(data_attimo, delta == delta_val), data_scamp, data_measures),
             width = 5,
             height = 6,
             dpi = 300
         )
     ),
 
-    # Figure profile -------------------------------------------------------
-    # tar_target(
-    #     fig_profile,
-    #     data_attimo %>%
-    #         filter(dataset == "HumanY", motifs == 1, repetitions == 100, window == 18000) %>%
-    #         head(1) %>%
-    #         plot_profile()
-    # ),
-    # tar_target(
-    #     img_profile,
-    #     ggsave(
-    #         "imgs/profile.png",
-    #         plot = fig_profile,
-    #         width = 10,
-    #         height = 1.5,
-    #         dpi = 300
-    #     )
-    # ),
+    # Figure memory -----------------------------------------------------
+    tar_target(
+        img_mem,
+        ggsave(
+            "imgs/memory.png",
+            plot = plot_mem(filter(data_attimo, delta == delta_val)),
+            width = 5,
+            height = 2,
+            dpi = 300
+        )
+    ),
 
     # Figure repetitions ----------------------------------------------------
     tar_target(
         fig_repetitions,
-        plot_memory_time(filter(data_attimo, delta == 0.001))
+        plot_memory_time(filter(data_attimo, delta == delta_val))
     ),
     tar_target(
         img_repetitions,
