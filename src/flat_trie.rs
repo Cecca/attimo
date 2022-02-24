@@ -16,7 +16,7 @@ pub struct FlatTrie {
 impl FlatTrie {
     pub fn new<K: LexiCmp+Send>(kv_pairs: &mut [(K, u32)]) -> Self {
         // arrange the keys lexicographically
-        kv_pairs.sort_unstable_by(|a, b| a.0.lexi_cmp(&b.0));
+        kv_pairs.par_sort_unstable_by(|a, b| a.0.lexi_cmp(&b.0));
         let mut common = Vec::with_capacity(kv_pairs.len());
         let mut indices = Vec::with_capacity(kv_pairs.len());
 
@@ -74,16 +74,48 @@ impl<O: Ord> LexiCmp for [O; K] {
     fn key_len(&self) -> usize {
         self.len()
     }
+    // fn lexi_cmp(&self, other: &Self) -> Ordering {
+    //     for (s, o) in self.iter().zip(other.iter()) {
+    //         if s != o {
+    //             if s < o {
+    //                 return Ordering::Less;
+    //             } else if s > o {
+    //                 return Ordering::Greater;
+    //             }
+    //         }
+    //     }
+    //     Ordering::Equal
+    // }
     fn lexi_cmp(&self, other: &Self) -> Ordering {
-        for (s, o) in self.iter().zip(other.iter()) {
-            if s < o {
-                return Ordering::Less;
-            } else if s > o {
-                return Ordering::Greater;
-            }
+        let mut i = 0;
+        while i < K {
+            let s0 = &self[i];
+            let s1 = &self[i+1];
+            let s2 = &self[i+2];
+            let s3 = &self[i+3];
+
+            let o0 = &other[i];
+            let o1 = &other[i+1];
+            let o2 = &other[i+2];
+            let o3 = &other[i+3];
+
+            if s0 < o0 { return Ordering::Less; }
+            if s0 > o0 { return Ordering::Greater; }
+
+            if s1 < o1 { return Ordering::Less; }
+            if s1 > o1 { return Ordering::Greater; }
+
+            if s2 < o2 { return Ordering::Less; }
+            if s2 > o2 { return Ordering::Greater; }
+
+            if s3 < o3 { return Ordering::Less; }
+            if s3 > o3 { return Ordering::Greater; }
+            
+            i += 4;
         }
         Ordering::Equal
     }
+
     fn common_prefix_len(&self, other: &Self) -> u8 {
         self.iter()
             .zip(other.iter())
