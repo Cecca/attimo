@@ -504,7 +504,7 @@ fn explore_tries(
                                             //// we try to insert the pair in the top data structure
                                             let d = zeucl(&ts, a_idx, b_idx);
                                             if d.is_finite() && d > min_dist.unwrap_or(-1.0) {
-                                                dists += 0;
+                                                dists += 1;
 
                                                 let m = Motif {
                                                     idx_a: a_idx as usize,

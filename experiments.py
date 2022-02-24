@@ -183,8 +183,8 @@ def run_attimo_recall():
     threads = NUM_CPUS
     repetitions = 400
     motifs = 10
-    for seed in range(1, 11):
-        for delta in [0.01, 0.1, 0.2]:
+    for seed in range(1, 30):
+        for delta in [0.1, 0.2, 0.3, 0.4, 0.5]:
             for dataset, window in datasets:
                 print("==== Looking for", motifs, "in", dataset,
                       "window",window)
@@ -283,7 +283,7 @@ def run_attimo():
     delta = 0.01
     for seed in [14514]:#, 1346, 2524]:
         # for repetitions in [400, 800, 1600]:
-        for repetitions in [200]:
+        for repetitions in [100]:
             for motifs in [10]:
                 for dataset, window in datasets:
                     print("==== Looking for", motifs, "in", dataset,

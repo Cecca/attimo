@@ -15,6 +15,7 @@ idxs = [parse(Int, l) for l in readlines(GZip.open("/tmp/astro.mp.idx.gz"))]
 
 # ╔═╡ fad3f96e-ab9a-4956-b7fc-8edc3d720115
 function findmotif(dists, idxs, ex)
+	@assert dists[1825969+1] != Inf
 	a = argmin(dists)
 	motif_d = dists[a]
 	b = idxs[a]
@@ -33,6 +34,7 @@ function findmotifs(dists, idxs, k, ex)
 	motifs = []
 	for _ in 1:k
 		(a, b, d) = findmotif(dists, idxs, ex)
+		@info "found motif $(a) $(b)" (a-ex,a+ex) (b-ex,b+ex)
 		dists[a-ex:a+ex] .= Inf
 		dists[b-ex:b+ex] .= Inf
 		push!(motifs, (a, b, d))
@@ -84,6 +86,71 @@ baseline = Dict(
 open("baselines.json", "w") do f
 	JSON.print(f, baseline, 2)
 end
+
+# ╔═╡ 27767505-36fc-49af-9d8c-77fadeee41fe
+dists = load(Float64, "data/freezer.mp.dists.gz")
+
+# ╔═╡ 1432d42f-feb5-43ef-8481-f69fd9ae9a8a
+idx = load(Int, "data/freezer.mp.idx.gz")
+
+# ╔═╡ 865014a5-4183-4999-b6d4-83e01430a855
+sum(dists .== Inf)
+
+# ╔═╡ 71406a9f-2376-4c0a-b3d7-a20c841cceeb
+dists[1825969+1]
+
+# ╔═╡ a777e6dc-31f3-4044-802a-01f30aa93e75
+dists[1993859+1], idx[1993859+1]
+
+# ╔═╡ 07275457-b76b-43d8-9fa0-f0c813eec88a
+1834102 - 1825969
+
+# ╔═╡ 01d215d5-bc6f-4d89-8789-b4fb5704c90e
+function overlaps(p1, p2, ex)
+	ov(x, y) = abs(x - y) <= ex
+	ov(p1[1], p2[1]) || ov(p1[1], p2[2]) || ov(p1[2], p2[1])|| ov(p1[2], p2[2])
+end
+
+# ╔═╡ 3cea46f9-817c-4472-ab57-bb9e9be943b9
+function pushtop!(arr, a, b, dist, ex)
+	log = a == 3815626
+	i = 1
+	while i <= length(arr) && arr[i][2] <= dist
+		if overlaps((a, b), arr[i][1], ex)
+			if log
+				@info "Excluding $(b) because it overlaps with $(arr[i])"
+			end
+			return
+		end
+		i += 1
+	end
+	insert!(arr, i, ((a,b), dist))
+	i = i + 1
+	while i <= length(arr)
+		if overlaps((a, b), arr[i][1], ex)
+			popat!(arr, i)
+		else
+			i += 1
+		end
+	end
+end
+
+# ╔═╡ 8845a7e9-288e-468a-9656-b938774ec08d
+function findmotifs2(dists, idx, k, ex)
+	vec = [(d, a, b) for (d, a, b) in zip(dists, 0:length(dists)-1, idx)
+	       if a < b]
+	ordered = sort(vec; by = x -> x[1])
+	top = []
+	for (d, a, b) in ordered
+		if length(top) >= k
+			return top
+		end
+		pushtop!(top, a, b, d, ex)
+	end
+end
+
+# ╔═╡ 7d955800-929e-4f15-898f-f233b7e93ead
+findmotifs2(dists, idx, 10, 5000)
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -152,6 +219,16 @@ uuid = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
 # ╠═cca91a1f-14b0-48c6-8cbd-ec91d45dcdfd
 # ╠═fad3f96e-ab9a-4956-b7fc-8edc3d720115
 # ╠═ed89e056-d62f-42b8-9328-5784773fcf24
+# ╠═8845a7e9-288e-468a-9656-b938774ec08d
 # ╠═4e302e0f-b529-490d-b106-435d59cb6447
+# ╠═7d955800-929e-4f15-898f-f233b7e93ead
+# ╠═27767505-36fc-49af-9d8c-77fadeee41fe
+# ╠═1432d42f-feb5-43ef-8481-f69fd9ae9a8a
+# ╠═865014a5-4183-4999-b6d4-83e01430a855
+# ╠═71406a9f-2376-4c0a-b3d7-a20c841cceeb
+# ╠═a777e6dc-31f3-4044-802a-01f30aa93e75
+# ╠═07275457-b76b-43d8-9fa0-f0c813eec88a
+# ╠═01d215d5-bc6f-4d89-8789-b4fb5704c90e
+# ╠═3cea46f9-817c-4472-ab57-bb9e9be943b9
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
