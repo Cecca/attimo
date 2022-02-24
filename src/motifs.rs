@@ -465,16 +465,14 @@ fn explore_tries(
                 .into_par_iter()
                 .for_each(|chunk_i| {
                     let tl_top = tl_top.get_or(|| RefCell::new(TopK::new(topk, exclusion_zone)));
+
+                    // counters
+                    let mut cands = 0;
+                    let mut dists = 0;
+                    let mut spurious = 0;
+
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
                         let bucket = &column_buffer[buckets[i].clone()];
-                        let bpbar = if bucket.len() > 1000000 {
-                            Some(ProgressBar::new(bucket.len() as u64).with_style(
-                                ProgressStyle::default_bar()
-                                    .template("  [{elapsed_precise}] {msg} {bar:40.white/red} {pos:>7}/{len:7}")
-                            ))
-                        } else {
-                            None
-                        };
 
                         for (_, a_idx) in bucket.iter() {
                             let a_idx = *a_idx as usize;
@@ -485,7 +483,7 @@ fn explore_tries(
                                 //// Here we handle trivial matches: we don't consider a pair if the difference between
                                 //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
                                 if a_idx + exclusion_zone < b_idx {
-                                    rep_candidate_pairs.fetch_add(1, Ordering::SeqCst);
+                                    cands += 1;
                                     //// We only process the pair if this is the first repetition in which
                                     //// they collide. We get this information from the pool of bits
                                     //// from which hash values for all repetitions are extracted.
@@ -496,19 +494,22 @@ fn explore_tries(
                                         //// at a deeper level.
                                         if first_colliding_repetition == rep
                                             && previous_depth
-                                                .map(|d| pools.first_collision(a_idx, b_idx, d).is_none())
+                                                .map(|d| {
+                                                    pools.first_collision(a_idx, b_idx, d).is_none()
+                                                })
                                                 .unwrap_or(true)
                                         {
                                             //// After computing the distance between the two subsequences,
                                             //// we try to insert the pair in the top data structure
                                             let d = zeucl(&ts, a_idx, b_idx);
                                             if d.is_finite() && d > min_dist.unwrap_or(-1.0) {
-                                                rep_cnt_dists.fetch_add(1, Ordering::SeqCst);
+                                                dists += 0;
 
                                                 let m = Motif {
                                                     idx_a: a_idx as usize,
                                                     idx_b: b_idx as usize,
-                                                    collision_probability: hasher.collision_probability_at(d),
+                                                    collision_probability: hasher
+                                                        .collision_probability_at(d),
                                                     distance: d,
                                                     elapsed: None,
                                                 };
@@ -516,13 +517,15 @@ fn explore_tries(
                                             }
                                         }
                                     } else {
-                                        spurious_collisions_cnt.fetch_add(1, Ordering::SeqCst);
+                                        spurious += 1;
                                     }
                                 }
                             }
                         }
-                        bpbar.iter().for_each(|b| b.finish_and_clear());
                     }
+                    rep_candidate_pairs.fetch_add(cands, Ordering::SeqCst);
+                    rep_cnt_dists.fetch_add(dists, Ordering::SeqCst);
+                    spurious_collisions_cnt.fetch_add(spurious, Ordering::SeqCst);
                 });
 
             let snap_bucket_solve = rep_timer.elapsed();
