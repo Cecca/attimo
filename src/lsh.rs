@@ -26,6 +26,7 @@
 //// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
+use crate::flat_trie::FlatTrie;
 use crate::motifs::Motif;
 use crate::{alloc_cnt, allocator::*};
 // TODO Remove this dependency
@@ -230,8 +231,7 @@ impl HashCollection {
         &self.pools[idx..idx + K_HALF]
     }
 
-    #[cfg(test)]
-    pub fn extended_hash_value(&self, i: usize, repetition: usize) -> [u8; 32] {
+    pub fn extended_hash_value(&self, i: usize, repetition: usize) -> [u8; K] {
         let mut output = [0; K];
         let l = &self.left(i, repetition);
         let r = &self.right(i, repetition);
@@ -325,6 +325,26 @@ impl HashCollection {
         } else {
             None
         }
+    }
+
+    pub fn flat_tries(&self) -> Vec<FlatTrie> {
+        let timer = Instant::now();
+        let n = self.n_subsequences;
+        let mut output = Vec::with_capacity(self.hasher.repetitions);
+        let mut buf = Vec::with_capacity(n);
+        for rep in 0..self.hasher.repetitions {
+            for i in 0..self.n_subsequences {
+                buf.push((self.extended_hash_value(i,  rep), i as u32));
+            }
+            output.push(FlatTrie::new(&mut buf));
+        }
+        let elapsed = timer.elapsed();
+        info!("building flat tries";
+            "tag" => "profiling",
+            "n_buckets" => output.len(),
+            "time_s" => elapsed.as_secs_f64()
+        );
+        output
     }
 
     pub fn group_subsequences(
