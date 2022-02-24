@@ -72,7 +72,6 @@ pub struct Motif {
     pub idx_a: usize,
     pub idx_b: usize,
     pub distance: f64,
-    pub collision_probability: f64,
     /// When the motif was confirmed
     pub elapsed: Option<Duration>,
 }
@@ -484,6 +483,7 @@ fn explore_tries(
                                 //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
                                 if a_idx + exclusion_zone < b_idx {
                                     cands += 1;
+
                                     //// We only process the pair if this is the first repetition in which
                                     //// they collide. We get this information from the pool of bits
                                     //// from which hash values for all repetitions are extracted.
@@ -508,8 +508,6 @@ fn explore_tries(
                                                 let m = Motif {
                                                     idx_a: a_idx as usize,
                                                     idx_b: b_idx as usize,
-                                                    collision_probability: hasher
-                                                        .collision_probability_at(d),
                                                     distance: d,
                                                     elapsed: None,
                                                 };

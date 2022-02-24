@@ -463,7 +463,6 @@ impl Hasher {
                                     if d > min_dist.unwrap_or(-1.0) {
                                         topk.insert(Motif {
                                             distance: d,
-                                            collision_probability: f64::NAN,
                                             elapsed: None,
                                             idx_a: a_idx,
                                             idx_b: b_idx,
