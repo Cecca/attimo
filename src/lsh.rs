@@ -230,12 +230,41 @@ impl HashCollection {
         &self.pools[idx..idx + K_HALF]
     }
 
-    pub fn hash_value(&self, i: usize, depth: usize, repetition: usize) -> HashValue {
+    #[cfg(test)]
+    pub fn extended_hash_value(&self, i: usize, repetition: usize) -> [u8; 32] {
+        let mut output = [0; K];
+        let l = &self.left(i, repetition);
+        let r = &self.right(i, repetition);
+        let mut h = 0;
+        while h < K_HALF {
+            output[2*h] = l[h];
+            output[2*h+1] = r[h];
+            h += 1;
+        }
+        output
+    }
+
+    fn k_pair(k: usize) -> (usize, usize) {
+        let k_left = (k as f64 / 2.0).ceil() as usize;
+        let k_right = (k as f64 / 2.0).floor() as usize;
+        (k_left, k_right)
+    }
+
+    pub fn hash_value(&self, i: usize, prefix: usize, repetition: usize) -> HashValue {
         use std::hash::Hasher;
         let mut hasher = std::collections::hash_map::DefaultHasher::default();
-        hasher.write(&self.left(i, repetition)[0..std::cmp::min(K_HALF, depth)]);
-        if depth > K_HALF {
-            hasher.write(&self.right(i, repetition)[0..(depth - K_HALF)]);
+        let (k_left, k_right) = Self::k_pair(prefix);
+        let l = &self.left(i, repetition);
+        let r = &self.right(i, repetition);
+        let mut h = 0;
+        while h < k_left || h < k_right {
+            if h < k_left {
+                hasher.write_u8(l[h]);
+            }
+            if h < k_right {
+                hasher.write_u8(r[h]);
+            }
+            h += 1;
         }
         HashValue(hasher.finish() as u32)
     }
@@ -245,45 +274,46 @@ impl HashCollection {
     }
 
     // TODO: Reimplement this test
-    // #[cfg(test)]
-    // pub fn first_collision_baseline(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
-    //     (0..self.hasher.repetitions)
-    //         .filter(|&rep| {
-    //             self.hash_value(i, rep)
-    //                 .prefix_eq(&self.hash_value(j, rep), depth)
-    //         })
-    //         .next()
-    // }
+    #[cfg(test)]
+    pub fn first_collision_baseline(&self, i: usize, j: usize, prefix: usize) -> Option<usize> {
+        (0..self.hasher.repetitions)
+            .filter(|&rep| {
+                let ihash = &self.extended_hash_value(i, rep)[0..prefix];
+                let jhash = &self.extended_hash_value(j, rep)[0..prefix];
+                ihash == jhash
+            })
+            .next()
+    }
 
-    pub fn first_collision(&self, i: usize, j: usize, depth: usize) -> Option<usize> {
-        let depth_l = std::cmp::min(depth, K_HALF);
-        let mut lindex = None;
-        let (depth_r, mut rindex) = if depth > K_HALF {
-            (Some(depth - K_HALF), None)
-        } else {
-            (None, Some(0))
-        };
+    pub fn first_collision(&self, i: usize, j: usize, prefix: usize) -> Option<usize> {
+        let (k_left, k_right) = Self::k_pair(prefix);
         let jump = K * self.n_subsequences;
         let mut iidx = i * K;
         let mut jidx = j * K;
+
+        let mut lindex = None;
+        let mut rindex = None;
         for rep in 0..self.hasher.tensor_repetitions {
             let ipool = &self.pools[iidx..iidx + K];
             let jpool = &self.pools[jidx..jidx + K];
             // check left
             if lindex.is_none() {
-                let hi = &ipool[0..depth_l];
-                let hj = &jpool[0..depth_l];
+                let hi = &ipool[0..k_left];
+                let hj = &jpool[0..k_left];
                 if hi == hj {
                     lindex = Some(rep);
                 }
             }
             // check right
             if rindex.is_none() {
-                let hi = &ipool[K_HALF..K_HALF + depth_r.unwrap()];
-                let hj = &jpool[K_HALF..K_HALF + depth_r.unwrap()];
+                let hi = &ipool[K_HALF..K_HALF + k_right];
+                let hj = &jpool[K_HALF..K_HALF + k_right];
                 if hi == hj {
                     rindex = Some(rep);
                 }
+            }
+            if rindex.is_some() && lindex.is_some() {
+                break;
             }
             iidx += jump;
             jidx += jump;
@@ -668,11 +698,11 @@ mod test {
             for i in 0..ts.num_subsequences() {
                 for j in 0..ts.num_subsequences() {
                     // println!("i={} j={}", i, j);
-                    // assert_eq!(
-                    //     pools.first_collision(i, j, depth),
-                    //     pools.first_collision_baseline(i, j, depth)
-                    // );
-                    todo!()
+                    assert_eq!(
+                        pools.first_collision(i, j, depth),
+                        pools.first_collision_baseline(i, j, depth)
+                    );
+                    // todo!()
                 }
             }
         }
