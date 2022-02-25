@@ -148,7 +148,7 @@ def get_datasets():
         # ("data/freezer.txt", 5000),
         # ("data/ASTRO.csv", 100),
         ("data/ECG.csv", 1000),
-        # ("data/HumanY.txt", 18000),
+        ("data/HumanY.txt", 18000),
         # (prefix("data/VCAB_BP2_580_days.txt", 100000000), 100)
     ]
 
@@ -282,8 +282,7 @@ def run_attimo():
     threads = NUM_CPUS
     delta = 0.01
     for seed in [14514]:#, 1346, 2524]:
-        # for repetitions in [400, 800, 1600]:
-        for repetitions in [100]:
+        for repetitions in [50]:
             for motifs in [10]:
                 for dataset, window in datasets:
                     print("==== Looking for", motifs, "in", dataset,
@@ -668,8 +667,8 @@ def scalability_attimo():
 
 if __name__ == "__main__":
     # scalability_attimo()
-    # run_attimo()
-    run_attimo_recall()
+    run_attimo()
+    # run_attimo_recall()
     # run_scamp()
     # run_ll()
     # run_mk()
