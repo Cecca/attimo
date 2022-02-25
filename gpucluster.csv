@@ -6,3 +6,11 @@ data/EMG.csv,100,35.44
 data/ASTRO.csv,100,12.75
 data/freezer.txt,500,169.82
 data/VCAB_BP2_580_days-100000000.txt,100,28451.59
+data/ECG.csv,1000,222.07
+data/ASTRO.csv,100,16.36
+data/EMG.csv,500,59.56
+data/EMG.csv,500,37.67
+data/GAP.csv,600,27.39
+data/VCAB_BP2_580_days-100000000.txt,100,28417.43
+data/HumanY.txt,18000,2230.17
+freezer,5000,207.85

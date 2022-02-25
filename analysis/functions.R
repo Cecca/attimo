@@ -13,7 +13,7 @@ dataset_info <- function() {
         ~dataset, ~n,
         "ASTRO", 1151349,
         "ECG", 7871870,
-        "EMG", 543893,
+        # "EMG", 543893,
         "HumanY", 26415045,
         "GAP", 2049279,
         "freezer", 7430755,
@@ -25,7 +25,7 @@ allowed_combinations <- tibble::tribble(
     ~dataset, ~window,
     "HumanY", 18000,
     "GAP", 600,
-    "EMG", 500,
+    # "EMG", 500,
     "ECG", 1000,
     "freezer", 5000,
     "ASTRO", 100,
@@ -82,32 +82,47 @@ load_attimo <- function() {
         ) %>%
         add_prefix_info() %>%
         semi_join(allowed_combinations)
+    print("Computing memory usage")
     mem <- table %>%
         as_tbl_json(json.column = "log") %>%
         gather_array() %>%
-        spread_all() %>%
-        filter() %>%
-        group_by(expid, prefix, dataset) %>%
+        # spread_all() %>%
+        spread_values(
+            mem_bytes = jnumber("mem_bytes")
+        ) %>%
+        drop_na(mem_bytes) %>%
+        group_by(expid, dataset) %>%
         summarise(max_mem_bytes = max(mem_bytes, na.rm = T)) %>%
         ungroup() %>%
         mutate(
-            bytes_per_subsequence = max_mem_bytes / prefix,
             max_mem_gb = max_mem_bytes / (1024^3)
         ) %>%
         as_tibble() %>%
-        select(expid, bytes_per_subsequence, max_mem_gb, max_mem_bytes)
+        select(expid, max_mem_gb, max_mem_bytes)
+    print("Computing distance counts")
     dists <- table %>%
         as_tbl_json(json.column = "log") %>%
         gather_array() %>%
-        spread_all() %>%
+        spread_values(
+            distances_fraction = jnumber("distances_fraction"),
+            total_distances = jnumber("distances_fraction"),
+            cnt_dist = jnumber("distances_fraction"),
+            msg = jstring("msg")
+        ) %>%
         filter(msg == "motifs completed") %>%
+        drop_na(expid, distances_fraction, total_distances, cnt_dist) %>%
         as_tibble() %>%
         select(expid, distances_fraction, total_distances, cnt_dist)
 
     phases <- table %>%
         as_tbl_json(json.column = "log") %>%
         gather_array() %>%
-        spread_all() %>%
+        spread_values(
+            msg = jstring("msg"),
+            tag = jstring("tag"),
+            phase = jstring("phase"),
+            ts = jstring("ts"),
+        ) %>%
         filter(tag == "phase", msg != "fft computation") %>% # Consider the FFT as part of the input reading
         mutate(ts = lubridate::ymd_hms(ts)) %>%
         group_by(expid) %>%
@@ -597,7 +612,10 @@ plot_memory_time <- function(data_attimo) {
     data_attimo %>%
         filter(motifs == 10) %>%
         group_by(dataset, window, repetitions) %>%
-        summarise(time_s = mean(time_s), preprocessing = mean(preprocessing)) %>%
+        summarise(
+            time_s = mean(time_s),
+            preprocessing = mean(preprocessing)
+        ) %>%
         group_by(dataset, window) %>%
         mutate(
             labelpos = time_s + 0.1 * max(time_s),
@@ -717,38 +735,42 @@ plot_motifs_10_alt <- function(data_attimo, data_scamp, data_measures) {
     bars + scamp + plot_layout(widths = c(5, 1))
 }
 
-plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_measures) {
+plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_scamp_gpu, data_measures) {
     # data_depths <- semi_join(data_depths, data_attimo)
+    print(data_scamp_gpu)
     
     pdata <- data_attimo %>%
-        left_join(select(filter(data_scamp, is_full_dataset), dataset, window, time_scamp_s = time_s)) %>%
+        # left_join(select(filter(data_scamp, is_full_dataset), dataset, window, time_scamp_s = time_s)) %>%
+        left_join(select(data_scamp_gpu, dataset, window = w, time_scamp_gpu_s = time_s)) %>%
         filter(motifs == 10) %>%
-        filter((repetitions == 400) | (dataset == "Seismic")) %>%
+        # filter((repetitions == 400) | (dataset == "Seismic")) %>%
         group_by(dataset, window) %>%
         slice_min(time_s) %>%
         ungroup() %>%
-        # print()
         as_tbl_json(json.column = "motif_pairs") %>%
         gather_array() %>%
         spread_all() %>%
         rename(motif_idx = array.index) %>%
         as_tibble() %>%
+        select(dataset, window, time_s, time_scamp_gpu_s, dist, motif_idx, confirmation_time, preprocessing) %>%
         mutate(
             time_scamp_s_hline = if_else(
-                (time_scamp_s < 1000) & (motif_idx == 1),
-                time_scamp_s,
+                (time_scamp_gpu_s < 1000) & (motif_idx == 1),
+                time_scamp_gpu_s,
                 as.double(NA)
             ),
             time_scamp_s_label = if_else(
-                time_scamp_s >= 1000 & (motif_idx == 1),
-                time_scamp_s,
+                time_scamp_gpu_s >= 1000 & (motif_idx == 1),
+                time_scamp_gpu_s,
                 as.double(NA)
             )
-        ) %>%
+        ) %T>%
+        print(n=100) %>%
         mutate(
             confirmation_time = as.numeric(confirmation_time),
             preprocessing = as.numeric(preprocessing)
-        ) 
+        )  %>%
+        reorder_datasets()
 
     maxval <- pdata %>% summarise(max(time_s)) %>% pull()
 
@@ -773,7 +795,7 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_measures) {
                 label = scales::number(
                     time_scamp_s_hline,
                     accuracy = 1,
-                    prefix = "Scamp: ",
+                    prefix = "Scamp-gpu: ",
                     suffix = " s"
                 ),
                 x = dist,
@@ -787,7 +809,7 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_measures) {
                 label = scales::number(
                     time_scamp_s_label,
                     accuracy = 1,
-                    prefix = "Scamp: ",
+                    prefix = "Scamp-gpu: ",
                     suffix = " s →"
                 ),
                 x = dist # * 1.2
@@ -815,7 +837,7 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_measures) {
             # axis.line.x = element_blank(),
             # axis.text.x = element_blank(),
             # axis.ticks.x = element_blank(),
-            panel.spacing = unit(5, "mm")
+            panel.spacing = unit(8, "mm")
         )
 
     bars

@@ -48,10 +48,18 @@ list(
     tar_target(
         data_gpucluster,
         read_csv("gpucluster.csv") %>%
+            group_by(dataset, w) %>%
+            summarise(time_s = mean(time_s)) %>%
             fix_names() %>%
             add_prefix_info() %>%
             mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
             select(dataset, w, algorithm, time_s)
+    ),
+    tar_target(
+        data_recall,
+        data_attimo %>% 
+            filter((repetitions == 400) | (dataset == "Seismic"), motifs == 10) %>% 
+            add_recall()
     ),
     # tar_target(
     #     data_depths,
@@ -99,7 +107,10 @@ list(
         img_motifs_10,
         ggsave(
             "imgs/10-motifs.png",
-            plot = plot_motifs_10_alt2(filter(data_attimo, delta == delta_val), data_scamp, data_measures),
+            plot = plot_motifs_10_alt2(filter(data_attimo, delta == delta_val), 
+                                       data_scamp, 
+                                       data_gpucluster,
+                                       data_measures),
             width = 5,
             height = 6,
             dpi = 300
