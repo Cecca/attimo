@@ -29,9 +29,6 @@ dists = load(Float64, "data/freezer.mp.dists.gz")
 # ╔═╡ 1432d42f-feb5-43ef-8481-f69fd9ae9a8a
 idx = load(Int, "data/freezer.mp.idx.gz")
 
-# ╔═╡ 865014a5-4183-4999-b6d4-83e01430a855
-sum(dists .== Inf)
-
 # ╔═╡ 71406a9f-2376-4c0a-b3d7-a20c841cceeb
 dists[1825969+1]
 
@@ -72,49 +69,53 @@ function pushtop!(arr, a, b, dist, ex)
 end
 
 # ╔═╡ 8845a7e9-288e-468a-9656-b938774ec08d
-function findmotifs2(dists, idx, k, ex; top=[])
+function findmotifs2(dists, idx, k, ex; init=[])
 	vec = [(d, a, b) for (d, a, b) in zip(dists, 0:length(dists)-1, idx)
 	       if a < b]
 	ordered = sort(vec; by = x -> x[1])
+	top = []
+	for ((a, b), d) in init
+		pushtop!(top, a, b, d, ex)
+	end
 	for (d, a, b) in ordered
 		if length(top) >= k
 			return top
 		end
 		pushtop!(top, a, b, d, ex)
 	end
-	top
+	[(a, b, d) for ((a, b), d) in top]
 end
 
 # ╔═╡ 52f5be68-d380-4fb2-8030-75db1186722f
 humany = findmotifs2(
 		load(Float64, "data/HumanY.mp.dists.gz"), 
 		load(Int, "data/HumanY.mp.idx.gz"), 10, 18000;
-		top=actual["HumanY"])
+		init=actual["HumanY"])
 
 # ╔═╡ 5dbfa9d3-a6a0-4be3-a3d8-a10be0b2836b
 gap = findmotifs2(
 		load(Float64, "data/GAP.mp.dists.gz"), 
-		load(Int, "data/GAP.mp.idx.gz"), 10, 600; top=actual["GAP"])
+		load(Int, "data/GAP.mp.idx.gz"), 10, 600; init=actual["GAP"])
 
 # ╔═╡ 12539f58-6689-4faf-b76b-4c655fefef25
 freezer = findmotifs2(
 		load(Float64, "data/freezer.mp.dists.gz"), 
-		load(Int, "data/freezer.mp.idx.gz"), 10, 5000; top=actual["freezer"])
+		load(Int, "data/freezer.mp.idx.gz"), 10, 5000; init=actual["freezer"])
 
 # ╔═╡ 344cec1b-9909-4c33-9d9c-081870680201
 astro = findmotifs2(
 		load(Float64, "data/astro.mp.dists.gz"), 
-		load(Int, "data/astro.mp.idx.gz"), 10, 100; top=actual["ASTRO"])
+		load(Int, "data/astro.mp.idx.gz"), 10, 100; init=actual["ASTRO"])
 
 # ╔═╡ 40d95c0f-dd33-48a2-a942-7241ef2d4a0b
 ecg = findmotifs2(
 		load(Float64, "data/ecg.mp.dists.gz"), 
-		load(Int, "data/ecg.mp.idx.gz"), 10, 1000; top=actual["ECG"])
+		load(Int, "data/ecg.mp.idx.gz"), 10, 1000; init=actual["ECG"])
 
 # ╔═╡ 88d0127d-f272-4b63-a631-d55a0f6c3929
 seismic = findmotifs2(
 		load(Float64, "data/VCAB_BP2_580_days-100000000.mp.dists.gz"), 
-		load(Int, "data/VCAB_BP2_580_days-100000000.mp.idx.gz"), 10, 1000; top=actual["Seismic"])
+		load(Int, "data/VCAB_BP2_580_days-100000000.mp.idx.gz"), 10, 100; init=actual["Seismic"])
 
 # ╔═╡ 07a42c2b-e9ed-4704-99b7-6b51d0fe58e6
 baseline = Dict(
@@ -128,11 +129,15 @@ baseline = Dict(
 
 # ╔═╡ 4e302e0f-b529-490d-b106-435d59cb6447
 open("baselines.json", "w") do f
-	JSON.print(f, baseline, 2)
+	b2 = deepcopy(baseline)
+	for k in keys(b2)
+		b2[k] = [(a, b, d) for ((a, b), d) in baseline[k]]
+	end
+	JSON.print(f, b2, 2)
 end
 
 # ╔═╡ 7d955800-929e-4f15-898f-f233b7e93ead
-findmotifs2(dists, idx, 10, 5000; top=actual["freezer"])
+findmotifs2(dists, idx, 10, 5000; init=actual["freezer"])
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -204,7 +209,6 @@ uuid = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
 # ╠═7d955800-929e-4f15-898f-f233b7e93ead
 # ╠═27767505-36fc-49af-9d8c-77fadeee41fe
 # ╠═1432d42f-feb5-43ef-8481-f69fd9ae9a8a
-# ╠═865014a5-4183-4999-b6d4-83e01430a855
 # ╠═71406a9f-2376-4c0a-b3d7-a20c841cceeb
 # ╠═a777e6dc-31f3-4044-802a-01f30aa93e75
 # ╠═07275457-b76b-43d8-9fa0-f0c813eec88a
