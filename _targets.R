@@ -36,7 +36,7 @@ list(
         bind_rows(
             data_attimo %>%
                 filter(!is.na(perc_size)) %>%
-                filter(delta == delta_val) %>%
+                filter(delta == 0.001) %>%
                 select(algorithm, dataset, perc_size, time_s),
             read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
                 fix_names() %>%
@@ -86,15 +86,15 @@ list(
     # ),
 
     # Figure scalability -------------------------------------------------------
-    # tar_target(
-    #     img_scalability_n,
-    #     ggsave("imgs/scalability_n.png",
-    #         plot = plot_scalability_n_alt(data_scalability),
-    #         width = 5,
-    #         height = 3,
-    #         dpi = 300
-    #     )
-    # ),
+    tar_target(
+        img_scalability_n,
+        ggsave("imgs/scalability_n.png",
+            plot = plot_scalability_n_alt(data_scalability),
+            width = 5,
+            height = 3,
+            dpi = 300
+        )
+    ),
 
     # Time comparison -----------------------------------------------
     tar_target(

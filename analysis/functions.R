@@ -53,6 +53,7 @@ add_prefix_info <- function(dat) {
             path = if_else(is.na(path), dataset, path),
             dataset = str_remove(dataset, "data/") %>%
                 str_remove("-(perc)?\\d+") %>%
+                str_remove("scamp-") %>%
                 str_remove(".(csv|txt)")
         ) %>%
         left_join(dataset_info()) %>%
@@ -190,6 +191,9 @@ add_recall <- function(data_attimo, data_scamp) {
 
         actual_a <- mots %>% pull(a)
         actual_b <- mots %>% pull(b)
+        # actual_dist <- mots %>% pull(dist)
+        # ground_dist <- purrr::map_dbl(baseline, ~ .[[3]])
+        # print(ground_dist - actual_dist)
 
         cnt <- 0
 
@@ -880,12 +884,16 @@ plot_scalability_n_alt <- function(data_scalability) {
     ggplot(plotdata, aes(perc_size, time_s, color = algorithm)) +
         geom_point() +
         geom_line() +
-        geom_text_repel(
-            aes(label = scales::number(time_s, accuracy = 1)), 
+        geom_text(
+            aes(x = perc_size - 0.01,
+                y = time_s + 1000,
+                label = scales::number(time_s, accuracy = 1)), 
             show.legend = F,
             data = function(d) {filter(d, perc_size > 0.4)},
             size = 3,
-            hjust = 0
+            hjust = 1
+            # nudge_y = 100
+            # nudge_x = -0.1
         ) +
         geom_segment(
             aes(
