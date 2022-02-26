@@ -13,4 +13,4 @@ data/EMG.csv,500,37.67
 data/GAP.csv,600,27.39
 data/VCAB_BP2_580_days-100000000.txt,100,28417.43
 data/HumanY.txt,18000,2230.17
-freezer,5000,207.85
+data/freezer.txt,5000,207.85

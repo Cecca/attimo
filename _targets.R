@@ -38,6 +38,9 @@ list(
                 filter(!is.na(perc_size)) %>%
                 filter(delta == 0.001) %>%
                 select(algorithm, dataset, perc_size, time_s),
+            data_scamp %>%
+                filter(!is.na(perc_size)) %>%
+                select(algorithm, dataset, perc_size, time_s),
             read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
                 fix_names() %>%
                 add_prefix_info() %>%
@@ -78,6 +81,10 @@ list(
         data_motif_occurences,
         get_motif_instances(data_attimo)
     ),
+    tar_target(
+        data_comparison,
+        get_data_comparison(filter(data_attimo, delta == delta_val), data_scamp, data_ll, data_gpucluster)
+    ),
 
     # Figure motifs ------------------------------------------------------------
     # tar_target(
@@ -99,7 +106,11 @@ list(
     # Time comparison -----------------------------------------------
     tar_target(
         tab_time_comparison,
-        do_tab_time_comparison(filter(data_attimo, delta == delta_val), data_scamp, data_ll, data_gpucluster, "imgs/time-comparison.tex")
+        do_tab_time_comparison(data_comparison, "imgs/time-comparison.tex")
+    ),
+    tar_target(
+        tab_time_comparison_normalized,
+        do_tab_time_comparison_normalized(data_comparison)
     ),
 
     # Figure motifs 10 -----------------------------------------------------
@@ -118,6 +129,10 @@ list(
     ),
 
     # Figure memory -----------------------------------------------------
+    tar_target(
+        tab_mem,
+        table_mem(filter(data_attimo, delta == delta_val))
+    ),
     tar_target(
         img_mem,
         ggsave(

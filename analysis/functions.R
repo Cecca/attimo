@@ -43,7 +43,7 @@ fix_names <- function(df) {
 reorder_datasets <- function(df) {
     df %>%
         mutate(
-            dataset = factor(dataset, c("EMG", "freezer", "ASTRO", "GAP", "Seismic", "ECG", "HumanY"), ordered = T)
+            dataset = factor(dataset, c("freezer", "ASTRO", "GAP", "Seismic", "ECG", "HumanY"), ordered = T)
         )
 }
 
@@ -474,10 +474,11 @@ latex_info <- function(data_motif_measures) {
         write_file("imgs/dataset-info.tex")
 }
 
-do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluster, file_out) {
+get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluster) {
+    print(data_gpucluster)
     bind_rows(
         data_attimo %>%
-            filter((repetitions == 800) | (dataset == "Seismic")) %>%
+            filter((repetitions == 200) | (dataset == "Seismic")) %>%
             select(
                 algorithm, hostname, dataset, is_full_dataset, threads, window,
                 repetitions, motifs, delta, time_s, distances_fraction
@@ -490,12 +491,46 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, data_gpuclu
             data_ll, algorithm, hostname, dataset, is_full_dataset, window,
             time_s
         ),
-        data_gpucluster %>% mutate(is_full_dataset = T)
+        select(data_gpucluster, algorithm, dataset, window = w, time_s) %>% mutate(is_full_dataset = T)
     ) %>%
+        semi_join(allowed_combinations) %>%
         filter(is_full_dataset) %>%
         group_by(dataset, algorithm) %>%
         slice_min(time_s) %>%
         ungroup() %>%
+        inner_join(dataset_info()) %>%
+        select(algorithm, dataset, n, window, time_s, distances_fraction)
+}
+
+do_tab_speedup <- function(data_comparison) {
+    data_comparison %>%
+        select(algorithm, dataset, time_s) %>%
+        pivot_wider(names_from = algorithm, values_from=time_s) %>%
+        mutate(speedup = `scamp-gpu` / attimo) %>%
+        select(dataset, speedup) %>%
+        reorder_datasets() %>%
+        arrange(dataset)
+        kableExtra::kbl(booktabs = T, format = 'latex', linesep = "") %>%
+        write_file("imgs/time-comparison-normalized.tex")
+}
+
+
+do_tab_time_comparison_normalized <- function(data_comparison) {
+    data_comparison %>%
+        mutate(ntime = time_s / n) %>%
+        select(algorithm, dataset, ntime) %>%
+        pivot_wider(names_from = algorithm, values_from=ntime) %>%
+        mutate_if(is.numeric, scales::scientific_format()) %>%
+        mutate(across(c("attimo", "ll", "scamp", "scamp-gpu"), ~ if_else(is.na(.), "-", .))) %>%
+        reorder_datasets() %>%
+        arrange(dataset) %>%
+        select(dataset, attimo, `scamp-gpu`, scamp, ll) %>%
+        kableExtra::kbl(booktabs = T, format = 'latex', linesep = "") %>%
+        write_file("imgs/time-comparison-normalized.tex")
+}
+
+do_tab_time_comparison <- function(data_comparison, file_out) {
+    data_comparison %>%
         mutate(
             time_s = scales::number(time_s, accuracy = 0.1),
             distances_fraction = scales::scientific(
@@ -511,17 +546,18 @@ do_tab_time_comparison <- function(data_attimo, data_scamp, data_ll, data_gpuclu
         ) %>%
         select(dataset, algorithm, time_s) %>%
         pivot_wider(names_from = algorithm, values_from = time_s) %>%
+        mutate(across(!matches("dataset"), ~if_else(is.na(.), "-", .))) %>%
         reorder_datasets() %>%
         arrange(dataset) %>%
-        select(dataset, attimo, `scamp-gpu`, scamp, ll) %>%
+        select(dataset, `\\attimo`=attimo, `\\scamp-gpu`=`scamp-gpu`, `\\scamp`=scamp, `\\LL`=ll) %>%
         kbl(
             format = "latex", booktabs = T, linesep = "", align = "lrrrr",
-            escape = F,
-            caption = "Time to find the top motif at different window lengths. For \\our,
-            the number in parentheses reports the fraction of distance computations
-            performed to find the solution."
+            escape = F
+            # caption = "Time to find the top motif at different window lengths. For \\our,
+            # the number in parentheses reports the fraction of distance computations
+            # performed to find the solution."
         ) %>%
-        kable_styling() %>%
+        # kable_styling() %>%
         add_header_above(c(" " = 1, "Time (s)" = 4)) %>%
         write_file(file_out)
 }
@@ -823,7 +859,7 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
             hjust = 1,
             vjust = 0
         ) +
-        scale_y_continuous(limits = c(0, NA)) +
+        scale_y_continuous(limits = c(0, NA), breaks = 0:5 * 100) +
         scale_x_continuous(limits = c(NA, NA), position = "top") +
         facet_wrap(vars(dataset), ncol = 1, scales = "free_y", strip.position = "left") +
         labs(
@@ -885,15 +921,22 @@ plot_scalability_n_alt <- function(data_scalability) {
         geom_point() +
         geom_line() +
         geom_text(
+            aes(x = perc_size + 0.01,
+                y = time_s - 1500,
+                label = scales::number(time_s, accuracy = 1)), 
+            show.legend = F,
+            data = function(d) {filter(d, algorithm == "scamp")},
+            size = 3,
+            hjust = 0
+        ) +
+        geom_text(
             aes(x = perc_size - 0.01,
-                y = time_s + 1000,
+                y = time_s + 2500,
                 label = scales::number(time_s, accuracy = 1)), 
             show.legend = F,
             data = function(d) {filter(d, perc_size > 0.4)},
             size = 3,
             hjust = 1
-            # nudge_y = 100
-            # nudge_x = -0.1
         ) +
         geom_segment(
             aes(
@@ -905,39 +948,33 @@ plot_scalability_n_alt <- function(data_scalability) {
             linetype = "dotted",
             data = speedups
         ) +
-        geom_label(
+        geom_text(
             aes(
                 y = y,
+                x = perc_size + 0.01,
                 label = scales::number(speedup, prefix = "x", accuracy = 1)
             ),
             color = "black",
             data = speedups,
-            size=3
+            size=3,
+            hjust = 0
         ) +
-        # geom_text_repel(
-        #     aes(label = algorithm), 
-        #     data = function(d){filter(d, perc_size == 1)},
-        #     show.legend = F, 
-        #     direction = 'x',
-        #     hjust = 1
-        #     # nudge_x = 0.2
-        # ) +
         scale_y_continuous(labels = scales::number_format()) +
         scale_x_continuous(labels = scales::percent_format()) +
-        scale_color_manual(values = c("#5778a4", "#e49444")) +
+        scale_color_manual(values = c("#5778a4", "#e49444", "#e15759")) +
         labs(
             x = "Size percentage",
             y = "Total time (s)"
         ) +
         theme_paper() +
         theme(
-            legend.position = c(0.2, 0.8)
+            legend.position = c(0.8, 0.8)
         )
 }
 
 plot_mem <- function(data_attimo) {
     plotdata <- data_attimo %>%
-        filter(motifs == 10, repetitions >= 200) %>%
+        filter(motifs == 10) %>%
         mutate(bytes_per_subsequence = max_mem_bytes / n)
 
     ggplot(plotdata, aes(repetitions, bytes_per_subsequence)) +
@@ -956,4 +993,17 @@ plot_mem <- function(data_attimo) {
             y = "Bytes per subsequence"
         ) +
         theme_paper()
+}
+
+table_mem <- function(data_attimo) {
+    data_attimo %>%
+        filter(motifs == 10, repetitions %in% c(50, 100, 200, 400, 800, 1600)) %>%
+        mutate(bytes_per_subsequence = max_mem_bytes / n) %>%
+        group_by(repetitions) %>%
+        summarise(
+            bytes_per_subsequence = scales::number_bytes(mean(bytes_per_subsequence), accuracy = 0.01)
+        ) %>%
+        pivot_wider(names_from=repetitions, values_from=bytes_per_subsequence) %>%
+        kableExtra::kbl(format = "latex", booktabs = T, align = "rrrrrr") %>%
+        write_file("imgs/memory.tex")
 }
