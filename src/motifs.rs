@@ -775,19 +775,19 @@ mod test {
         // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
         // In this example, however, we find a set of motifs which are at shorter distance than
         // the ones returned by SCAMP, because SCAMP allows to search only among the nearest neighbor pairs.
-        // In this dataset, however, the 8-th and 9-th motifs are formed between subsequences 
+        // In this dataset, however, the 8-th and 9-th motifs are formed between subsequences
         // which are nearest neighbor of the other.
         let top10 = [
-            (1834102, 3705031, 4.195242485),
-            (3698075, 4733298, 5.765751866),
-            (2352367, 4186991, 7.077046765),
-            (3993450, 4002563, 7.318316307),
-            (4618976, 4812738, 9.207241828),
-            (1408089, 1697587, 10.56533893),
-            (5169982, 6429402, 11.46242184),
-            (723608, 1825768, 11.94925582),
-            (5230708, 6641806, 12.46052708),
-            (191377, 6339277, 12.50717434),
+            (1834102, 3705031, 4.1952486568),
+            (3698075, 4733298, 5.7657310309),
+            (2352368, 4186992, 7.0770274972),
+            (3993450, 4002563, 7.3183233206),
+            (4618976, 4812738, 9.2072505046),
+            (1825961, 1993851, 9.4638512551),
+            (1408089, 1697587, 10.5653425966),
+            (3815625, 5170040, 11.3377882631),
+            (6429366, 6641900, 11.7777055301),
+            (191377, 6339277, 12.50718219),
         ];
 
         let w = 5000;
