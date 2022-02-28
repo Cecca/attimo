@@ -21,4 +21,4 @@ jobs:
     - name: Run tests (debug mode)
       run: cargo test --verbose
     - name: Run tests (release mode)
-      run: cargo test -- --ignored --test-threads=1
+      run: cargo test --release -- --ignored --test-threads=1
