@@ -588,7 +588,7 @@ mod test {
     fn test_rolling_stats() {
         let w = 1000;
         let ts =
-            crate::load::loadts("data/ECG.csv", Some(1_000_000)).expect("problem loading data");
+            crate::load::loadts("data/ECG.csv.gz", Some(1_000_000)).expect("problem loading data");
 
         let (a_mean, a_std) = rolling_stat(&ts, w);
         let (e_mean, e_std) = rolling_stat_slow(&ts, w);
@@ -619,7 +619,7 @@ mod test {
     #[test]
     fn test_distance_profile() {
         let w = 1000;
-        let ts = crate::load::loadts("data/ECG.csv", Some(100000)).expect("problem loading data");
+        let ts = crate::load::loadts("data/ECG.csv.gz", Some(100000)).expect("problem loading data");
         let ts = WindowedTimeseries::new(ts, w, true);
 
         let actual = ts.distance_profile(0);
