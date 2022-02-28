@@ -1,7 +1,7 @@
-ATTIMO: ApproximaTe TImeseries MOtifs
+ATTIMO: AdapTive TImeseries MOtifs
 =====================================
 
-This is the implementation of the ATTIMO algorithm for fast approximate mining
+This is the implementation of the ATTIMO algorithm for fast mining
 of timeseries motifs, with probabilistic guarantees.
 
 ## Installation
@@ -22,7 +22,7 @@ At this point, you should have the `attimo` command available on your system.
 
 Executing the command with no arguments shows a short help message.
 
-    $ attimo                                                                                                                                                            (base) 
+    ❯ attimo
     Required positional arguments not provided:
         path
     Required options not provided:
@@ -31,22 +31,6 @@ Executing the command with no arguments shows a short help message.
         --memory
 
 The flag `--help` gives a more comprehensive overview
-
-    ❯ attimo --help                                                                                                                                                     (base) 
-    Usage: attimo <path> -w <window> --motifs <motifs> [--delta <delta>] -m <memory> [--plot] [--prefix <prefix>] [--seed <seed>]
-
-    ATTIMO computes ApproximaTe TImeseries MOtifs.
-
-    Options:
-      -w, --window      subsequcence length
-      --motifs          the number of motifs to look for
-      --delta           failure probability of the LSH scheme
-      -m, --memory      the amount of memory the algorithm can use
-      --plot            open a browser window with a plot of the approximate matrix
-                        profile
-      --prefix          consider only the given number of points from the input
-      --seed            seed for the psudorandom number generator
-      --help            display usage information
 
 ## Data format
 
