@@ -123,7 +123,7 @@ list(
                                        data_gpucluster,
                                        data_measures),
             width = 5,
-            height = 6,
+            height = 5,
             dpi = 300
         )
     ),

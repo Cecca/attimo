@@ -584,6 +584,7 @@ mod test {
     }
 
     #[test]
+    #[ignore]
     fn test_rolling_stats() {
         let w = 1000;
         let ts =

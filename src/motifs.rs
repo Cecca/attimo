@@ -627,7 +627,8 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_ecg_10000() {
+    #[ignore]
+    fn test_motif_ecg_10000() {
         // The indices and distances in this test have been computed
         // using SCAMP: https://github.com/zpzim/SCAMP
         // The distances are slightly different, due to numerical approximation
@@ -637,7 +638,7 @@ mod test {
             (200, 416, 2580, 0.3602377446),
             (1000, 1172, 6112, 2.133571168),
         ] {
-            let ts: Vec<f64> = loadts("data/ECG-10000.csv", None).unwrap();
+            let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
 
             let motif = *motifs(&ts, 1, Repetitions::Exact(20), 0.001, None, None, 12435)
@@ -654,13 +655,14 @@ mod test {
     }
 
     #[test]
-    fn test_ecg_full() {
+    #[ignore]
+    fn test_motif_ecg_full() {
         // The indices and distances in this test have been computed
         // using SCAMP: https://github.com/zpzim/SCAMP
         // The distances are slightly different, due to numerical approximation
         // and a different normalization in their computation of the standard deviation
         for (w, a, b, d) in [(1000, 7137168, 7414108, 0.3013925657)] {
-            let ts: Vec<f64> = loadts("data/ECG.csv", None).unwrap();
+            let ts: Vec<f64> = loadts("data/ECG.csv.gz", None).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
             // assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
 
@@ -678,7 +680,8 @@ mod test {
     }
 
     #[test]
-    fn test_ecg_top10() {
+    #[ignore]
+    fn test_motif_ecg_top10() {
         // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
         let top10 = [
             (7137166, 7414106, 0.3013925657),
@@ -694,7 +697,7 @@ mod test {
         ];
 
         let w = 1000;
-        let ts: Vec<f64> = loadts("data/ECG.csv", None).unwrap();
+        let ts: Vec<f64> = loadts("data/ECG.csv.gz", None).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
         let motifs = motifs(&ts, 10, Repetitions::Exact(200), 0.01, None, None, 12435);
@@ -722,7 +725,8 @@ mod test {
     }
 
     #[test]
-    fn test_astro_top10() {
+    #[ignore]
+    fn test_motif_astro_top10() {
         // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
         let top10 = [
             (609810, 888455, 1.264327903),
@@ -738,7 +742,7 @@ mod test {
         ];
 
         let w = 100;
-        let ts: Vec<f64> = loadts("data/ASTRO.csv", None).unwrap();
+        let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", None).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
         let motifs = motifs(&ts, 10, Repetitions::Exact(800), 0.01, None, None, 12435);
@@ -766,7 +770,8 @@ mod test {
     }
 
     #[test]
-    fn test_freezer_top10() {
+    #[ignore]
+    fn test_motif_freezer_top10() {
         // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
         // In this example, however, we find a set of motifs which are at shorter distance than
         // the ones returned by SCAMP, because SCAMP allows to search only among the nearest neighbor pairs.
@@ -786,7 +791,7 @@ mod test {
         ];
 
         let w = 5000;
-        let ts: Vec<f64> = loadts("data/freezer.txt", None).unwrap();
+        let ts: Vec<f64> = loadts("data/freezer.txt.gz", None).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
         let motifs = motifs(&ts, 10, Repetitions::Exact(400), 0.01, None, None, 12435);

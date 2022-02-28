@@ -7,16 +7,28 @@ use std::path::Path;
 use std::time::Instant;
 
 pub fn loadts<P: AsRef<Path>>(path: P, prefix: Option<usize>) -> Result<Vec<f64>> {
+    if path.as_ref().extension().map(|ext| ext.to_str().unwrap().ends_with("gz")).unwrap_or(false) {
+        let f = File::open(path.as_ref()).with_context(|| format!("reading {:?}", path.as_ref()))?;
+        let f = BufReader::new(f);
+        let f = flate2::read::GzDecoder::new(f);
+        let f = BufReader::new(f);
+        load_from(f, prefix)
+    } else {
+        let f = File::open(path.as_ref()).with_context(|| format!("reading {:?}", path.as_ref()))?;
+        let f = BufReader::new(f);
+        load_from(f, prefix)
+    }
+}
+
+fn load_from<R: BufRead>(mut reader: R, prefix: Option<usize>) -> Result<Vec<f64>> {
     let start = Instant::now();
     let to_take = prefix.unwrap_or(usize::MAX);
-    let f = File::open(path.as_ref()).with_context(|| format!("reading {:?}", path.as_ref()))?;
-    let mut f = BufReader::new(f);
     let mut res: Vec<f64> = Vec::with_capacity(10000000);
     let mut buf = String::new();
     let mut cnt = 0;
     while cnt < to_take {
         buf.clear();
-        match f.read_line(&mut buf) {
+        match reader.read_line(&mut buf) {
             Ok(0) => break, // EOF reached
             Ok(_) => {
                 if !buf.trim_end().is_empty() {
@@ -33,4 +45,5 @@ pub fn loadts<P: AsRef<Path>>(path: P, prefix: Option<usize>) -> Result<Vec<f64>
     }
     slog_scope::info!("input reading"; "tag" => "profiling", "time_s" => start.elapsed().as_secs_f64());
     Ok(res)
+
 }

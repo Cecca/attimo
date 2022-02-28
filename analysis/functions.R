@@ -867,7 +867,7 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
             x = "distance",
             y = "time (s)"
         ) +
-        coord_flip() +
+        coord_flip(clip='off') +
         theme_paper() +
         theme(
             # axis.line.y = element_blank(),
