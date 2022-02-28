@@ -783,7 +783,7 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
         # left_join(select(filter(data_scamp, is_full_dataset), dataset, window, time_scamp_s = time_s)) %>%
         left_join(select(data_scamp_gpu, dataset, window = w, time_scamp_gpu_s = time_s)) %>%
         filter(motifs == 10) %>%
-        # filter((repetitions == 400) | (dataset == "Seismic")) %>%
+        filter((repetitions == 400) | (dataset == "Seismic")) %>%
         group_by(dataset, window) %>%
         slice_min(time_s) %>%
         ungroup() %>%
@@ -839,7 +839,7 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
                     suffix = " s"
                 ),
                 x = dist,
-                y = time_scamp_s_hline + 10
+                y = time_scamp_s_hline + 30
             ),
             hjust = 0,
             vjust = 0
@@ -859,7 +859,8 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
             hjust = 1,
             vjust = 0
         ) +
-        scale_y_continuous(limits = c(0, NA), breaks = 0:5 * 100) +
+        scale_y_continuous(limits = c(0, NA)) +
+        # scale_y_continuous(limits = c(0, NA), breaks = 0:5 * 100) +
         scale_x_continuous(limits = c(NA, NA), position = "top") +
         facet_wrap(vars(dataset), ncol = 1, scales = "free_y", strip.position = "left") +
         labs(
