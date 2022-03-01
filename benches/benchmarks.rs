@@ -1,4 +1,5 @@
 use std::cmp::Reverse;
+use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -310,16 +311,124 @@ pub fn bench_first_collision(c: &mut Criterion) {
     }
 }
 
+fn bench_repetition(c: &mut Criterion) {
+    let mut group = c.benchmark_group("repetition");
+    group.sample_size(10);
+
+
+    let w = 1000;
+    let repetitions = 2;
+    let prefix = 20;
+
+    let explore = |ts: &WindowedTimeseries, buckets: &[Range<usize>]| {
+        for bucket in buckets {
+            for a in bucket.clone().into_iter() {
+                for b in bucket.clone().into_iter() {
+                    if a + w < b {
+                        zeucl(&ts, a, b);
+                    }
+                }
+            }
+        }
+    };
+
+    // these two benchmarks only focus on computing the bucket boundaries
+    group.bench_function(
+        "distances/group_subsequences",
+        |bencher| {
+            let ts = loadts("data/ECG.csv.gz", None).unwrap();
+            let ts = WindowedTimeseries::new(ts, w, false);
+            let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
+            let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
+            let mut buffer = Vec::new();
+            let mut output = Vec::new();
+            bencher.iter(|| {
+                pools.group_subsequences(prefix, 0, w, &mut buffer, &mut output);
+            });
+        }
+    );
+
+    group.bench_function(
+        "distances/flat_trie",
+        |bencher| {
+            let ts = loadts("data/ECG.csv.gz", None).unwrap();
+            let ts = WindowedTimeseries::new(ts, w, false);
+            let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
+            let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
+            let mut output = Vec::new();
+            let tries = pools.flat_tries();
+            bencher.iter(|| {
+                tries[0].groups_at(prefix as u8, &mut output);
+            });
+        }
+    );
+
+    // these benchmarks, instead, also do the computation of distances
+    group.bench_function(
+        "distances/group_subsequences",
+        |bencher| {
+            let ts = loadts("data/ECG.csv.gz", None).unwrap();
+            let ts = WindowedTimeseries::new(ts, w, false);
+            let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
+            let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
+            let mut buffer = Vec::new();
+            let mut output = Vec::new();
+            bencher.iter(|| {
+                pools.group_subsequences(prefix, 0, w, &mut buffer, &mut output);
+                explore(&ts, &output);
+            });
+        }
+    );
+    group.bench_function(
+        "distances/flat_trie",
+        |bencher| {
+            let ts = loadts("data/ECG.csv.gz", None).unwrap();
+            let ts = WindowedTimeseries::new(ts, w, false);
+            let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
+            let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
+            let mut output = Vec::new();
+            let tries = pools.flat_tries();
+            bencher.iter(|| {
+                tries[0].groups_at(prefix as u8, &mut output);
+                explore(&ts, &output);
+            });
+        }
+    );
+}
+
+fn bench_create_tries(c: &mut Criterion) {
+    let mut group = c.benchmark_group("create_tries");
+    group.sample_size(10);
+
+    let w = 1000;
+    let repetitions = 2;
+
+    group.bench_function(
+        "flat_trie",
+        |bencher| {
+            let ts = loadts("data/ECG.csv.gz", None).unwrap();
+            let ts = WindowedTimeseries::new(ts, w, false);
+            let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
+            let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
+            bencher.iter(|| {
+                pools.flat_tries()
+            });
+        }
+    );
+}
+
 criterion_group!(
     benches,
-    bench_sliding_dot_product,
-    bench_construct_ts,
-    bench_hash_ts,
-    // bench_sort_usize,
-    // bench_sort_u8,
-    bench_sort_hashes,
-    bench_zdot,
-    bench_first_collision,
-    bench_zeucl
+    // bench_sliding_dot_product,
+    // bench_construct_ts,
+    // bench_hash_ts,
+    // // bench_sort_usize,
+    // // bench_sort_u8,
+    // bench_sort_hashes,
+    // bench_zdot,
+    // bench_first_collision,
+    // bench_zeucl,
+    // bench_repetition,
+    bench_create_tries
 );
 criterion_main!(benches);
