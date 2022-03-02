@@ -4,6 +4,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use attimo::distance::{zdot, zeucl};
+use attimo::flat_trie::*;
 use attimo::load::loadts;
 use attimo::sort::*;
 use attimo::{lsh::*, timeseries::WindowedTimeseries};
@@ -315,7 +316,6 @@ fn bench_repetition(c: &mut Criterion) {
     let mut group = c.benchmark_group("repetition");
     group.sample_size(10);
 
-
     let w = 1000;
     let repetitions = 2;
     let prefix = 20;
@@ -333,88 +333,122 @@ fn bench_repetition(c: &mut Criterion) {
     };
 
     // these two benchmarks only focus on computing the bucket boundaries
-    group.bench_function(
-        "distances/group_subsequences",
-        |bencher| {
-            let ts = loadts("data/ECG.csv.gz", None).unwrap();
-            let ts = WindowedTimeseries::new(ts, w, false);
-            let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
-            let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
-            let mut buffer = Vec::new();
-            let mut output = Vec::new();
-            bencher.iter(|| {
-                pools.group_subsequences(prefix, 0, w, &mut buffer, &mut output);
-            });
-        }
-    );
+    group.bench_function("distances/group_subsequences", |bencher| {
+        let ts = loadts("data/ECG.csv.gz", None).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, false);
+        let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
+        let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
+        let mut buffer = Vec::new();
+        let mut output = Vec::new();
+        bencher.iter(|| {
+            pools.group_subsequences(prefix, 0, w, &mut buffer, &mut output);
+        });
+    });
 
-    group.bench_function(
-        "distances/flat_trie",
-        |bencher| {
-            let ts = loadts("data/ECG.csv.gz", None).unwrap();
-            let ts = WindowedTimeseries::new(ts, w, false);
-            let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
-            let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
-            let mut output = Vec::new();
-            let tries = pools.flat_tries();
-            bencher.iter(|| {
-                tries[0].groups_at(prefix as u8, &mut output);
-            });
-        }
-    );
+    group.bench_function("distances/flat_trie", |bencher| {
+        let ts = loadts("data/ECG.csv.gz", None).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, false);
+        let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
+        let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
+        let mut output = Vec::new();
+        let tries = pools.flat_tries();
+        bencher.iter(|| {
+            tries[0].groups_at(prefix as u8, &mut output);
+        });
+    });
 
     // these benchmarks, instead, also do the computation of distances
-    group.bench_function(
-        "distances/group_subsequences",
-        |bencher| {
-            let ts = loadts("data/ECG.csv.gz", None).unwrap();
-            let ts = WindowedTimeseries::new(ts, w, false);
-            let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
-            let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
-            let mut buffer = Vec::new();
-            let mut output = Vec::new();
-            bencher.iter(|| {
-                pools.group_subsequences(prefix, 0, w, &mut buffer, &mut output);
-                explore(&ts, &output);
-            });
-        }
-    );
-    group.bench_function(
-        "distances/flat_trie",
-        |bencher| {
-            let ts = loadts("data/ECG.csv.gz", None).unwrap();
-            let ts = WindowedTimeseries::new(ts, w, false);
-            let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
-            let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
-            let mut output = Vec::new();
-            let tries = pools.flat_tries();
-            bencher.iter(|| {
-                tries[0].groups_at(prefix as u8, &mut output);
-                explore(&ts, &output);
-            });
-        }
-    );
+    group.bench_function("distances/group_subsequences", |bencher| {
+        let ts = loadts("data/ECG.csv.gz", None).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, false);
+        let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
+        let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
+        let mut buffer = Vec::new();
+        let mut output = Vec::new();
+        bencher.iter(|| {
+            pools.group_subsequences(prefix, 0, w, &mut buffer, &mut output);
+            explore(&ts, &output);
+        });
+    });
+    group.bench_function("distances/flat_trie", |bencher| {
+        let ts = loadts("data/ECG.csv.gz", None).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, false);
+        let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
+        let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
+        let mut output = Vec::new();
+        let tries = pools.flat_tries();
+        bencher.iter(|| {
+            tries[0].groups_at(prefix as u8, &mut output);
+            explore(&ts, &output);
+        });
+    });
 }
 
 fn bench_create_tries(c: &mut Criterion) {
+    let w = 1000;
+    let ts = loadts("data/ECG.csv.gz", None).unwrap();
+    let ts = WindowedTimeseries::new(ts, w, false);
+
     let mut group = c.benchmark_group("create_tries");
     group.sample_size(10);
+    group.throughput(Throughput::Elements(ts.num_subsequences() as u64));
 
-    let w = 1000;
     let repetitions = 2;
+    let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
+    let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
 
-    group.bench_function(
-        "flat_trie",
-        |bencher| {
-            let ts = loadts("data/ECG.csv.gz", None).unwrap();
-            let ts = WindowedTimeseries::new(ts, w, false);
-            let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
-            let pools = HashCollection::from_ts(&ts, Arc::clone(&h));
-            bencher.iter(|| {
-                pools.flat_tries()
-            });
-        }
-    );
+    group.bench_function("cmp_equal", |bencher| {
+        let h1 = pools.extended_hash_value(0, 0);
+        let h2 = pools.extended_hash_value(0, 0);
+        bencher.iter(|| h1.lexi_cmp(&h2));
+    });
+    group.bench_function("cmp_different", |bencher| {
+        let h1 = pools.extended_hash_value(0, 0);
+        let h2 = pools.extended_hash_value(20000, 0);
+        bencher.iter(|| h1.lexi_cmp(&h2));
+    });
+
+    group.bench_function("cmp_equal_inplace", |bencher| {
+        bencher.iter(|| pools.lexi_cmp(0, 0, 0, 0));
+    });
+    group.bench_function("cmp_different_inplace", |bencher| {
+        bencher.iter(|| pools.lexi_cmp(0, 20000, 0, 0));
+    });
+
+    group.bench_function("sort_hashes", |bencher| {
+        let hashes: Vec<([u8; K], u32)> = (0..ts.num_subsequences())
+            .map(|i| (pools.extended_hash_value(i, 0), i as u32))
+            .collect();
+        bencher.iter_batched(
+            || hashes.clone(),
+            |mut h| h.sort_unstable_by(|a, b| a.0.lexi_cmp(&b.0)),
+            criterion::BatchSize::LargeInput,
+        );
+    });
+    group.bench_function("sort_hashes_nocopy", |bencher| {
+        bencher.iter_batched(
+            || (0u32..ts.num_subsequences() as u32).collect::<Vec<u32>>(),
+            |mut h| h.sort_unstable_by(|a, b| pools.lexi_cmp(*a as usize, *b as usize, 0, 0)),
+            criterion::BatchSize::LargeInput,
+        );
+    });
+    group.bench_function("sort_hashes_radix", |bencher| {
+        bencher.iter_batched(
+            || (0u32..ts.num_subsequences() as u32).collect::<Vec<u32>>(),
+            |mut h| pools.lexi_sort(0, &mut h),
+            criterion::BatchSize::LargeInput,
+        );
+    });
+    group.bench_function("sort_short_hashes", |bencher| {
+        let mut buf = Vec::with_capacity(ts.num_subsequences());
+        bencher.iter(
+            || {
+                buf.clear();
+                buf.extend((0..ts.num_subsequences()).map(|i| (pools.hash_value(i, K, 0))));
+                buf.sort_unstable();
+            }
+        );
+    });
 }
 
 criterion_group!(

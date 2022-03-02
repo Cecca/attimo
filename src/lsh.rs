@@ -38,6 +38,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::time::Duration;
@@ -237,11 +238,65 @@ impl HashCollection {
         let r = &self.right(i, repetition);
         let mut h = 0;
         while h < K_HALF {
-            output[2*h] = l[h];
-            output[2*h+1] = r[h];
+            output[2 * h] = l[h];
+            output[2 * h + 1] = r[h];
             h += 1;
         }
         output
+    }
+
+    pub fn single_hash_value(&self, subseq: usize, i: usize, rep: usize) -> u8 {
+        if i % 2 == 0 {
+            self.left(subseq, rep)[i % K_HALF]
+        } else {
+            self.right(subseq, rep)[i % K_HALF]
+        }
+    }
+
+    /// Compare two subsequences by the lexicographic ordering of
+    /// their `K`-length hash values in the the given repetition
+    pub fn lexi_cmp(&self, a: usize, b: usize, from_byte: usize, rep: usize) -> Ordering {
+        let a_left = self.left(a, rep);
+        let b_left = self.left(b, rep);
+        let a_right = self.right(a, rep);
+        let b_right = self.right(b, rep);
+        let mut idx_left = from_byte / 2;
+        let mut idx_right = from_byte / 2;
+        while idx_left < K_HALF {
+            if a_left[idx_left] != b_left[idx_left] {
+                break;
+            }
+            idx_left += 1;
+        }
+        while idx_right < K_HALF {
+            if a_right[idx_right] != b_right[idx_right] {
+                break;
+            }
+            idx_right += 1;
+        }
+
+        if idx_left == K_HALF && idx_right == K_HALF {
+            return Ordering::Equal;
+        } else if idx_left <= idx_right {
+            // First difference from left hash values
+            let i = idx_left;
+            if a_left[i] < b_left[i] {
+                return Ordering::Less;
+            }
+            if a_left[i] > b_left[i] {
+                return Ordering::Greater;
+            }
+        } else {
+            // First difference on the right
+            let i = idx_right;
+            if a_right[i] < b_right[i] {
+                return Ordering::Less;
+            }
+            if a_right[i] > b_right[i] {
+                return Ordering::Greater;
+            }
+        }
+        Ordering::Equal
     }
 
     fn k_pair(k: usize) -> (usize, usize) {
@@ -412,6 +467,144 @@ impl HashCollection {
             "time_sort_s" => elapsed_sort.as_secs_f64(),
             "time_s" => (elapsed_hashes + elapsed_sort + elapsed_boundaries).as_secs_f64()
         );
+    }
+
+    /// Sort in place the given array of identifiers according to the lexicographic ordering
+    /// of their corresponding hash values in the given repetition
+    pub fn lexi_sort(&self, repetition: usize, ids: &mut [u32]) {
+        // the bytes that we are sorting now, to improve cache efficiency
+        let mut current_bytes = Vec::with_capacity(ids.len());
+        // the outstanding work: pairs of range to sort and byte to sort it on.
+        // Range indices are with respect to the indices in the ids array
+        let mut work = Vec::new();
+        work.push((0..ids.len(), 0usize));
+
+        let get_byte_left = |i: usize, byte: usize| self.left(i, repetition)[byte];
+        let get_byte_right = |i: usize, byte: usize| self.right(i, repetition)[byte];
+
+        let mut counts = [0usize; 256];
+        let mut buckets_by_size = Vec::with_capacity(256);
+        let mut offsets = [0usize; 256];
+        let mut write_heads = [0usize; 256];
+        let mut ends = [0usize; 256];
+
+        while let Some((tosort, current_byte)) = work.pop() {
+            let slice = &mut ids[tosort.clone()];
+            current_bytes.clear();
+            let left = current_byte % 2 == 0;
+
+            // divide by two because we are accessing separately left and right bytes
+            let half_byte = current_byte / 2;
+
+            counts.fill(0);
+            // count and accumulate the byte counts
+            if left {
+                for i in slice.iter() {
+                    let b = get_byte_left(*i as usize, half_byte);
+                    counts[b as usize] += 1;
+                    current_bytes.push(b);
+                }
+            } else {
+                for i in slice.iter() {
+                    let b = get_byte_right(*i as usize, half_byte);
+                    counts[b as usize] += 1;
+                    current_bytes.push(b);
+                }
+            }
+
+            let mut sum = 0;
+            buckets_by_size.clear();
+            offsets.fill(0);
+            write_heads.fill(0);
+            ends.fill(0);
+            for i in 0..256 {
+                unsafe {
+                    *offsets.get_unchecked_mut(i) = sum;
+                    *write_heads.get_unchecked_mut(i) = sum;
+                    sum += *counts.get_unchecked(i);
+                    ends[i] = sum;
+                    let span = sum - offsets.get_unchecked(i);
+                    if span > 0 {
+                        buckets_by_size.push((i, span));
+                    }
+                }
+            }
+
+            //// Sort the buckets by decreasing size.
+            //// This sort is cheap to do, since it's always at most 256 elements.
+            //// Benchmarks revealed that it's cheaper to first fix the second largest bucket,
+            //// and the move to smaller buckets.
+            buckets_by_size.sort_unstable_by(|p1, p2| p1.1.cmp(&p2.1).reverse());
+            //// Remove the largest bucket. By construction, when all the other buckets are sorted, it
+            //// must also be sorted, so we can avoid iterating over it.
+            buckets_by_size.remove(0);
+
+            // swap elements
+            while !buckets_by_size.is_empty() {
+                for &(current_bucket, _) in buckets_by_size.iter() {
+                    unsafe {
+                        loop {
+                            let offset = *write_heads.get_unchecked(current_bucket);
+                            if offset + 4 < ends[current_bucket] {
+                                let q = offset;
+                                let b1 = *current_bytes.get_unchecked(q) as usize;
+                                let b2 = *current_bytes.get_unchecked(q + 1) as usize;
+                                let b3 = *current_bytes.get_unchecked(q + 2) as usize;
+                                let b4 = *current_bytes.get_unchecked(q + 3) as usize;
+
+                                let t1 = *write_heads.get_unchecked(b1);
+                                *write_heads.get_unchecked_mut(b1) += 1;
+                                let t2 = *write_heads.get_unchecked(b2);
+                                *write_heads.get_unchecked_mut(b2) += 1;
+                                let t3 = *write_heads.get_unchecked(b3);
+                                *write_heads.get_unchecked_mut(b3) += 1;
+                                let t4 = *write_heads.get_unchecked(b4);
+                                *write_heads.get_unchecked_mut(b4) += 1;
+
+                                current_bytes.swap(q, t1);
+                                current_bytes.swap(q + 1, t2);
+                                current_bytes.swap(q + 2, t3);
+                                current_bytes.swap(q + 3, t4);
+
+                                slice.swap(q, t1);
+                                slice.swap(q + 1, t2);
+                                slice.swap(q + 2, t3);
+                                slice.swap(q + 3, t4);
+                            } else if offset < ends[current_bucket] {
+                                let r = offset;
+                                let b = *current_bytes.get_unchecked(r) as usize;
+                                let t = *write_heads.get_unchecked(b);
+                                current_bytes.swap(r, t);
+                                slice.swap(r, t);
+                                *write_heads.get_unchecked_mut(b) += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+                buckets_by_size.retain(|&(b, _)| write_heads[b] < ends[b]);
+            }
+
+            // set up outstanding work
+            for i in 0..256 {
+                let offset = tosort.start;
+                let r = offsets[i]..ends[i];
+                let r = r.start + offset..r.end + offset;
+                let next_byte = current_byte + 1;
+                if next_byte < K {
+                    if r.len() < 128{
+                        // sort directly
+                        ids[r].sort_unstable_by(|a, b| {
+                            self.lexi_cmp(*a as usize, *b as usize, next_byte, repetition)
+                        });
+                    } else {
+                        let nextwork = (r, next_byte);
+                        work.push(nextwork);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -707,7 +900,7 @@ thread_local! { static DOTP_BUFFER: RefCell<Vec<f64>> = RefCell::new(Vec::new())
 
 #[cfg(test)]
 mod test {
-    use crate::lsh::*;
+    use crate::{flat_trie::LexiCmp, load::loadts, lsh::*};
 
     #[test]
     fn test_first_collision() {
@@ -731,6 +924,39 @@ mod test {
                     // todo!()
                 }
             }
+        }
+    }
+
+    #[test]
+
+    fn lexi_sort() {
+        let w = 10;
+        let ts = loadts("data/ECG.csv.gz", Some(100)).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, false);
+
+        let hasher = Arc::new(Hasher::new(w, 2, 5.0, 1245));
+        let pools = HashCollection::from_ts(&ts, Arc::clone(&hasher));
+
+        let mut ids: Vec<usize> = (0..ts.num_subsequences()).collect();
+        let mut ids2: Vec<u32> = (0..ts.num_subsequences()).map(|i| i as u32).collect();
+        let mut hashes: Vec<([u8; K], usize)> = ids
+            .iter()
+            .map(|i| (pools.extended_hash_value(*i, 0), *i))
+            .collect();
+
+        ids.sort_unstable_by(|a, b| pools.lexi_cmp(*a, *b, 0, 0));
+        hashes.sort_unstable_by(|a, b| a.0.lexi_cmp(&b.0));
+        pools.lexi_sort(0, &mut ids2);
+        let ids2: Vec<usize> = ids2.into_iter().map(|i| i as usize).collect();
+
+        let expected: Vec<usize> = hashes.into_iter().map(|pair| pair.1).collect();
+
+        assert_eq!(expected, ids);
+
+        for i in 0..expected.len() {
+            let exp = pools.extended_hash_value(expected[i], 0);
+            let act = pools.extended_hash_value(ids2[i], 0);
+            assert_eq!(exp, act);
         }
     }
 }
