@@ -256,44 +256,46 @@ impl HashCollection {
     /// Compare two subsequences by the lexicographic ordering of
     /// their `K`-length hash values in the the given repetition
     pub fn lexi_cmp(&self, a: usize, b: usize, from_byte: usize, rep: usize) -> Ordering {
-        let a_left = self.left(a, rep);
-        let b_left = self.left(b, rep);
-        let a_right = self.right(a, rep);
-        let b_right = self.right(b, rep);
-        let mut idx_left = from_byte / 2;
-        let mut idx_right = from_byte / 2;
-        while idx_left < K_HALF {
-            if a_left[idx_left] != b_left[idx_left] {
-                break;
+        unsafe {
+            let a_left = self.left(a, rep);
+            let b_left = self.left(b, rep);
+            let a_right = self.right(a, rep);
+            let b_right = self.right(b, rep);
+            let mut idx_left = from_byte / 2;
+            let mut idx_right = from_byte / 2;
+            while idx_left < K_HALF {
+                if *a_left.get_unchecked(idx_left) != *b_left.get_unchecked(idx_left) {
+                    break;
+                }
+                idx_left += 1;
             }
-            idx_left += 1;
-        }
-        while idx_right < K_HALF {
-            if a_right[idx_right] != b_right[idx_right] {
-                break;
+            while idx_right < K_HALF {
+                if *a_right.get_unchecked(idx_right) != *b_right.get_unchecked(idx_right) {
+                    break;
+                }
+                idx_right += 1;
             }
-            idx_right += 1;
-        }
 
-        if idx_left == K_HALF && idx_right == K_HALF {
-            return Ordering::Equal;
-        } else if idx_left <= idx_right {
-            // First difference from left hash values
-            let i = idx_left;
-            if a_left[i] < b_left[i] {
-                return Ordering::Less;
-            }
-            if a_left[i] > b_left[i] {
-                return Ordering::Greater;
-            }
-        } else {
-            // First difference on the right
-            let i = idx_right;
-            if a_right[i] < b_right[i] {
-                return Ordering::Less;
-            }
-            if a_right[i] > b_right[i] {
-                return Ordering::Greater;
+            if idx_left == K_HALF && idx_right == K_HALF {
+                return Ordering::Equal;
+            } else if idx_left <= idx_right {
+                // First difference from left hash values
+                let i = idx_left;
+                if *a_left.get_unchecked(i) < *b_left.get_unchecked(i) {
+                    return Ordering::Less;
+                }
+                if *a_left.get_unchecked(i) > *b_left.get_unchecked(i) {
+                    return Ordering::Greater;
+                }
+            } else {
+                // First difference on the right
+                let i = idx_right;
+                if *a_right.get_unchecked(i) < *b_right.get_unchecked(i) {
+                    return Ordering::Less;
+                }
+                if *a_right.get_unchecked(i) > *b_right.get_unchecked(i) {
+                    return Ordering::Greater;
+                }
             }
         }
         Ordering::Equal
