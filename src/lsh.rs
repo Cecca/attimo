@@ -494,6 +494,7 @@ impl HashCollection {
         let mut write_heads = [0usize; 256];
         let mut ends = [0usize; 256];
 
+
         while let Some((tosort, current_byte)) = work.pop() {
             // let t_count = Instant::now();
             let slice = &mut ids[tosort.clone()];
@@ -555,7 +556,7 @@ impl HashCollection {
                     offset += 4;
                 }
                 for i in chunks.remainder() {
-                    let b = get_byte_left(*i as usize, half_byte);
+                    let b = get_byte_right(*i as usize, half_byte);
                     counts[b as usize] += 1;
                     current_bytes[offset] = b;
                     offset += 1;
@@ -646,6 +647,7 @@ impl HashCollection {
                 }
                 buckets_by_size.retain(|&(b, _)| write_heads[b] < ends[b]);
             }
+            // assert!(current_bytes.is_sorted());
 
             // d_swaps += t_swap.elapsed();
             // let t_setup = Instant::now();
@@ -655,9 +657,10 @@ impl HashCollection {
                 let offset = tosort.start;
                 let r = offsets[i]..ends[i];
                 let r = r.start + offset..r.end + offset;
+
                 let next_byte = current_byte + 1;
                 if next_byte < K {
-                    if r.len() < 64 {
+                    if r.len() < 32 {
                         // let t_base = Instant::now();
                         // sort directly
                         self.lexi_insertion_sort(&mut ids[r], next_byte, repetition);
@@ -1010,8 +1013,8 @@ mod test {
 
     fn lexi_sort() {
         let w = 10;
-        let ts = loadts("data/ECG.csv.gz", Some(100)).unwrap();
-        let ts = WindowedTimeseries::new(ts, w, false);
+        let ts = loadts("data/ECG.csv.gz", Some(1000000)).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, true);
 
         let hasher = Arc::new(Hasher::new(w, 2, 5.0, 1245));
         let pools = HashCollection::from_ts(&ts, Arc::clone(&hasher));
