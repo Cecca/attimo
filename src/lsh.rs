@@ -617,21 +617,26 @@ impl HashCollection {
                                 let t4 = *write_heads.get_unchecked(b4);
                                 *write_heads.get_unchecked_mut(b4) += 1;
 
-                                current_bytes.swap_unchecked(q, t1);
-                                current_bytes.swap_unchecked(q + 1, t2);
-                                current_bytes.swap_unchecked(q + 2, t3);
-                                current_bytes.swap_unchecked(q + 3, t4);
+                                assert!(t1 < slice.len());
+                                assert!(t2 < slice.len());
+                                assert!(t3 < slice.len());
+                                assert!(t4 < slice.len());
 
-                                slice.swap_unchecked(q, t1);
-                                slice.swap_unchecked(q + 1, t2);
-                                slice.swap_unchecked(q + 2, t3);
-                                slice.swap_unchecked(q + 3, t4);
+                                current_bytes.swap(q, t1);
+                                current_bytes.swap(q + 1, t2);
+                                current_bytes.swap(q + 2, t3);
+                                current_bytes.swap(q + 3, t4);
+
+                                slice.swap(q, t1);
+                                slice.swap(q + 1, t2);
+                                slice.swap(q + 2, t3);
+                                slice.swap(q + 3, t4);
                             } else if offset < ends[current_bucket] {
                                 let r = offset;
                                 let b = *current_bytes.get_unchecked(r) as usize;
                                 let t = *write_heads.get_unchecked(b);
-                                current_bytes.swap_unchecked(r, t);
-                                slice.swap_unchecked(r, t);
+                                current_bytes.swap(r, t);
+                                slice.swap(r, t);
                                 *write_heads.get_unchecked_mut(b) += 1;
                             } else {
                                 break;
@@ -652,7 +657,7 @@ impl HashCollection {
                 let r = r.start + offset..r.end + offset;
                 let next_byte = current_byte + 1;
                 if next_byte < K {
-                    if r.len() < 32 {
+                    if r.len() < 64 {
                         // let t_base = Instant::now();
                         // sort directly
                         self.lexi_insertion_sort(&mut ids[r], next_byte, repetition);
@@ -673,11 +678,9 @@ impl HashCollection {
     fn lexi_insertion_sort(&self, arr: &mut [u32], next_byte: usize, repetition: usize) {
         for i in 1..arr.len() {
             let mut j = i;
-            unsafe {
-                while j > 0 && self.lexi_cmp(*arr.get_unchecked(j - 1) as usize, *arr.get_unchecked(j) as usize, next_byte, repetition).is_gt() {
-                    arr.swap_unchecked(j - 1, j);
-                    j -= 1;
-                }
+            while j > 0 && self.lexi_cmp(arr[j - 1] as usize, arr[j] as usize, next_byte, repetition).is_gt() {
+                arr.swap(j - 1, j);
+                j -= 1;
             }
         }
     }
