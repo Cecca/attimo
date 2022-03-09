@@ -26,7 +26,7 @@
 //// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
-use crate::flat_trie::FlatTrie;
+use crate::flat_trie::{FlatTrie, LexiCmp};
 use crate::motifs::Motif;
 use crate::{alloc_cnt, allocator::*};
 // TODO Remove this dependency
@@ -472,6 +472,12 @@ impl HashCollection {
     /// Sort in place the given array of identifiers according to the lexicographic ordering
     /// of their corresponding hash values in the given repetition
     pub fn lexi_sort(&self, repetition: usize, ids: &mut [u32]) {
+        // let mut d_count = Duration::from_secs(0);
+        // let mut d_setup_bucks = Duration::from_secs(0);
+        // let mut d_swaps = Duration::from_secs(0);
+        // let mut d_setup = Duration::from_secs(0);
+        // let mut d_base = Duration::from_secs(0);
+
         // the bytes that we are sorting now, to improve cache efficiency
         let mut current_bytes = Vec::with_capacity(ids.len());
         // the outstanding work: pairs of range to sort and byte to sort it on.
@@ -489,8 +495,10 @@ impl HashCollection {
         let mut ends = [0usize; 256];
 
         while let Some((tosort, current_byte)) = work.pop() {
+            // let t_count = Instant::now();
             let slice = &mut ids[tosort.clone()];
             current_bytes.clear();
+            current_bytes.resize(slice.len(), 0);
             let left = current_byte % 2 == 0;
 
             // divide by two because we are accessing separately left and right bytes
@@ -499,18 +507,63 @@ impl HashCollection {
             counts.fill(0);
             // count and accumulate the byte counts
             if left {
-                for i in slice.iter() {
+                let mut chunks = slice.chunks_exact(4);
+                let mut offset = 0;
+                while let Some([i1, i2, i3, i4]) = chunks.next() {
+                    let b1 = get_byte_left(*i1 as usize, half_byte);
+                    let b2 = get_byte_left(*i2 as usize, half_byte);
+                    let b3 = get_byte_left(*i3 as usize, half_byte);
+                    let b4 = get_byte_left(*i4 as usize, half_byte);
+
+                    counts[b1 as usize] += 1;
+                    counts[b2 as usize] += 1;
+                    counts[b3 as usize] += 1;
+                    counts[b4 as usize] += 1;
+
+                    current_bytes[offset] = b1;
+                    current_bytes[offset + 1] = b2;
+                    current_bytes[offset + 2] = b3;
+                    current_bytes[offset + 3] = b4;
+
+                    offset += 4;
+                }
+                for i in chunks.remainder() {
                     let b = get_byte_left(*i as usize, half_byte);
                     counts[b as usize] += 1;
-                    current_bytes.push(b);
+                    current_bytes[offset] = b;
+                    offset += 1;
                 }
             } else {
-                for i in slice.iter() {
-                    let b = get_byte_right(*i as usize, half_byte);
+                let mut chunks = slice.chunks_exact(4);
+                let mut offset = 0;
+                while let Some([i1, i2, i3, i4]) = chunks.next() {
+                    let b1 = get_byte_right(*i1 as usize, half_byte);
+                    let b2 = get_byte_right(*i2 as usize, half_byte);
+                    let b3 = get_byte_right(*i3 as usize, half_byte);
+                    let b4 = get_byte_right(*i4 as usize, half_byte);
+
+                    counts[b1 as usize] += 1;
+                    counts[b2 as usize] += 1;
+                    counts[b3 as usize] += 1;
+                    counts[b4 as usize] += 1;
+
+                    current_bytes[offset] = b1;
+                    current_bytes[offset + 1] = b2;
+                    current_bytes[offset + 2] = b3;
+                    current_bytes[offset + 3] = b4;
+
+                    offset += 4;
+                }
+                for i in chunks.remainder() {
+                    let b = get_byte_left(*i as usize, half_byte);
                     counts[b as usize] += 1;
-                    current_bytes.push(b);
+                    current_bytes[offset] = b;
+                    offset += 1;
                 }
             }
+
+            // d_count += t_count.elapsed();
+            // let t_setup_bucks = Instant::now();
 
             let mut sum = 0;
             buckets_by_size.clear();
@@ -519,11 +572,11 @@ impl HashCollection {
             ends.fill(0);
             for i in 0..256 {
                 unsafe {
-                    *offsets.get_unchecked_mut(i) = sum;
-                    *write_heads.get_unchecked_mut(i) = sum;
-                    sum += *counts.get_unchecked(i);
+                    offsets[i] = sum;
+                    write_heads[i] = sum;
+                    sum += counts[i];
                     ends[i] = sum;
-                    let span = sum - offsets.get_unchecked(i);
+                    let span = sum - offsets[i];
                     if span > 0 {
                         buckets_by_size.push((i, span));
                     }
@@ -538,6 +591,9 @@ impl HashCollection {
             //// Remove the largest bucket. By construction, when all the other buckets are sorted, it
             //// must also be sorted, so we can avoid iterating over it.
             buckets_by_size.remove(0);
+
+            // d_setup_bucks += t_setup_bucks.elapsed();
+            // let t_swap = Instant::now();
 
             // swap elements
             while !buckets_by_size.is_empty() {
@@ -561,21 +617,21 @@ impl HashCollection {
                                 let t4 = *write_heads.get_unchecked(b4);
                                 *write_heads.get_unchecked_mut(b4) += 1;
 
-                                current_bytes.swap(q, t1);
-                                current_bytes.swap(q + 1, t2);
-                                current_bytes.swap(q + 2, t3);
-                                current_bytes.swap(q + 3, t4);
+                                current_bytes.swap_unchecked(q, t1);
+                                current_bytes.swap_unchecked(q + 1, t2);
+                                current_bytes.swap_unchecked(q + 2, t3);
+                                current_bytes.swap_unchecked(q + 3, t4);
 
-                                slice.swap(q, t1);
-                                slice.swap(q + 1, t2);
-                                slice.swap(q + 2, t3);
-                                slice.swap(q + 3, t4);
+                                slice.swap_unchecked(q, t1);
+                                slice.swap_unchecked(q + 1, t2);
+                                slice.swap_unchecked(q + 2, t3);
+                                slice.swap_unchecked(q + 3, t4);
                             } else if offset < ends[current_bucket] {
                                 let r = offset;
                                 let b = *current_bytes.get_unchecked(r) as usize;
                                 let t = *write_heads.get_unchecked(b);
-                                current_bytes.swap(r, t);
-                                slice.swap(r, t);
+                                current_bytes.swap_unchecked(r, t);
+                                slice.swap_unchecked(r, t);
                                 *write_heads.get_unchecked_mut(b) += 1;
                             } else {
                                 break;
@@ -586,6 +642,9 @@ impl HashCollection {
                 buckets_by_size.retain(|&(b, _)| write_heads[b] < ends[b]);
             }
 
+            // d_swaps += t_swap.elapsed();
+            // let t_setup = Instant::now();
+
             // set up outstanding work
             for i in 0..256 {
                 let offset = tosort.start;
@@ -593,20 +652,37 @@ impl HashCollection {
                 let r = r.start + offset..r.end + offset;
                 let next_byte = current_byte + 1;
                 if next_byte < K {
-                    if r.len() < 128{
+                    if r.len() < 32 {
+                        // let t_base = Instant::now();
                         // sort directly
-                        ids[r].sort_unstable_by(|a, b| {
-                            self.lexi_cmp(*a as usize, *b as usize, next_byte, repetition)
-                        });
+                        self.lexi_insertion_sort(&mut ids[r], next_byte, repetition);
+                        // d_base += t_base.elapsed();
                     } else {
                         let nextwork = (r, next_byte);
                         work.push(nextwork);
                     }
                 }
             }
+
+            // d_setup += t_setup.elapsed();
+        }
+
+        // println!("Setup {d_setup:?} (base case {d_base:?}) | count {d_count:?} | setup buckets {d_setup_bucks:?} | swap {d_swaps:?}");
+    }
+
+    fn lexi_insertion_sort(&self, arr: &mut [u32], next_byte: usize, repetition: usize) {
+        for i in 1..arr.len() {
+            let mut j = i;
+            unsafe {
+                while j > 0 && self.lexi_cmp(*arr.get_unchecked(j - 1) as usize, *arr.get_unchecked(j) as usize, next_byte, repetition).is_gt() {
+                    arr.swap_unchecked(j - 1, j);
+                    j -= 1;
+                }
+            }
         }
     }
 }
+
 
 /// Data structure to do LSH of subsequences.
 #[derive(Clone)]

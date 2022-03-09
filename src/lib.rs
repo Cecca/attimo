@@ -1,3 +1,4 @@
+#![feature(slice_swap_unchecked)]
 #![feature(allocator_api)]
 #![feature(is_sorted)]
 #![feature(map_first_last)]
