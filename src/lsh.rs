@@ -128,6 +128,17 @@ impl<'a, T> UnsafeSlice<'a, T> {
     }
 }
 
+unsafe fn common_prefix(x: &[u8], y: &[u8]) -> usize {
+    let mut i = 0;
+    while i < K_HALF {
+        if *x.get_unchecked(i) != *y.get_unchecked(i) {
+            return i;
+        }
+        i += 1;
+    }
+    K_HALF // signals that they are actually equal
+}
+
 //// This data structure contains all the information needed to generate the hash values for all the repeititions
 //// for all the subsequences.
 #[derive(Clone)]
@@ -250,6 +261,28 @@ impl HashCollection {
             self.left(subseq, rep)[i % K_HALF]
         } else {
             self.right(subseq, rep)[i % K_HALF]
+        }
+    }
+
+    /// Return the index of the first difference of the hash values of the two
+    /// given subsequences, the given repetition
+    pub fn common_prefix(&self, a: usize, b: usize, rep: usize) -> usize {
+        unsafe {
+            let a_left = self.left(a, rep);
+            let b_left = self.left(b, rep);
+            let a_right = self.right(a, rep);
+            let b_right = self.right(b, rep);
+
+            let mut idx_left = common_prefix(a_left, b_left);
+            let mut idx_right = common_prefix(a_right, b_right);
+
+            if idx_left <= idx_right {
+                // First difference is on the left
+                return idx_left * 2;
+            } else {
+                // First difference is on the right
+                return idx_right * 2 + 1;
+            }
         }
     }
 
@@ -1009,8 +1042,26 @@ mod test {
         }
     }
 
-    #[test]
+    #[test] 
+    fn common_prefix() {
+        let w = 10;
+        let ts = loadts("data/ECG.csv.gz", Some(1000)).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, true);
 
+        let hasher = Arc::new(Hasher::new(w, 2, 5.0, 1245));
+        let pools = HashCollection::from_ts(&ts, Arc::clone(&hasher));
+
+        let rep = 0;
+        for a in 0..ts.num_subsequences() {
+            for b in 0..ts.num_subsequences() {
+                let expected = pools.extended_hash_value(a, rep).iter().zip(pools.extended_hash_value(b, 0).iter()).take_while(|(a, b)| a == b).count();
+                let actual = pools.common_prefix(a, b, rep);
+                assert_eq!(expected, actual);
+            }
+        }
+    }
+
+    #[test]
     fn lexi_sort() {
         let w = 10;
         let ts = loadts("data/ECG.csv.gz", Some(1000000)).unwrap();
