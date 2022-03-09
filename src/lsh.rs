@@ -26,7 +26,7 @@
 //// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
-use crate::flat_trie::{FlatTrie, LexiCmp};
+use crate::flat_trie::FlatTrie;
 use crate::motifs::Motif;
 use crate::{alloc_cnt, allocator::*};
 // TODO Remove this dependency
@@ -572,15 +572,13 @@ impl HashCollection {
             write_heads.fill(0);
             ends.fill(0);
             for i in 0..256 {
-                unsafe {
-                    offsets[i] = sum;
-                    write_heads[i] = sum;
-                    sum += counts[i];
-                    ends[i] = sum;
-                    let span = sum - offsets[i];
-                    if span > 0 {
-                        buckets_by_size.push((i, span));
-                    }
+                offsets[i] = sum;
+                write_heads[i] = sum;
+                sum += counts[i];
+                ends[i] = sum;
+                let span = sum - offsets[i];
+                if span > 0 {
+                    buckets_by_size.push((i, span));
                 }
             }
 

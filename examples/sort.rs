@@ -1,6 +1,5 @@
 use attimo::{
-    lsh::{HashCollection, HashValue, Hasher},
-    sort::RadixSort,
+    lsh::{HashCollection, Hasher},
     timeseries::WindowedTimeseries,
 };
 
