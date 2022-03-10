@@ -1,7 +1,7 @@
 use std::{cmp::Ordering, ops::Range};
 
 use rayon::prelude::*;
-use crate::lsh::K;
+use crate::lsh::{K, HashCollection};
 
 /// A trie leveraging the property that all the strings it contains have the
 /// same length, thus avoiding pointers and using only flat arrays to retrieve
@@ -14,22 +14,14 @@ pub struct FlatTrie {
 }
 
 impl FlatTrie {
-    pub fn new<K: LexiCmp+Send>(kv_pairs: &mut [(K, u32)]) -> Self {
-        // arrange the keys lexicographically
-        kv_pairs.par_sort_unstable_by(|a, b| a.0.lexi_cmp(&b.0));
-        let mut common = Vec::with_capacity(kv_pairs.len());
-        let mut indices = Vec::with_capacity(kv_pairs.len());
+    pub fn new(n: u32, hash_coll: &HashCollection, rep: usize) -> Self {
+        let mut common = vec![0u8; n as usize];
+        let mut indices: Vec<u32> = (0..n).collect();
 
-        // push the first element, which has no preceding with which to compare the prefix
-        common.push(0u8);
-        indices.push(kv_pairs[0].1);
-        let mut prev = &kv_pairs[0].0;
+        hash_coll.lexi_sort(rep, &mut indices);
 
-        for (k, v) in &kv_pairs[1..] {
-            let comm = k.common_prefix_len(prev);
-            common.push(comm);
-            indices.push(*v);
-            prev = k;
+        for i in 1..n as usize {
+            common[i] = hash_coll.common_prefix(indices[i] as usize, indices[i-1] as usize, rep) as u8;
         }
 
         Self {
@@ -143,30 +135,5 @@ impl<O: Ord> LexiCmp for &[O] {
             .zip(other.iter())
             .take_while(|(s, o)| s == o)
             .count() as u8
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::FlatTrie;
-
-    #[test]
-    fn test_prefix_tree() {
-        let mut data = [
-            ("abkd".as_bytes(), 10),
-            ("abad".as_bytes(), 0),
-            ("abke".as_bytes(), 30),
-            ("bbsd".as_bytes(), 40),
-            ("abkd".as_bytes(), 20),
-        ];
-        let trie = FlatTrie::new(&mut data);
-        let mut out = Vec::new();
-        trie.groups_at(2, &mut out);
-        assert_eq!(out, [0..4, 4..5]);
-
-        trie.groups_at(3, &mut out);
-        assert_eq!(out, [0..1, 1..4, 4..5]);
-
-        assert_eq!(trie.slice(out[1].clone()), [10,20,30]);
     }
 }

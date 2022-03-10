@@ -421,21 +421,13 @@ impl HashCollection {
         let timer = Instant::now();
         let n = self.n_subsequences;
 
-        let tl_buf = ThreadLocal::new();
-        let output = (0..self.hasher.repetitions)
+        let output = (0..self.hasher.repetitions).into_par_iter()
             .map(|rep| {
-                let mut buf = tl_buf
-                    .get_or(|| RefCell::new(Vec::with_capacity(n)))
-                    .borrow_mut();
-                buf.par_extend(
-                    (0..n)
-                        .into_par_iter()
-                        .map(|i| (self.extended_hash_value(i, rep), i as u32)),
-                );
-                FlatTrie::new(&mut buf)
+                FlatTrie::new(n as u32, &self, rep)
             })
             .collect();
         let elapsed = timer.elapsed();
+        println!("Built tries in {elapsed:?}");
         info!("building flat tries";
             "tag" => "profiling",
             "time_s" => elapsed.as_secs_f64()

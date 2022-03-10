@@ -462,7 +462,7 @@ criterion_group!(
     // bench_zdot,
     // bench_first_collision,
     // bench_zeucl,
-    // bench_repetition,
-    bench_create_tries
+    bench_repetition
+    // bench_create_tries
 );
 criterion_main!(benches);
