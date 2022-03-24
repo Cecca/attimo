@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 fn main() {
-    let n = std::env::args().nth(1).unwrap().parse::<usize>().unwrap();
+    let n = std::env::args().nth(1).map(|n| n.parse::<usize>().unwrap());
 
     let w = 1000;
     println!("Reading time series");
     let start = Instant::now();
-    let ts: Vec<f64> = attimo::load::loadts("data/ECG.csv.gz", Some(n)).unwrap();
+    let ts: Vec<f64> = attimo::load::loadts("data/ECG.csv.gz",n).unwrap();
     let ts = WindowedTimeseries::new(ts, w, false);
     println!("...{:?}", start.elapsed());
     println!("Computing hashes");
