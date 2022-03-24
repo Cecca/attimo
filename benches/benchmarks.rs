@@ -385,6 +385,7 @@ fn bench_repetition(c: &mut Criterion) {
 }
 
 fn bench_create_tries(c: &mut Criterion) {
+    use rayon::prelude::*;
     let w = 1000;
     let ts = loadts("data/ECG.csv.gz", None).unwrap();
     let ts = WindowedTimeseries::new(ts, w, false);
@@ -444,8 +445,8 @@ fn bench_create_tries(c: &mut Criterion) {
         bencher.iter(
             || {
                 buf.clear();
-                buf.extend((0..ts.num_subsequences()).map(|i| (pools.hash_value(i, K, 0))));
-                buf.sort_unstable();
+                buf.par_extend((0..ts.num_subsequences()).into_par_iter().map(|i| (pools.hash_value(i, K, 0))));
+                buf.par_sort_unstable();
             }
         );
     });
@@ -462,7 +463,7 @@ criterion_group!(
     // bench_zdot,
     // bench_first_collision,
     // bench_zeucl,
-    bench_repetition
-    // bench_create_tries
+    // bench_repetition
+    bench_create_tries
 );
 criterion_main!(benches);
