@@ -471,6 +471,7 @@ fn explore_tries(
                     let mut dists = 0;
                     let mut spurious = 0;
 
+                    let buckets_start = Instant::now();
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
                         let bucket = &column_buffer[buckets[i].clone()];
 
@@ -522,6 +523,8 @@ fn explore_tries(
                             }
                         }
                     }
+                    let buckets_elapsed = Instant::now() - buckets_start;
+                    pbar.println(format!("computed {} distances in {:?} ({:?}/pair)", cands, buckets_elapsed, buckets_elapsed / cands as u32));
                     rep_candidate_pairs.fetch_add(cands, Ordering::SeqCst);
                     rep_cnt_dists.fetch_add(dists, Ordering::SeqCst);
                     spurious_collisions_cnt.fetch_add(spurious, Ordering::SeqCst);

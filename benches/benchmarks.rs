@@ -312,13 +312,13 @@ pub fn bench_first_collision(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    bench_sliding_dot_product,
-    bench_construct_ts,
-    bench_hash_ts,
+    // bench_sliding_dot_product,
+    // bench_construct_ts,
+    // bench_hash_ts,
     // bench_sort_usize,
     // bench_sort_u8,
-    bench_sort_hashes,
-    bench_zdot,
+    // bench_sort_hashes,
+    // bench_zdot,
     bench_first_collision,
     bench_zeucl
 );

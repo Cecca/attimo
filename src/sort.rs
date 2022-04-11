@@ -27,26 +27,42 @@ impl GetByte for usize {
     }
 }
 
-impl<T1: GetByte, T2: GetByte> GetByte for (T1, T2) {
+impl GetByte for (u8, usize) {
     fn num_bytes(&self) -> usize {
-        self.0.num_bytes() + self.1.num_bytes()
+        1
     }
 
-    #[inline(always)]
     fn get_byte(&self, i: usize) -> u8 {
-        if i < self.0.num_bytes() {
-            self.0.get_byte(i)
-        } else {
-            self.1.get_byte(i)
-        }
+        self.0
     }
 }
+
+// impl<T1: GetByte, T2: GetByte> GetByte for (T1, T2) {
+//     fn num_bytes(&self) -> usize {
+//         self.0.num_bytes() + self.1.num_bytes()
+//     }
+
+//     #[inline(always)]
+//     fn get_byte(&self, i: usize) -> u8 {
+//         if i < self.0.num_bytes() {
+//             self.0.get_byte(i)
+//         } else {
+//             self.1.get_byte(i)
+//         }
+//     }
+// }
 
 pub trait RadixSort {
     fn radix_sort(&mut self);
 }
 
 impl<T: GetByte + Debug + Ord> RadixSort for Vec<T> {
+    fn radix_sort(&mut self) {
+        radix_sort_impl(self, 0);
+    }
+}
+
+impl<T: GetByte + Debug + Ord> RadixSort for [T] {
     fn radix_sort(&mut self) {
         radix_sort_impl(self, 0);
     }
