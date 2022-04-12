@@ -17,7 +17,6 @@ fn main() -> Result<()> {
     let delta = 0.01;
     let top_dist = 0.403;
 
-    let mut accum = 0.0;
     println!("r,k,collisions,preparation,exploration,total,repetitions");
     for r in &[1.0, 2.0, 4.0, 8.0] {
         let mut topk = TopK::new(10, ts.w);
@@ -30,7 +29,8 @@ fn main() -> Result<()> {
         let top_p = hasher.collision_probability_at(top_dist);
 
         for k in 0..32 {
-            let required_repetitions = ((1.0f64/delta).log(std::f64::consts::E) / top_p.powi(k as i32)).ceil() as usize;
+            let required_repetitions =
+                ((1.0f64 / delta).log(std::f64::consts::E) / top_p.powi(k as i32)).ceil() as usize;
             let start_hash = Instant::now();
             hasher.hash_all(&ts, k, 0, &mut buf);
             for (h, i) in ids.iter_mut() {
@@ -87,7 +87,8 @@ fn main() -> Result<()> {
                 actual_elapsed, estimated
             );
 
-            if false { // num_collisions < 10_000_000 && num_collisions > 0 {
+            if false {
+            // if num_collisions < 10_000_000 && num_collisions > 0 {
                 let bs = boundaries.clone();
                 let start_distances = Instant::now();
                 let mut cnt = 0;

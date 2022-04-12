@@ -94,7 +94,6 @@ fn get_reps(conf: &Config) -> Repetitions {
     }
 }
 
-
 fn main() -> Result<()> {
     let total_timer = Instant::now();
     if std::env::args().filter(|arg| arg == "--version").count() == 1 {

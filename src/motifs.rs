@@ -524,7 +524,12 @@ fn explore_tries(
                         }
                     }
                     let buckets_elapsed = Instant::now() - buckets_start;
-                    pbar.println(format!("computed {} distances in {:?} ({:?}/pair)", cands, buckets_elapsed, buckets_elapsed / cands as u32));
+                    pbar.println(format!(
+                        "computed {} distances in {:?} ({:?}/pair)",
+                        cands,
+                        buckets_elapsed,
+                        buckets_elapsed / cands as u32
+                    ));
                     rep_candidate_pairs.fetch_add(cands, Ordering::SeqCst);
                     rep_cnt_dists.fetch_add(dists, Ordering::SeqCst);
                     spurious_collisions_cnt.fetch_add(spurious, Ordering::SeqCst);
