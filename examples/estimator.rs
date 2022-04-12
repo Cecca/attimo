@@ -14,10 +14,11 @@ fn main() -> Result<()> {
 
     let n = ts.num_subsequences();
 
-
+    let delta = 0.01;
+    let top_dist = 0.403;
 
     let mut accum = 0.0;
-    println!("r,k,collisions,preparation,exploration,total");
+    println!("r,k,collisions,preparation,exploration,total,repetitions");
     for r in &[1.0, 2.0, 4.0, 8.0] {
         let mut topk = TopK::new(10, ts.w);
         let mut cost = CostEstimator::new(n);
@@ -26,8 +27,10 @@ fn main() -> Result<()> {
         let mut boundaries = vec![(0..ts.num_subsequences())];
         let mut buf = vec![0; ts.num_subsequences()];
 
+        let top_p = hasher.collision_probability_at(top_dist);
+
         for k in 0..32 {
-            // Why am I overestimating this?
+            let required_repetitions = ((1.0f64/delta).log(std::f64::consts::E) / top_p.powi(k as i32)).ceil() as usize;
             let start_hash = Instant::now();
             hasher.hash_all(&ts, k, 0, &mut buf);
             for (h, i) in ids.iter_mut() {
@@ -72,6 +75,7 @@ fn main() -> Result<()> {
                 boundaries.iter().map(|r| r.len() * (r.len() - 1) / 2).sum();
             cost.append(LevelMeasurements {
                 num_collisions,
+                required_repetitions,
                 hash: elapsed_hash,
                 sort: elapsed_sort,
                 boundaries: elapsed_boundaries,
@@ -83,7 +87,7 @@ fn main() -> Result<()> {
                 actual_elapsed, estimated
             );
 
-            if num_collisions < 100_000_000 && num_collisions > 0 {
+            if false { // num_collisions < 10_000_000 && num_collisions > 0 {
                 let bs = boundaries.clone();
                 let start_distances = Instant::now();
                 let mut cnt = 0;
@@ -120,13 +124,14 @@ fn main() -> Result<()> {
 
         for level in 0..32 {
             println!(
-                "{}, {}, {}, {}, {}, {}",
+                "{}, {}, {}, {}, {}, {}, {}",
                 r,
                 level,
                 cost.collisions_at(level),
                 cost.preparation_cost_at(level).as_secs_f64(),
                 cost.exploration_cost_at(level).as_secs_f64(),
-                cost.total_cost_at(level).as_secs_f64()
+                cost.total_cost_at(level).as_secs_f64(),
+                cost.required_repetitions_at(level)
             );
         }
     }
@@ -136,6 +141,7 @@ fn main() -> Result<()> {
 
 struct LevelMeasurements {
     num_collisions: usize,
+    required_repetitions: usize,
     hash: Duration,
     sort: Duration,
     boundaries: Duration,
@@ -167,6 +173,10 @@ impl CostEstimator {
         self.n_distances += ndist;
     }
 
+    fn required_repetitions_at(&self, level: usize) -> usize {
+        self.levels[level].required_repetitions
+    }
+
     fn collisions_at(&self, level: usize) -> usize {
         self.levels[level].num_collisions
     }
@@ -188,6 +198,7 @@ impl CostEstimator {
         let level = &self.levels[level];
         let s_per_distance = self.distance.as_secs_f64() / self.n_distances as f64;
         let tot = s_per_distance * level.num_collisions as f64;
-        Duration::from_secs_f64(tot)
+        // Duration::from_secs_f64(tot)
+        Duration::from_nanos(560 * level.num_collisions as u64)
     }
 }
