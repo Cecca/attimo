@@ -28,7 +28,12 @@ impl CostEstimator {
         assert_eq!(level, self.cumulative_preprocessing.len());
         self.cumulative_preprocessing.push(preprocessing + *self.cumulative_preprocessing.last().unwrap());
         self.collisions.push(collisions);
-        eprintln!("at level {} preprocessing {:?} and {} collisions", level, self.cumulative_preprocessing.last().unwrap(), self.collisions.last().unwrap());
+        eprintln!("at level {} preprocessing {:?} and {:?} exploring {} collisions", 
+            level, 
+            self.cumulative_preprocessing.last().unwrap(),
+            *self.collisions.last().unwrap() as u32 * self.pair_evaluation,
+            self.collisions.last().unwrap()
+        );
     }
 
     fn estimated_cost(&self, level: usize) -> Duration {
@@ -43,7 +48,7 @@ pub struct AdaptiveHashCollection<'ts> {
     cost_estimator: CostEstimator,
     max_memory_bytes: usize,
     /// number of concatenations to use at most, set with the cost optimizer
-    max_k: usize,
+    pub max_k: usize,
     max_repetitions: usize,
     r: f64,
     seed: u64,
@@ -112,7 +117,10 @@ impl<'ts> AdaptiveHashCollection<'ts> {
     }
 
     fn memory_usage_bytes(ts: &WindowedTimeseries, n_repetitions: usize) -> usize {
-        n_repetitions * ts.num_subsequences() * std::mem::size_of::<(u8, u32, i32)>()
+        n_repetitions * ts.num_subsequences() * (
+            std::mem::size_of::<u8>() +
+            std::mem::size_of::<u32>()
+        )
     }
 
     fn derive_seed(seed: u64, k: usize, repetition: usize) -> u64 {
@@ -123,6 +131,38 @@ impl<'ts> AdaptiveHashCollection<'ts> {
         (0..ts.num_subsequences())
             .map(|i| (0, i as u32, 0))
             .collect()
+    }
+
+    pub fn for_pairs_at(&self, prefix: usize, mut action: impl FnMut(usize, usize)) {
+        for rep in self.repetitions.iter() {
+            rep.for_pairs_at(prefix, &mut action);
+        }
+    }
+
+    pub fn add_repetitions(&mut self, nreps: usize) {
+        let s = self.repetitions.len();
+        let e = s + nreps;
+        let ts = &self.ts;
+        let max_k = self.max_k;
+        let seed = self.seed;
+        let r = self.r;
+        let extension = (s..e).map(|repetition| {
+            let mut arr = Self::init_repetition(ts);
+            let mut partition = vec![0..ts.num_subsequences()];
+            let mut v_buf = Vec::new();
+            let mut dotp_buf = Vec::new();
+            partition_by_hash(
+                ts,
+                &mut arr,
+                &mut partition,
+                Self::derive_seed(seed, max_k, repetition),
+                r,
+                &mut v_buf,
+                &mut dotp_buf,
+            );
+            Repetition::from_vec(&arr)
+        });
+        self.repetitions.extend(extension);
     }
 }
 
@@ -188,5 +228,29 @@ impl Repetition {
             indices.push(*idx);
         }
         Repetition {diffs, indices}
+    }
+
+    // TODO: we might want to cache the boundaries?
+    fn for_pairs_at(&self, prefix: usize, mut action: impl FnMut(usize, usize)) {
+        let mut s = 0;
+        let mut e = s + 1;
+        loop {
+            if e == self.diffs.len() || (self.diffs[e] as usize) < prefix {
+                // Invoke action on the pairs
+                for i in s..e {
+                    for j in (i+1)..e {
+                        action(self.indices[i] as usize, self.indices[j] as usize);
+                    }
+                }
+
+                if e >= self.diffs.len() {
+                    return;
+                }
+                s = e;
+                e = s + 1;
+            } else {
+                e += 1;
+            }
+        }
     }
 }
