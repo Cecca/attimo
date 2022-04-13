@@ -7,11 +7,6 @@ use rand_xoshiro::Xoshiro256StarStar;
 
 use crate::{timeseries::WindowedTimeseries, distance::zeucl};
 
-// const show_a: u32 = 1172;
-// const show_b: u32 = 6112;
-const show_a: u32 = 7137172;
-const show_b: u32 = 7414112;
-
 struct CostEstimator {
     /// how much it costs to carry out a pair evaluation
     pair_evaluation: Duration,
@@ -68,8 +63,6 @@ impl<'ts> AdaptiveHashCollection<'ts> {
         let mut cost_estimator = CostEstimator::new(ts);
         let mut max_k = 1usize;
         let r = 1.0;
-
-        eprintln!("known motif distance {}", zeucl(ts, show_a as usize, show_b as usize));
 
         let mut v_buf = Vec::new();
         let mut dotp_buf = Vec::new();
@@ -225,6 +218,7 @@ fn partition_by_hash(
     v_buf: &mut Vec<f64>,
     dotp_buf: &mut Vec<f64>,
 ) {
+    // TODO reduce allocations by reusing buffers in thread local storage
     // Compute hash value
     let mut rng = Xoshiro256StarStar::seed_from_u64(seed);
     // Get the random vector
@@ -291,15 +285,8 @@ impl Repetition {
         Repetition {diffs, indices}
     }
 
-    // TODO: we might want to cache the boundaries?
+    // TODO: we want to skip comparisons that have already been performed.
     fn for_pairs_at(&self, prefix: usize, mut action: impl FnMut(usize, usize)) {
-        // where are the two motifs?
-        // for (p, (diff, idx)) in self.diffs.iter().zip(self.indices.iter()).enumerate() {
-        //     if *idx == show_a || *idx == show_b {
-        //         eprintln!("  {idx} has a diff of {diff} with previous and is at position {p}");
-        //     }
-        // }
-
         let mut s = 0;
         let mut e = s + 1;
         loop {
