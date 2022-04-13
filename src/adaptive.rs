@@ -50,7 +50,7 @@ pub struct AdaptiveHashCollection<'ts> {
     /// the vector of the repetitions holds, for each repetition, a vector of subsequence indexes
     /// lexicographically sorted by hash code. Instead of storing the hash code, we store the prefix length
     /// at which each subsequence's hash code differs from the previous one in the order
-    repetitions: Vec<Vec<(u8, u32, i32)>>,
+    repetitions: Vec<Repetition>,
 }
 
 impl<'ts> AdaptiveHashCollection<'ts> {
@@ -69,7 +69,7 @@ impl<'ts> AdaptiveHashCollection<'ts> {
             }
             reps
         };
-        eprintln!("Maximum number of repetitions {}", max_repetitions);
+        eprintln!("Maximum number of repetitions {} ({} bytes per repetition)", max_repetitions, Self::memory_usage_bytes(ts, 1));
 
         let mut probe_repetition = Self::init_repetition(ts);
         let mut partition = vec![0..ts.num_subsequences()];
@@ -107,7 +107,7 @@ impl<'ts> AdaptiveHashCollection<'ts> {
             r,
             max_k,
             seed,
-            repetitions: vec![probe_repetition],
+            repetitions: vec![Repetition::from_vec(&probe_repetition)],
         }
     }
 
@@ -172,4 +172,21 @@ fn partition_by_hash(
 
     // Update partitions
     std::mem::swap(partition, &mut new_partition);
+}
+
+struct Repetition {
+    diffs: Vec<u8>,
+    indices: Vec<u32>
+}
+
+impl Repetition {
+    fn from_vec(v: &Vec<(u8, u32, i32)>) -> Repetition {
+        let mut diffs = Vec::with_capacity(v.len());
+        let mut indices = Vec::with_capacity(v.len());
+        for (diff, idx, _) in v.iter() {
+            diffs.push(*diff);
+            indices.push(*idx);
+        }
+        Repetition {diffs, indices}
+    }
 }
