@@ -52,11 +52,10 @@ impl CostEstimator {
 pub struct AdaptiveHashCollection<'ts> {
     ts: &'ts WindowedTimeseries,
     cost_estimator: CostEstimator,
-    max_memory_bytes: usize,
     /// number of concatenations to use at most, set with the cost optimizer
     pub max_k: usize,
     max_repetitions: usize,
-    r: f64,
+    pub r: f64,
     seed: u64,
     /// the vector of the repetitions holds, for each repetition, a vector of subsequence indexes
     /// lexicographically sorted by hash code. Instead of storing the hash code, we store the prefix length
@@ -118,13 +117,16 @@ impl<'ts> AdaptiveHashCollection<'ts> {
         Self {
             ts,
             cost_estimator,
-            max_memory_bytes,
             max_repetitions,
             r,
             max_k,
             seed,
             repetitions: vec![Repetition::from_vec(&probe_repetition)],
         }
+    }
+
+    pub fn current_repetitions(&self) -> usize {
+        self.repetitions.len()
     }
 
     fn memory_usage_bytes(ts: &WindowedTimeseries, n_repetitions: usize) -> usize {
@@ -148,7 +150,13 @@ impl<'ts> AdaptiveHashCollection<'ts> {
         self.repetitions[repetition].for_pairs_at(prefix, &mut action);
     }
 
-    pub fn add_repetitions(&mut self, nreps: usize) {
+    pub fn set_repetitions(&mut self, repetitions: usize) {
+        assert!(repetitions <= self.max_repetitions);
+        assert!(repetitions >= self.current_repetitions());
+        self.add_repetitions(repetitions - self.current_repetitions());
+    }
+
+    fn add_repetitions(&mut self, nreps: usize) {
         let s = self.repetitions.len();
         let e = s + nreps;
         let ts = &self.ts;
@@ -156,8 +164,6 @@ impl<'ts> AdaptiveHashCollection<'ts> {
         let seed = self.seed;
         let r = self.r;
         let extension = (s..e).into_par_iter().map(|repetition| {
-            // for debug purposes only
-            let mut hash_values: Vec<Vec<i32>> = vec![Vec::new(); ts.num_subsequences()];
             let mut arr = Self::init_repetition(ts);
             let mut partition = vec![0..ts.num_subsequences()];
             let mut v_buf = Vec::new();
@@ -172,10 +178,6 @@ impl<'ts> AdaptiveHashCollection<'ts> {
                     &mut v_buf,
                     &mut dotp_buf,
                 );
-                // just for debugging
-                for (_, idx, h) in arr.iter() {
-                    hash_values[*idx as usize].push(*h);
-                }
             }
             Repetition::from_vec(&arr)
         });
@@ -202,15 +204,15 @@ impl<'ts> AdaptiveHashCollection<'ts> {
         let required_repetitions = |prefix: usize| {
             ((1.0/delta).log(std::f64::consts::E) / p.powi(prefix as i32)).ceil() as usize
         };
-        for prefix in 1..self.max_k {
+        let (prefix, reps, _cost) = (1..=self.max_k).map(|prefix|{
             let reps = required_repetitions(prefix);
             let cost = self.cost_estimator.estimated_cost(prefix) * reps as u32;
-            eprintln!(
-                "At prefix {} we should do {} repetitions, estimated cost {:?}",
-                prefix, reps, cost
-            );
-        }
-        todo!()
+            eprintln!(" . cost for {} repetitions at prefix {} would be {:?}", reps, prefix, cost);
+            (prefix, reps, cost)
+        }).filter(|(_prefix, reps, _cost)| *reps <= self.max_repetitions)
+          .min_by_key(|triplet| triplet.2)
+          .unwrap();
+        (prefix, reps)
     }
 }
 

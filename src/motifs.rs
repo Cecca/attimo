@@ -234,7 +234,7 @@ impl TopK {
         self.top.iter().filter(|m| m.elapsed.is_some()).map(|m| *m)
     }
 
-    fn for_each(&mut self, f: impl FnMut(&mut Motif)) {
+    pub fn for_each(&mut self, f: impl FnMut(&mut Motif)) {
         self.top.iter_mut().for_each(f)
     }
 
