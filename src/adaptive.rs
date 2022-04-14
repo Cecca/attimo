@@ -1,14 +1,14 @@
+use crate::timeseries::WindowedTimeseries;
 use rand::prelude::*;
 use rand_distr::{StandardNormal, Uniform};
 use rand_xoshiro::Xoshiro256StarStar;
 use rayon::prelude::*;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
+use thread_local::ThreadLocal;
 use std::{
     ops::Range,
-    time::{Duration, Instant},
+    time::{Duration, Instant}, cell::RefCell,
 };
-
-use crate::{distance::zeucl, timeseries::WindowedTimeseries};
 
 struct CostEstimator {
     /// how much it costs to carry out a pair evaluation
@@ -58,6 +58,7 @@ pub struct AdaptiveHashCollection<'ts> {
     max_repetitions: usize,
     pub r: f64,
     seed: u64,
+    scratch: ThreadLocal<RefCell<Scratch>>,
     /// the vector of the repetitions holds, for each repetition, a vector of subsequence indexes
     /// lexicographically sorted by hash code. Instead of storing the hash code, we store the prefix length
     /// at which each subsequence's hash code differs from the previous one in the order
@@ -69,9 +70,6 @@ impl<'ts> AdaptiveHashCollection<'ts> {
         let mut cost_estimator = CostEstimator::new(ts);
         let mut max_k = 1usize;
         let r = 1.0;
-
-        let mut v_buf = Vec::new();
-        let mut dotp_buf = Vec::new();
 
         let max_repetitions = {
             let mut reps = 1;
@@ -87,29 +85,18 @@ impl<'ts> AdaptiveHashCollection<'ts> {
             Self::memory_usage_bytes(ts, 1)
         );
 
-        let mut hashes = vec![Vec::new(); ts.num_subsequences()];
-        let mut probe_repetition = Self::init_repetition(ts);
-        let mut partition = vec![0..ts.num_subsequences()];
-        let mut old_partition = Vec::new();
+        let scratch: ThreadLocal<RefCell<Scratch>> = ThreadLocal::default();
+
+        let mut tl_scratch = scratch.get_or_default().borrow_mut();
+        tl_scratch.reset(ts.num_subsequences());
         eprintln!("Estimated cost at 0 {:?}", cost_estimator.estimated_cost(0));
         while max_k <= 32 {
             eprintln!(":::::::::::: k={max_k}");
             let start = Instant::now();
-            partition_by_hash(
-                ts,
-                &mut probe_repetition,
-                &mut partition,
-                &mut old_partition,
-                Self::derive_seed(seed, max_k, 0),
-                r,
-                &mut v_buf,
-                &mut dotp_buf,
-            );
-            for triplet in probe_repetition.iter() {
-                hashes[triplet.1 as usize].push(triplet.2);
-            }
+            partition_by_hash(ts, Self::derive_seed(seed, max_k, 0), r, &mut tl_scratch);
             let elapsed = start.elapsed();
-            let collisions = partition
+            let collisions = tl_scratch
+                .partition
                 .iter()
                 .map(|r| (r.len() * (r.len() - 1)) / 2)
                 .sum();
@@ -131,6 +118,7 @@ impl<'ts> AdaptiveHashCollection<'ts> {
             max_k += 1;
         }
         eprintln!("Selected max_k = {max_k}");
+        drop(tl_scratch); // release borrow on tl_scratch
 
         Self {
             ts,
@@ -140,6 +128,7 @@ impl<'ts> AdaptiveHashCollection<'ts> {
             max_k,
             level: max_k,
             seed,
+            scratch,
             // We don't use the probe repetition we built for the estimation because
             // it is partitioned according to max_k + 1, and there does not seem to be an easy way to
             // undo the sorting at the last invocation of partition_by_hash
@@ -161,17 +150,7 @@ impl<'ts> AdaptiveHashCollection<'ts> {
         (repetition + 1) as u64 * seed + k as u64
     }
 
-    fn init_repetition(ts: &WindowedTimeseries) -> Vec<(u8, u32, i32)> {
-        (0..ts.num_subsequences())
-            .map(|i| (0, i as u32, 0))
-            .collect()
-    }
-
-    pub fn for_pairs(
-        &self,
-        repetition: usize,
-        mut action: impl FnMut(usize, usize),
-    ) {
+    pub fn for_pairs(&self, repetition: usize, mut action: impl FnMut(usize, usize)) {
         self.repetitions[repetition].for_pairs(&mut action);
     }
 
@@ -208,25 +187,14 @@ impl<'ts> AdaptiveHashCollection<'ts> {
         let seed = self.seed;
         let r = self.r;
         let level = self.level;
+        let scratch_provider = &self.scratch;
         let extension = (s..e).into_par_iter().map(|repetition| {
-            let mut arr = Self::init_repetition(ts);
-            let mut partition = vec![0..ts.num_subsequences()];
-            let mut old_partition = Vec::new();
-            let mut v_buf = Vec::new();
-            let mut dotp_buf = Vec::new();
+            let mut scratch = scratch_provider.get_or_default().borrow_mut();
+            scratch.reset(ts.num_subsequences());
             for k in 1..=level {
-                partition_by_hash(
-                    ts,
-                    &mut arr,
-                    &mut partition,
-                    &mut old_partition,
-                    Self::derive_seed(seed, k, repetition),
-                    r,
-                    &mut v_buf,
-                    &mut dotp_buf,
-                );
+                partition_by_hash(ts, Self::derive_seed(seed, k, repetition), r, &mut scratch);
             }
-            Repetition::from_vec(level, &arr, &partition)
+            Repetition::from_vec(level, &scratch.indices, &scratch.partition)
         });
         self.repetitions.par_extend(extension);
         eprintln!("Added {nreps} repetitions in {:?}", timer.elapsed());
@@ -269,40 +237,57 @@ impl<'ts> AdaptiveHashCollection<'ts> {
     }
 }
 
-fn partition_by_hash(
-    ts: &WindowedTimeseries,
-    indices: &mut [(u8, u32, i32)],
-    partition: &mut Vec<Range<usize>>,
-    old_partition: &mut Vec<Range<usize>>,
-    seed: u64,
-    r: f64,
-    v_buf: &mut Vec<f64>,
-    dotp_buf: &mut Vec<f64>,
-) {
+#[derive(Default)]
+struct Scratch {
+    indices: Vec<(u8, u32, i32)>,
+    partition: Vec<Range<usize>>,
+    old_partition: Vec<Range<usize>>,
+    v_buf: Vec<f64>,
+    dotp_buf: Vec<f64>,
+}
+
+impl Scratch {
+    fn reset(&mut self, n: usize) {
+        self.indices.clear();
+        self.partition.clear();
+        self.old_partition.clear();
+        self.v_buf.clear();
+        self.dotp_buf.clear();
+
+        for i in 0..n {
+            self.indices.push((0, i as u32, 0));
+        }
+        self.partition.push(0..n);
+    }
+}
+
+fn partition_by_hash(ts: &WindowedTimeseries, seed: u64, r: f64, scratch: &mut Scratch) {
     // TODO reduce allocations by reusing buffers in thread local storage
     // Compute hash value
     let mut rng = Xoshiro256StarStar::seed_from_u64(seed);
     // Get the random vector
-    v_buf.clear();
-    v_buf.resize_with(ts.w, || StandardNormal.sample(&mut rng));
+    scratch.v_buf.clear();
+    scratch
+        .v_buf
+        .resize_with(ts.w, || StandardNormal.sample(&mut rng));
     let b = Uniform::new(0.0, r).sample(&mut rng);
-    dotp_buf.resize(ts.num_subsequences(), 0.0);
+    scratch.dotp_buf.resize(ts.num_subsequences(), 0.0);
 
-    ts.znormalized_sliding_dot_product(&v_buf, dotp_buf);
+    ts.znormalized_sliding_dot_product(&scratch.v_buf, &mut scratch.dotp_buf);
     let mut hash_values = Vec::new();
-    for dotp in dotp_buf.iter() {
+    for dotp in scratch.dotp_buf.iter() {
         hash_values.push(((dotp + b) / r).floor() as i32);
     }
-    for triplet in indices.iter_mut() {
+    for triplet in scratch.indices.iter_mut() {
         triplet.2 = hash_values[triplet.1 as usize];
     }
     // eprintln!(" . time hash: {:?}", t_hash.elapsed());
 
     // Partition by values
-    std::mem::swap(partition, old_partition);
-    partition.clear();
-    for range in old_partition.iter() {
-        let part = &mut indices[range.clone()];
+    std::mem::swap(&mut scratch.partition, &mut scratch.old_partition);
+    scratch.partition.clear();
+    for range in scratch.old_partition.iter() {
+        let part = &mut scratch.indices[range.clone()];
         // Sort by hash value
         part.sort_by_key(|triplet| triplet.2);
 
@@ -314,7 +299,7 @@ fn partition_by_hash(
             if end >= part.len() || part[end].2 != part[end - 1].2 {
                 let r = (start + offset)..(end + offset);
                 assert!(r.start < r.end);
-                partition.push(r);
+                scratch.partition.push(r);
                 start = end;
                 end = start + 1;
             } else {
@@ -324,13 +309,13 @@ fn partition_by_hash(
         }
     }
     // Check that the partition is indeed a partition
-    for i in 1..partition.len() {
+    for i in 1..scratch.partition.len() {
         assert_eq!(
-            partition[i - 1].end,
-            partition[i].start,
+            scratch.partition[i - 1].end,
+            scratch.partition[i].start,
             "partition has non contiguous intervals \nold partition{:?}\nnew partition{:?}",
-            &old_partition[0..10],
-            &partition[0..10]
+            &scratch.old_partition[0..10],
+            &scratch.partition[0..10]
         );
     }
 }
@@ -361,10 +346,6 @@ impl RepetitionSlice {
         }
     }
 
-    fn len(&self) -> usize {
-        self.end - self.start
-    }
-
     fn from_slices(slices: &[RepetitionSlice]) -> Self {
         let children = slices.iter().map(|r| r.start..r.end).collect();
         Self::new(
@@ -384,7 +365,7 @@ impl RepetitionSlice {
         if let Some(children) = self.children.as_ref() {
             for child_i in 0..(children.len() - 1) {
                 let range_i = children[child_i].clone();
-                let range_j = children[child_i+1].start..children[children.len()-1].end;
+                let range_j = children[child_i + 1].start..children[children.len() - 1].end;
                 for i in range_i {
                     for j in range_j.clone() {
                         action(i, j);
@@ -416,7 +397,7 @@ impl Repetition {
             diffs.push(*diff);
             indices.push(*idx);
         }
-        // The first diff should always be zero, regardless of what we got 
+        // The first diff should always be zero, regardless of what we got
         //from the input (which can be different from 0 because of the rearrangement during partitioning,
         // which might cause the first bucket to be split at a higher level than zero, of course)
         diffs[0] = 0;
@@ -428,8 +409,13 @@ impl Repetition {
                 "slices are not contiguous"
             );
         }
-        assert!(slices.iter().cloned().all(|s| diffs[(s.start+1..s.end)].iter().all(|d| *d as usize >= level)));
-        assert!(slices.iter().cloned().all(|s| diffs[s.start] == *diffs[s.start..s.end].iter().min().unwrap()));
+        assert!(slices.iter().cloned().all(|s| diffs[(s.start + 1..s.end)]
+            .iter()
+            .all(|d| *d as usize >= level)));
+        assert!(slices
+            .iter()
+            .cloned()
+            .all(|s| diffs[s.start] == *diffs[s.start..s.end].iter().min().unwrap()));
 
         let slices: Vec<RepetitionSlice> = slices.iter().map(RepetitionSlice::from_range).collect();
         for s in slices.iter() {
@@ -458,7 +444,7 @@ impl Repetition {
         while start < self.slices.len() {
             // We grow the slice at position i so that it includes all the next slices
             // so that the breakpoints share a common prefix of length `target_level`
-            let mut end = start+1;
+            let mut end = start + 1;
             while end < self.slices.len()
                 && (self.diffs[self.slices[end].start] as usize) >= target_level
             {
@@ -480,7 +466,15 @@ impl Repetition {
                 s.start..s.end,
                 self.diffs
             );
-            assert!(self.diffs[(s.start+1)..s.end].iter().all(|d| *d as usize >= target_level), "common prefixes at {}..{} : {:?}", s.start, s.end, &self.diffs[s.start..s.end]);
+            assert!(
+                self.diffs[(s.start + 1)..s.end]
+                    .iter()
+                    .all(|d| *d as usize >= target_level),
+                "common prefixes at {}..{} : {:?}",
+                s.start,
+                s.end,
+                &self.diffs[s.start..s.end]
+            );
         }
     }
 

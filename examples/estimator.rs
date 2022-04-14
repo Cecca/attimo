@@ -88,7 +88,7 @@ fn main() -> Result<()> {
             );
 
             if false {
-            // if num_collisions < 10_000_000 && num_collisions > 0 {
+                // if num_collisions < 10_000_000 && num_collisions > 0 {
                 let bs = boundaries.clone();
                 let start_distances = Instant::now();
                 let mut cnt = 0;
