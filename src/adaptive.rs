@@ -191,11 +191,13 @@ impl<'ts> AdaptiveHashCollection<'ts> {
     }
 
     pub fn decrease_level(&mut self, level: usize) {
+        eprintln!("Decreasing all levels");
         assert!(level < self.level);
         self.repetitions
-            .iter_mut()
+            .par_iter_mut()
             .for_each(|rep| rep.decrease_level(level));
         self.level = level;
+        eprintln!("done!");
     }
 
     fn add_repetitions(&mut self, nreps: usize) {
@@ -310,7 +312,6 @@ fn partition_by_hash(
         let offset = range.start;
         while end <= part.len() {
             if end >= part.len() || part[end].2 != part[end - 1].2 {
-            // if part[end].2 != part[end - 1].2 {
                 let r = (start + offset)..(end + offset);
                 assert!(r.start < r.end);
                 partition.push(r);

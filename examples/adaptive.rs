@@ -21,7 +21,6 @@ pub fn collision_probability_at(r: f64, d: f64) -> f64 {
 fn main() -> Result<()> {
     let ts = loadts("data/ECG.csv.gz", None)?;
     let ts = WindowedTimeseries::new(ts, 1000, false);
-    // let ts = WindowedTimeseries::gen_randomwalk(30, 3, 234);
     let start = Instant::now();
 
     let exclusion_zone = ts.w;
@@ -29,14 +28,12 @@ fn main() -> Result<()> {
     let num_motifs = 1;
     let timer = Instant::now();
     let mut topk = TopK::new(num_motifs, exclusion_zone);
-    let mut coll = AdaptiveHashCollection::new(&ts, 1024 * MB, 12345);
+    let mut coll = AdaptiveHashCollection::new(&ts, 4096 * MB, 12345);
     eprintln!("Estimation and construction {:?}", timer.elapsed());
     let r = coll.r;
 
     let stopping_condition = |d: f64, prefix: usize, repetition: usize| {
         let p = collision_probability_at(r, d);
-        // let failure_p = (1.0 - p.powi(prefix as i32)).powi(repetition as i32);
-        // failure_p <= delta / (num_motifs as f64)
         repetition as f64
             >= (num_motifs as f64 / delta).log(std::f64::consts::E) / p.powi(prefix as i32)
     };
