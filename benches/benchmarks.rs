@@ -207,21 +207,21 @@ pub fn bench_zdot(c: &mut Criterion) {
 }
 
 pub fn bench_zeucl(c: &mut Criterion) {
-    let ts = loadts("data/ECG.csv", Some(10000)).unwrap();
+    let ts = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
     let ts = WindowedTimeseries::new(ts, 1000, false);
 
     c.bench_function("ops/zeucl/ECG", move |bencher| {
         bencher.iter(|| zeucl(&ts, 0, 1340))
     });
 
-    let ts = loadts("data/HumanY.txt", Some(1000000)).unwrap();
+    let ts = loadts("data/HumanY.txt.gz", Some(1000000)).unwrap();
     let ts = WindowedTimeseries::new(ts, 18000, false);
 
     c.bench_function("ops/zeucl/HumanY", move |bencher| {
         bencher.iter(|| zeucl(&ts, 0, 130040))
     });
 
-    let ts = loadts("data/ASTRO.csv", None).unwrap();
+    let ts = loadts("data/ASTRO.csv.gz", None).unwrap();
     let ts = WindowedTimeseries::new(ts, 100, false);
 
     c.bench_function("ops/zeucl/ASTRO", move |bencher| {
@@ -234,7 +234,7 @@ pub fn bench_first_collision(c: &mut Criterion) {
 
     for depth in [32, 16] {
         let w = 1000;
-        let ts = loadts("data/ECG.csv", Some(10000)).unwrap();
+        let ts = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
         let h = Arc::new(Hasher::new(w, repetitions, 16.0, 12345));
@@ -259,7 +259,7 @@ pub fn bench_first_collision(c: &mut Criterion) {
         );
 
         let w = 18000;
-        let ts = loadts("data/HumanY.txt", Some(1000000)).unwrap();
+        let ts = loadts("data/HumanY.txt.gz", Some(1000000)).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
         let h = Arc::new(Hasher::new(w, repetitions, 16.0, 12345));
@@ -284,7 +284,7 @@ pub fn bench_first_collision(c: &mut Criterion) {
         );
 
         let w = 100;
-        let ts = loadts("data/ASTRO.csv", None).unwrap();
+        let ts = loadts("data/ASTRO.csv.gz", None).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
         let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
