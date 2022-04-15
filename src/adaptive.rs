@@ -1,4 +1,4 @@
-use crate::timeseries::WindowedTimeseries;
+use crate::{timeseries::WindowedTimeseries, distance::zeucl};
 use rand::prelude::*;
 use rand_distr::{StandardNormal, Uniform};
 use rand_xoshiro::Xoshiro256StarStar;
@@ -21,8 +21,32 @@ struct CostEstimator {
 
 impl CostEstimator {
     fn new(ts: &WindowedTimeseries) -> Self {
+        // Benchmark the cost of distance computation
+        let mut sink = 0.0;
+        let mut i = 0;
+        let mut cnt = 0;
+        let timer = Instant::now();
+        while i < ts.num_subsequences() {
+            if cnt >= 1000 {
+                break;
+            }
+            let mut j = i + 1000;
+            while j < ts.num_subsequences() {
+                if cnt >= 1000 {
+                    break;
+                }
+                sink += zeucl(ts, i, j);
+                cnt += 1;
+                j += 1000;
+            }
+            i += 1000;
+        }
+        let elapsed_distances = timer.elapsed();
+        let pair_evaluation = elapsed_distances / (cnt as u32);
+        eprintln!("Estimated time per distance evaluation {:?} (sink {})", pair_evaluation, sink);
+
         Self {
-            pair_evaluation: Duration::from_nanos(1500), // this number should be derived from benchmarking
+            pair_evaluation,//: Duration::from_nanos(1500), // this number should be derived from benchmarking
             cumulative_preprocessing: vec![Duration::from_secs(0)],
             collisions: vec![(ts.num_subsequences() * (ts.num_subsequences() - 1)) / 2],
         }

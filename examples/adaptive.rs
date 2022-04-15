@@ -19,13 +19,13 @@ pub fn collision_probability_at(r: f64, d: f64) -> f64 {
 }
 
 fn main() -> Result<()> {
-    let ts = loadts("data/ECG.csv.gz", None)?;
-    let ts = WindowedTimeseries::new(ts, 1000, false);
+    let ts = loadts("data/ASTRO.csv.gz", None)?;
+    let ts = WindowedTimeseries::new(ts, 100, false);
     let start = Instant::now();
 
     let exclusion_zone = ts.w;
     let delta = 0.01;
-    let num_motifs = 1;
+    let num_motifs = 10;
     let timer = Instant::now();
     let mut topk = TopK::new(num_motifs, exclusion_zone);
     let mut coll = AdaptiveHashCollection::new(&ts, 4096 * MB, 12345);
@@ -55,14 +55,16 @@ fn main() -> Result<()> {
                 coll.for_pairs(rep, |pi, pj| {
                     let i = std::cmp::min(pi, pj);
                     let j = std::cmp::max(pi, pj);
-                    let d = zeucl(&ts, i, j);
-                    let m = Motif {
-                        idx_a: i,
-                        idx_b: j,
-                        distance: d,
-                        elapsed: None,
-                    };
-                    topk.insert(m);
+                    if j - i >= ts.w {
+                        let d = zeucl(&ts, i, j);
+                        let m = Motif {
+                            idx_a: i,
+                            idx_b: j,
+                            distance: d,
+                            elapsed: None,
+                        };
+                        topk.insert(m);
+                    }
                 });
                 // eprintln!("repetition {} at prefix {} took {:?}", rep, prefix, t_rep.elapsed());
                 topk
