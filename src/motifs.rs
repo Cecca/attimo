@@ -666,7 +666,7 @@ mod test {
             let ts = WindowedTimeseries::new(ts, w, true);
             // assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
 
-            let motif = *motifs(&ts, 1, Repetitions::Exact(20), 0.001, None, None, 12435)
+            let motif = *motifs(&ts, 1, Repetitions::Exact(200), 0.001, None, None, 12435)
                 .first()
                 .unwrap();
             println!("Motif distance {}", motif.distance);
