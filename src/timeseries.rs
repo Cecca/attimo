@@ -49,9 +49,9 @@ impl WindowedTimeseries {
         let mut begin = 0;
         while begin < ts.len() {
             let end = std::cmp::min(begin + fft_length, ts.len());
-            let mut chunk: Vec<Complex<f64>> = ts[begin..end]
+            let mut chunk: Vec<Complex<f32>> = ts[begin..end]
                 .iter()
-                .map(|x| Complex { re: *x, im: 0.0 })
+                .map(|x| Complex { re: *x as f32, im: 0.0f32 })
                 .collect();
             chunk.resize(fft_length, Complex::zero());
             fftfun.process(&mut chunk);
@@ -143,7 +143,7 @@ impl WindowedTimeseries {
         //// Then compute the FFT of the reversed input vector, padded with zeros
         vfft.fill(Complex::zero());
         for (i, &x) in v.iter().enumerate() {
-            vfft[self.w - i - 1] = Complex { re: x, im: 0.0 };
+            vfft[self.w - i - 1] = Complex { re: x as f32, im: 0.0 };
         }
         self.fft_data.fftfun.process(&mut vfft);
 
@@ -163,8 +163,8 @@ impl WindowedTimeseries {
             let offset = chunk_idx * stride;
             for i in 0..(self.fft_data.fft_length - self.w) {
                 if i + offset < self.num_subsequences() {
-                    output[i + offset] = ivfft[(i + v.len() - 1) % self.fft_data.fft_length].re
-                        / self.fft_data.fft_length as f64
+                    output[i + offset] = (ivfft[(i + v.len() - 1) % self.fft_data.fft_length].re
+                        / self.fft_data.fft_length as f32) as f64
                 }
             }
         }
@@ -480,11 +480,11 @@ struct FFTData {
     /// We maintain the fft transform for computing dot products in chunks
     /// of size `fft_length` (or the smallest power of 2 after w, whichever largest), in order to
     /// be able to tile the computation of the dot products.
-    fft_chunks: Vec<Vec<Complex<f64>>>,
-    fftfun: Arc<dyn Fft<f64>>,
-    ifftfun: Arc<dyn Fft<f64>>,
-    buf_vfft: ThreadLocal<RefCell<Vec<Complex<f64>>>>,
-    buf_ivfft: ThreadLocal<RefCell<Vec<Complex<f64>>>>,
+    fft_chunks: Vec<Vec<Complex<f32>>>,
+    fftfun: Arc<dyn Fft<f32>>,
+    ifftfun: Arc<dyn Fft<f32>>,
+    buf_vfft: ThreadLocal<RefCell<Vec<Complex<f32>>>>,
+    buf_ivfft: ThreadLocal<RefCell<Vec<Complex<f32>>>>,
 }
 
 #[cfg(test)]
