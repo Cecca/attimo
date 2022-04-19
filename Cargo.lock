@@ -65,6 +65,7 @@ dependencies = [
  "anyhow",
  "argh",
  "bitvec",
+ "chrono",
  "claxon",
  "criterion",
  "crossbeam-channel",

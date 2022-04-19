@@ -7,16 +7,28 @@ use std::path::Path;
 use std::time::Instant;
 
 pub fn loadts<P: AsRef<Path>>(path: P, prefix: Option<usize>) -> Result<Vec<f64>> {
-    if path.as_ref().extension().map(|ext| ext.to_str().unwrap().ends_with("flac")).unwrap_or(false) {
+    if path
+        .as_ref()
+        .extension()
+        .map(|ext| ext.to_str().unwrap().ends_with("flac"))
+        .unwrap_or(false)
+    {
         load_flac(path, prefix)
-    }else if path.as_ref().extension().map(|ext| ext.to_str().unwrap().ends_with("gz")).unwrap_or(false) {
-        let f = File::open(path.as_ref()).with_context(|| format!("reading {:?}", path.as_ref()))?;
+    } else if path
+        .as_ref()
+        .extension()
+        .map(|ext| ext.to_str().unwrap().ends_with("gz"))
+        .unwrap_or(false)
+    {
+        let f =
+            File::open(path.as_ref()).with_context(|| format!("reading {:?}", path.as_ref()))?;
         let f = BufReader::new(f);
         let f = flate2::read::GzDecoder::new(f);
         let f = BufReader::new(f);
         load_from(f, prefix)
     } else {
-        let f = File::open(path.as_ref()).with_context(|| format!("reading {:?}", path.as_ref()))?;
+        let f =
+            File::open(path.as_ref()).with_context(|| format!("reading {:?}", path.as_ref()))?;
         let f = BufReader::new(f);
         load_from(f, prefix)
     }
@@ -52,6 +64,10 @@ fn load_from<R: BufRead>(mut reader: R, prefix: Option<usize>) -> Result<Vec<f64
 fn load_flac<P: AsRef<Path>>(path: P, prefix: Option<usize>) -> Result<Vec<f64>> {
     let mut reader = claxon::FlacReader::open(path)?;
     let to_take = prefix.unwrap_or(usize::MAX);
-    let result: Vec<f64> = reader.samples().take(to_take).map(|sample| sample.unwrap() as f64).collect();
+    let result: Vec<f64> = reader
+        .samples()
+        .take(to_take)
+        .map(|sample| sample.unwrap() as f64)
+        .collect();
     Ok(result)
 }
