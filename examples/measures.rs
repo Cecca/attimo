@@ -36,6 +36,7 @@ struct Measures {
 fn main() -> Result<()> {
     let args: Args = argh::from_env();
     let ts = WindowedTimeseries::new(loadts(&args.path, None)?, args.window, false);
+    let fft_data = FFTData::new(&ts);
 
     let idxs = args.idxs;
 
@@ -47,7 +48,7 @@ fn main() -> Result<()> {
     let lids: Vec<(usize, Measures)> = idxs
         .into_par_iter()
         .map(|i| {
-            let mut dp = ts.distance_profile(i);
+            let mut dp = ts.distance_profile(&fft_data, i);
             let mut dp: Vec<f64> = dp
                 .drain(..)
                 .enumerate()

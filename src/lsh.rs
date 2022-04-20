@@ -30,7 +30,7 @@ use crate::motifs::Motif;
 use crate::{alloc_cnt, allocator::*};
 // TODO Remove this dependency
 use crate::sort::*;
-use crate::timeseries::WindowedTimeseries;
+use crate::timeseries::{WindowedTimeseries, FFTData};
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -161,7 +161,7 @@ impl HashCollection {
 
     //// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
     //// and a `Hasher`.
-    pub fn from_ts(ts: &WindowedTimeseries, hasher: Arc<Hasher>) -> Self {
+    pub fn from_ts(ts: &WindowedTimeseries, fft_data: &FFTData, hasher: Arc<Hasher>) -> Self {
         assert!(ts.num_subsequences() < u32::MAX as usize, "We use 32 bit integers as pointers into subsequences, this timeseries has too many subsequences.");
         println!(
             "Number of tensor repetitions: {}",
@@ -185,15 +185,16 @@ impl HashCollection {
                 let k = hash_idx % K;
                 // info!("hashing"; "repetition" => repetition, "k" => k);
 
-                let mut buffer = tl_buffer.get_or(|| RefCell::new(vec![0; ns])).borrow_mut();
+                let mut buffer = tl_buffer.get_or(|| RefCell::new(vec![0.0; ns])).borrow_mut();
 
-                let oob = hasher.hash_all(&ts, k, repetition, &mut buffer);
+                let oob = hasher.hash_all(&ts, fft_data, k, repetition, &mut buffer);
                 for (i, h) in buffer.iter().enumerate() {
                     let idx = K * ns * repetition + i * K + k;
                     assert!(idx < nhashes);
+                    let h = ((*h as i64 & 0xFFi64) as i8) as u8;
                     //// This operation is `unsafe` but each index is accessed only once,
                     //// so there are no data races, despite not using synchronization.
-                    unsafe { uns_pools.write(idx, *h) };
+                    unsafe { uns_pools.write(idx, h) };
                 }
                 oob
             })
@@ -447,6 +448,7 @@ impl Hasher {
     //// i.e. that 99% of the hash values can be represented with 8 bits.
     pub fn estimate_width(
         ts: &WindowedTimeseries,
+        fft_data: &FFTData,
         k: usize,
         min_dist: Option<f64>,
         max_repetitions: Option<usize>,
@@ -465,7 +467,7 @@ impl Hasher {
         loop {
             println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
-            let probe_collection = HashCollection::from_ts(&ts, probe_hasher);
+            let probe_collection = HashCollection::from_ts(&ts, fft_data, probe_hasher);
             let fraction_oob = probe_collection.fraction_oob();
             let probe_collection = Arc::new(probe_collection);
             info!(
@@ -537,6 +539,7 @@ impl Hasher {
         let estimated_repetitions = max_repetitions.map(|max_repetitions| {
             Self::estimate_repetitions(
                 ts,
+                fft_data,
                 kth_upper_bound.unwrap(),
                 r,
                 max_repetitions,
@@ -551,6 +554,7 @@ impl Hasher {
     /// Compute an estimate of the number of repetitions that minimizes the total running time
     fn estimate_repetitions(
         ts: &WindowedTimeseries,
+        fft_data: &FFTData,
         kth_upper_bound: f64,
         r: f64,
         max_repetitions: usize,
@@ -560,7 +564,7 @@ impl Hasher {
         let mut probe_column = Vec::new();
         let mut probe_buckets = Vec::new();
         let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
-        let probe_collection = HashCollection::from_ts(&ts, Arc::clone(&probe_hasher));
+        let probe_collection = HashCollection::from_ts(&ts, fft_data, Arc::clone(&probe_hasher));
 
         let threshold_fn = |d: f64, depth: isize| {
             let p = probe_hasher.collision_probability_at(d);
@@ -647,37 +651,28 @@ impl Hasher {
     pub fn hash_all(
         &self,
         ts: &WindowedTimeseries,
+        fft_data: &FFTData,
         k: usize,
         repetition: usize,
-        buffer: &mut [u8],
+        buffer: &mut [f64],
     ) -> usize {
         assert!(buffer.len() == ts.num_subsequences());
         let v = self.get_vector(repetition, k);
         let shift = self.shifts[repetition * K + k];
         let mut oob = 0; // count how many out of bounds we have
-        DOTP_BUFFER.with(|dotp_buf| {
-            ts.znormalized_sliding_dot_product(v, &mut dotp_buf.borrow_mut());
-            for (i, dotp) in dotp_buf.borrow().iter().enumerate() {
-                let h = (dotp + shift) / self.width;
-                //// Count if the value is out of bounds to be repre
-                if h.abs() > 128.0 {
-                    oob += 1;
-                }
-                //// We only use the 8 lowest-order bits of each hash value, in order to use a bit less space.
-                //// In most cases we don't lose information in this way, because we are
-                //// truncating zeros in all hash values. When we truncate other bit patters
-                //// we are just increasing the collision probability, which harms performance
-                //// but not correctness
-                buffer[i] = ((h as i64 & 0xFFi64) as i8) as u8;
-            }
-        });
+        ts.znormalized_sliding_dot_product(fft_data, v, buffer);
+        for h in buffer.iter_mut() {
+             *h = (*h + shift) / self.width;
+            //// Count if the value is out of bounds to be repre
+            if h.abs() > 128.0 {
+                oob += 1;
+                *h = h.signum() * 127.0;
+            } 
+        }
         oob
     }
 }
 
-//// And this is the buffer that is reused across sliding dot product invocations.
-//// It's thread local, so it is safe to use if there are multiple concurrent threads.
-thread_local! { static DOTP_BUFFER: RefCell<Vec<f64>> = RefCell::new(Vec::new()); }
 
 #[cfg(test)]
 mod test {
@@ -688,11 +683,12 @@ mod test {
         let w = 300;
         let ts = crate::load::loadts("data/ECG.csv.gz", Some(500)).expect("problem loading data");
         let ts = crate::timeseries::WindowedTimeseries::new(ts, w, true);
+        let fft_data = FFTData::new(&ts);
 
         let repetitions = 200;
 
         let hasher = Arc::new(Hasher::new(w, repetitions, 5.0, 1245));
-        let pools = HashCollection::from_ts(&ts, Arc::clone(&hasher));
+        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
 
         for &depth in &[32usize, 20, 10] {
             for i in 0..ts.num_subsequences() {

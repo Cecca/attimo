@@ -286,6 +286,7 @@ pub fn motifs(
 
     //// We set the exclusion zone to the motif length, so that motifs cannot overlap at all.
     let exclusion_zone = ts.w;
+    let fft_data = FFTData::new(&ts);
 
     let max_dist = min_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
     let min_dist = max_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
@@ -295,7 +296,7 @@ pub fn motifs(
     );
 
     let (hasher_width, estimated_repetitions) =
-        Hasher::estimate_width(&ts, topk, min_dist, repetitions.get_upper_bound(), seed);
+        Hasher::estimate_width(&ts, &fft_data, topk, min_dist, repetitions.get_upper_bound(), seed);
     let repetitions = if let Some(reps) = repetitions.get_exact() {
         reps
     } else {
@@ -310,7 +311,7 @@ pub fn motifs(
     info!("hash computation"; "tag" => "phase");
     let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
     let mem_before = allocated();
-    let pools = HashCollection::from_ts(ts, Arc::clone(&hasher));
+    let pools = HashCollection::from_ts(ts, &fft_data, Arc::clone(&hasher));
     let pools = Arc::new(pools);
     let pools_size = allocated() - mem_before;
     println!(
@@ -318,6 +319,8 @@ pub fn motifs(
         start.elapsed(),
         PrettyBytes(pools_size)
     );
+    eprintln!("Dropping fft data");
+    drop(fft_data);
 
     let cnt_dist = AtomicUsize::new(0);
 

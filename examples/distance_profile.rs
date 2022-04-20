@@ -36,9 +36,10 @@ fn main() -> Result<()> {
     let args: Args = argh::from_env();
     println!("[{:?}] Reading input", timer.elapsed());
     let ts = WindowedTimeseries::new(loadts(&args.path, None)?, args.window, false);
+    let fft_data = FFTData::new(&ts);
 
     println!("[{:?}] Computing distance profile", timer.elapsed());
-    let dp = ts.distance_profile(args.from);
+    let dp = ts.distance_profile(&fft_data, args.from);
 
     let thresh = args.threshold.unwrap_or(f64::INFINITY);
 
