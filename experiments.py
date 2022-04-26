@@ -31,6 +31,20 @@ def install_scamp():
         for cmd, d in commands:
             sp.run(shlex.split(cmd), cwd=d).check_returncode()
 
+def install_prescrimp():
+    try:
+        if os.path.isfile("./prescrimp"):
+            return
+    except:
+        print("Installing PreSCRIMP....")
+        commands = [
+            ("wget https://sites.google.com/site/scrimpplusplus/home/prescrimp.cpp",
+            "."),
+            ("g++ -O3 -march=native -std=c++11 -o prescrimp prescrimp.cpp -lm -lfftw3", ".")
+        ]
+        for cmd, d in commands:
+            sp.run(shlex.split(cmd), cwd=d).check_returncode()
+
 def install_ll():
     if os.path.isfile("./LL"):
         return
@@ -126,6 +140,19 @@ def get_db():
         """)
         db.execute("PRAGMA user_version = 3;")
         print("  Bump version to 3")
+    if dbver < 4:
+        db.execute("""
+        CREATE TABLE IF NOT EXISTS scrimp (
+            hostname     TEXT,
+            dataset      TEXT,
+            window       INT,
+            stepsize     REAL,   -- As a fraction of window
+            time_s       REAL,
+            motif_pairs  TEXT
+        )
+        """)
+        db.execute("PRAGMA user_version = 3;")
+        print("  Bump version to 4")
     
     print("Database initialized")
 
@@ -146,9 +173,9 @@ def get_datasets():
         # ("data/GAP.csv", 600),
         ## ("data/EMG.csv", 500),
         # ("data/freezer.txt", 5000),
-        # ("data/ASTRO.csv", 100),
-        ("data/ECG.csv", 1000),
-        ("data/HumanY.txt", 18000),
+        ("data/ASTRO.csv", 100),
+        # ("data/ECG.csv", 1000),
+        # ("data/HumanY.txt", 18000),
         # (prefix("data/VCAB_BP2_580_days.txt", 100000000), 100)
     ]
 
@@ -496,6 +523,67 @@ def run_ll():
         )
 
 
+def run_prescrimp():
+    install_prescrimp()
+    db = get_db()
+    datasets = get_datasets()
+    stepsize = 0.25
+    for dataset, window in datasets:
+        execid = db.execute("""
+            SELECT rowid from scrimp
+            where hostname=:hostname
+              and dataset=:dataset
+              and stepsize=:stepsize
+              and window=:window
+            """,
+            {
+                "hostname": HOSTNAME,
+                "dataset": dataset,
+                "stepsize": stepsize,
+                "window": window,
+            }
+        ).fetchone()
+        if execid is not None:
+            print("Experiment already executed (scrimp id={})".format(execid[0]))
+            continue
+
+        print(f"running PreSCRIMP on {dataset} with w={window} and stepsize={stepsize}... ")
+        start = time.time()
+        sp.run([
+            "./prescrimp", 
+            dataset,
+            str(window),
+            str(stepsize)
+        ]).check_returncode()
+        end = time.time()
+        elapsed = end - start
+        print(f"{elapsed} seconds")
+        outfname = "PreSCRIMP_MatrixProfile_and_Index_{}_{}".format(window, dataset)
+        df = pd.read_csv(outfname, header=None, names=['dist', 'b'])
+        df['a'] = np.arange(len(df))
+        df = df.sort_values('dist')
+        df = df[df['a'] < df['b']]
+        df = remove_trivial(df, window)
+        motifs = df.head(100)[['a', 'b', 'dist']].to_json(orient='records')
+
+        os.remove(outfname)
+
+        db.execute("""
+            INSERT INTO scrimp VALUES (:hostname,:dataset,:window,:stepsize,:elapsed,:motifs);
+            """,
+            {
+                "hostname": HOSTNAME,
+                "dataset": dataset,
+                "window": window,
+                "stepsize": stepsize,
+                "elapsed": elapsed,
+                "motifs": motifs
+            }
+        )
+
+
+
+
 def run_scamp():
     install_scamp()
     db = get_db()
@@ -667,9 +755,10 @@ def scalability_attimo():
 
 if __name__ == "__main__":
     # scalability_attimo()
-    run_attimo()
+    # run_attimo()
     # run_attimo_recall()
     # run_scamp()
+    run_prescrimp()
     # run_ll()
     # run_mk()
     

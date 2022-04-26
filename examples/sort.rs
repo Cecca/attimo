@@ -1,7 +1,7 @@
 use attimo::{
     lsh::{HashCollection, HashValue, Hasher},
     sort::RadixSort,
-    timeseries::{WindowedTimeseries, FFTData},
+    timeseries::{FFTData, WindowedTimeseries},
 };
 
 use std::sync::Arc;

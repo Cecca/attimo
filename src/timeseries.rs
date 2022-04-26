@@ -35,7 +35,7 @@ impl WindowedTimeseries {
             data: ts,
             w,
             rolling_avg,
-            rolling_sd
+            rolling_sd,
         }
     }
 
@@ -86,27 +86,35 @@ impl WindowedTimeseries {
 
         //// Get local scratch vectors, to avoid allocations
         let fft_length = fft_data.fft_length;
-        let mut vfft =
-            fft_data
+        let mut vfft = fft_data
             .buf_vfft
             .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
             .borrow_mut();
-        let mut ivfft = 
-            fft_data
+        let mut ivfft = fft_data
             .buf_ivfft
             .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
             .borrow_mut();
         let mut scratch = fft_data
             .scratch
-            .get_or(|| RefCell::new(vec![Complex::zero(); fft_data.ifftfun.get_inplace_scratch_len()]))
+            .get_or(|| {
+                RefCell::new(vec![
+                    Complex::zero();
+                    fft_data.ifftfun.get_inplace_scratch_len()
+                ])
+            })
             .borrow_mut();
 
         //// Then compute the FFT of the reversed input vector, padded with zeros
         vfft.fill(Complex::zero());
         for (i, &x) in v.iter().enumerate() {
-            vfft[self.w - i - 1] = Complex { re: x as f64, im: 0.0 };
+            vfft[self.w - i - 1] = Complex {
+                re: x as f64,
+                im: 0.0,
+            };
         }
-        fft_data.fftfun.process_with_scratch(&mut vfft, &mut scratch);
+        fft_data
+            .fftfun
+            .process_with_scratch(&mut vfft, &mut scratch);
 
         //// Iterate over the chunks
         for (chunk_idx, chunk) in fft_data.fft_chunks.iter().enumerate() {
@@ -117,7 +125,9 @@ impl WindowedTimeseries {
             }
 
             //// And go back to the time domain
-            fft_data.ifftfun.process_with_scratch(&mut ivfft, &mut scratch);
+            fft_data
+                .ifftfun
+                .process_with_scratch(&mut ivfft, &mut scratch);
 
             //// Copy the values to the output buffer, rescaling on the go (`rustfft`
             //// does not perform normalization automatically)
@@ -125,7 +135,8 @@ impl WindowedTimeseries {
             for i in 0..(fft_data.fft_length - self.w) {
                 if i + offset < self.num_subsequences() {
                     output[i + offset] = (ivfft[(i + v.len() - 1) % fft_data.fft_length].re
-                        / fft_data.fft_length as f64) as f64
+                        / fft_data.fft_length as f64)
+                        as f64
                 }
             }
         }
@@ -147,7 +158,12 @@ impl WindowedTimeseries {
     //// This function allows to compute the sliding dot product between the input vector
     //// and the z-normalized subsequences of the time series. Note that the input
     //// is not z-normalized by this function.
-    pub fn znormalized_sliding_dot_product(&self, fft_data: &FFTData, v: &[f64], output: &mut [f64]) {
+    pub fn znormalized_sliding_dot_product(
+        &self,
+        fft_data: &FFTData,
+        v: &[f64],
+        output: &mut [f64],
+    ) {
         self.sliding_dot_product(fft_data, v, output);
         let sumv: f64 = v.iter().sum();
         for i in 0..self.num_subsequences() {
@@ -446,7 +462,7 @@ pub struct FFTData {
     ifftfun: Arc<dyn Fft<f64>>,
     buf_vfft: ThreadLocal<RefCell<Vec<Complex<f64>>>>,
     buf_ivfft: ThreadLocal<RefCell<Vec<Complex<f64>>>>,
-    scratch: ThreadLocal<RefCell<Vec<Complex<f64>>>>
+    scratch: ThreadLocal<RefCell<Vec<Complex<f64>>>>,
 }
 
 impl FFTData {
@@ -466,7 +482,10 @@ impl FFTData {
             let end = std::cmp::min(begin + fft_length, ts.data.len());
             let mut chunk: Vec<Complex<f64>> = ts.data[begin..end]
                 .iter()
-                .map(|x| Complex { re: *x as f64, im: 0.0f64 })
+                .map(|x| Complex {
+                    re: *x as f64,
+                    im: 0.0f64,
+                })
                 .collect();
             chunk.resize(fft_length, Complex::zero());
             fftfun.process(&mut chunk);
@@ -516,9 +535,11 @@ mod test {
                     // dump_vec(format!("/tmp/sliding-actual-{}-{}.txt", n, w), &actual);
 
                     for (e, a) in expected.into_iter().zip(actual) {
-                        assert!((e - a).abs() <= 0.000000001,
+                        assert!(
+                            (e - a).abs() <= 0.000000001,
                             "{} != {} (expected != actual)",
-                            e, a
+                            e,
+                            a
                         );
                     }
                     // assert!(expected

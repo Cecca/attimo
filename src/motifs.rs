@@ -295,8 +295,14 @@ pub fn motifs(
         min_dist, max_dist
     );
 
-    let (hasher_width, estimated_repetitions) =
-        Hasher::estimate_width(&ts, &fft_data, topk, min_dist, repetitions.get_upper_bound(), seed);
+    let (hasher_width, estimated_repetitions) = Hasher::estimate_width(
+        &ts,
+        &fft_data,
+        topk,
+        min_dist,
+        repetitions.get_upper_bound(),
+        seed,
+    );
     let repetitions = if let Some(reps) = repetitions.get_exact() {
         reps
     } else {

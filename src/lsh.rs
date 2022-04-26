@@ -30,7 +30,7 @@ use crate::motifs::Motif;
 use crate::{alloc_cnt, allocator::*};
 // TODO Remove this dependency
 use crate::sort::*;
-use crate::timeseries::{WindowedTimeseries, FFTData};
+use crate::timeseries::{FFTData, WindowedTimeseries};
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -185,7 +185,9 @@ impl HashCollection {
                 let k = hash_idx % K;
                 // info!("hashing"; "repetition" => repetition, "k" => k);
 
-                let mut buffer = tl_buffer.get_or(|| RefCell::new(vec![0.0; ns])).borrow_mut();
+                let mut buffer = tl_buffer
+                    .get_or(|| RefCell::new(vec![0.0; ns]))
+                    .borrow_mut();
 
                 let oob = hasher.hash_all(&ts, fft_data, k, repetition, &mut buffer);
                 for (i, h) in buffer.iter().enumerate() {
@@ -662,17 +664,16 @@ impl Hasher {
         let mut oob = 0; // count how many out of bounds we have
         ts.znormalized_sliding_dot_product(fft_data, v, buffer);
         for h in buffer.iter_mut() {
-             *h = (*h + shift) / self.width;
+            *h = (*h + shift) / self.width;
             //// Count if the value is out of bounds to be repre
             if h.abs() > 128.0 {
                 oob += 1;
                 *h = h.signum() * 127.0;
-            } 
+            }
         }
         oob
     }
 }
-
 
 #[cfg(test)]
 mod test {

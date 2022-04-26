@@ -1,10 +1,14 @@
-use std::{time::{Duration, Instant}, path::PathBuf, str::FromStr};
-use std::io::prelude::*;
-use anyhow::{anyhow, Result, Context};
+use anyhow::{anyhow, Context, Result};
 use attimo::{
     load::loadts,
     motifs::{motifs, Repetitions},
     timeseries::WindowedTimeseries,
+};
+use std::io::prelude::*;
+use std::{
+    path::PathBuf,
+    str::FromStr,
+    time::{Duration, Instant},
 };
 
 fn get_git_sha() -> Result<String> {
@@ -16,26 +20,45 @@ fn get_git_sha() -> Result<String> {
         .context("getting git sha")
         .and_then(|output| {
             let bytes = output.stdout;
-            String::from_utf8(bytes).context("decoding output").map(|s| s.trim().to_owned())
+            String::from_utf8(bytes)
+                .context("decoding output")
+                .map(|s| s.trim().to_owned())
         })
 }
 
 fn run(path: &str, w: usize, topk: usize, reps: usize, runs: usize, csv: &str) -> Result<()> {
     let date = chrono::offset::Utc::now();
     let sha = get_git_sha()?;
-    let mut f = std::fs::OpenOptions::new().append(true).create(true).open(csv)?;
+    let mut f = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(csv)?;
     let threads = rayon::current_num_threads();
     let ts = WindowedTimeseries::new(loadts("data/ECG.csv.gz", None)?, 1000, false);
     for _ in 0..runs {
         let timer = Instant::now();
         motifs(&ts, 10, Repetitions::Exact(200), 0.01, None, None, 1234);
-        writeln!(f, "{},{},{},{},{},{},{},{}", date.to_rfc3339(), sha, threads, path, w, topk, reps, timer.elapsed().as_secs_f64())?;
+        writeln!(
+            f,
+            "{},{},{},{},{},{},{},{}",
+            date.to_rfc3339(),
+            sha,
+            threads,
+            path,
+            w,
+            topk,
+            reps,
+            timer.elapsed().as_secs_f64()
+        )?;
     }
     Ok(())
 }
 
 fn main() -> Result<()> {
-    debug_assert!(false, "This program should be executed only in release mode");
+    debug_assert!(
+        false,
+        "This program should be executed only in release mode"
+    );
     let output = "regressions.csv";
     if !PathBuf::from_str(&output)?.is_file() {
         let mut f = std::fs::File::create(&output)?;
