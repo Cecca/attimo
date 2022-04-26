@@ -78,7 +78,7 @@ impl WindowedTimeseries {
         self.data.len() - self.w
     }
 
-    pub fn sliding_dot_product(&self, fft_data: &FFTData, v: &[f64], output: &mut [f64]) {
+    pub fn sliding_dot_product_for_each<F: FnMut(usize, f64)>(&self, fft_data: &FFTData, v: &[f64], mut action: F) {
         // let n = self.data_fft.len();
         assert!(v.len() == self.w);
 
@@ -119,16 +119,21 @@ impl WindowedTimeseries {
             //// And go back to the time domain
             fft_data.ifftfun.process_with_scratch(&mut ivfft, &mut scratch);
 
-            //// Copy the values to the output buffer, rescaling on the go (`rustfft`
+            //// Callback with the output value, rescaling on the go (`rustfft`
             //// does not perform normalization automatically)
             let offset = chunk_idx * stride;
             for i in 0..(fft_data.fft_length - self.w) {
                 if i + offset < self.num_subsequences() {
-                    output[i + offset] = (ivfft[(i + v.len() - 1) % fft_data.fft_length].re
-                        / fft_data.fft_length as f64) as f64
+                    let val = (ivfft[(i + v.len() - 1) % fft_data.fft_length].re
+                        / fft_data.fft_length as f64) as f64;
+                    action(i + offset, val);
                 }
             }
         }
+    }
+
+    pub fn sliding_dot_product(&self, fft_data: &FFTData, v: &[f64], output: &mut [f64]) {
+        self.sliding_dot_product_for_each(fft_data, v, |i, v| output[i] = v);
     }
 
     #[cfg(test)]
@@ -148,26 +153,17 @@ impl WindowedTimeseries {
     //// and the z-normalized subsequences of the time series. Note that the input
     //// is not z-normalized by this function.
     pub fn znormalized_sliding_dot_product(&self, fft_data: &FFTData, v: &[f64], output: &mut [f64]) {
-        self.sliding_dot_product(fft_data, v, output);
+        self.znormalized_sliding_dot_product_for_each(fft_data, v, |i, val| output[i] = val);
+    }
+
+    pub fn znormalized_sliding_dot_product_for_each<F: FnMut(usize, f64)>(&self, fft_data: &FFTData, v: &[f64], mut action: F) {
         let sumv: f64 = v.iter().sum();
-        for i in 0..self.num_subsequences() {
+        self.sliding_dot_product_for_each(fft_data, v, |i, val| {
             let m = self.mean(i);
             let sd = self.sd(i);
-            if sd > 0.0 {
-                output[i] = output[i] / sd - sumv * m / sd;
-            } else {
-                //// If the standard deviation is 0 (i.e. the subsequence is constant),
-                //// we just shift by the mean
-                output[i] = output[i] - sumv * m;
-            }
-            assert!(
-                output[i].is_finite(),
-                "dotp={} where mean={} and sd={}",
-                output[i],
-                m,
-                sd
-            );
-        }
+            assert!(sd > 0.0);
+            action(i, val / sd - sumv * m / sd);
+        });
     }
 
     #[cfg(test)]
