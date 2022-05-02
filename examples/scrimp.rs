@@ -1,4 +1,5 @@
 use argh::FromArgs;
+use indicatif::{ProgressBar, ProgressStyle};
 use anyhow::Result;
 use attimo::load::loadts;
 use attimo::timeseries::*;
@@ -53,6 +54,9 @@ fn pre_scrimp<R: Rng>(
     let ns = ts.num_subsequences();
     let w = ts.w;
 
+    let pbar = ProgressBar::new((ns / s) as u64);
+    pbar.set_style(ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} ETA: {eta} {pos:>7}/{len:7} {msg}"));
     for i in rand_seq(0, ns, s, rng) {
         let dists = ts.distance_profile(fft_data, i);
 
@@ -124,64 +128,9 @@ fn pre_scrimp<R: Rng>(
                 indices[j-k] = i-k;
             }
         }
-
+        pbar.inc(1);
     }
-}
-
-fn scrimp<R: Rng>(
-    ts: &WindowedTimeseries,
-    exclusion_zone: usize,
-    fraction: f64,
-    mp: &mut [f64],
-    indices: &mut [usize],
-    rng: &mut R,
-) {
-    let ns = ts.num_subsequences();
-    let total_distances: u64 = (ns * (ns - 1) / 2) as u64;
-    let w = ts.w;
-    let mut cnt_dists = 0u64;
-    for k in rand_seq(exclusion_zone, ns, 1, rng) {
-        let mut q = 0.0;
-        for i in 0..(ns - k) {
-            let j = i + k;
-            if i == 0 {
-                q = dot(ts.subsequence(i), ts.subsequence(j));
-            } else {
-                q = q - ts.data[i-1] * ts.data[j - 1]
-                      + ts.data[i + w - 1] * ts.data[j + w - 1];
-                debug_assert!((q - dot(ts.subsequence(i), ts.subsequence(j))).abs() < 0.00001,
-                    "actual {} expectd {}",
-                    q,
-                    dot(ts.subsequence(i), ts.subsequence(j))
-                );
-            }
-            let d = dotp_to_zeucl(w, q, ts.mean(i), ts.mean(j), ts.sd(i), ts.sd(j));
-            cnt_dists += 1;
-            if d < mp[i] {
-                mp[i] = d;
-                indices[i] = j;
-            }
-            if d < mp[j] {
-                mp[j] = d;
-                indices[j] = i;
-            }
-        }
-        let frac_dist = cnt_dists as f64 / total_distances as f64;
-        assert!(cnt_dists <= total_distances);
-        if frac_dist > fraction {
-            return;
-        }
-    }
-}
-
-fn write_csv(path: &str, mp: &[f64], indices: &[usize]) -> Result<()> {
-    use std::io::prelude::*;
-    let mut f = std::fs::File::create(path)?;
-    writeln!(f, "d,i")?;
-    for (d, i) in mp.iter().zip(indices.iter()) {
-        writeln!(f, "{},{}", d, i)?;
-    }
-    Ok(())
+    pbar.finish_and_clear();
 }
 
 /// Compute the approximate matrix profile using SCRIMP++
@@ -199,13 +148,9 @@ struct Args {
     /// consider only the given number of points from the input
     pub prefix: Option<usize>,
 
-    #[argh(option)]
-    /// the fraction of ditances to evaluate
-    pub fraction: f64,
-
-    #[argh(option)]
-    /// the skip for pre-scrimp
-    pub skip: usize,
+    #[argh(option, default="0.25")]
+    /// the skip for pre-scrimp, as a fraction of the window size
+    pub skip: f64,
 
     #[argh(option, default = "12453")]
     /// seed for the psudorandom number generator
@@ -250,12 +195,13 @@ fn main() -> Result<()> {
     debug_assert!(false, "This software should run only in Release mode, times are important");
     let args: Args = argh::from_env();
 
+    eprintln!("Reading input");
     let w = args.window;
-    let ts = WindowedTimeseries::new(loadts(args.path, args.prefix)?, w, false);
+    let ts = WindowedTimeseries::new(loadts(args.path, args.prefix)?, w, args.precise);
+    eprintln!("Computing FFT");
     let fft_data = FFTData::new(&ts);
-    let s = args.skip;
+    let s = (args.skip * (w as f64)) as usize;
     let exclusion_zone = w;
-    let fraction = args.fraction;
 
     let mut rng = Xoshiro256StarStar::seed_from_u64(args.seed);
 
@@ -263,12 +209,10 @@ fn main() -> Result<()> {
     let mut mp = vec![f64::INFINITY; ts.num_subsequences()];
     let mut indices = vec![0; ts.num_subsequences()];
 
-    // initialize the matrix profile with PreSCRIMP
+    eprintln!("Running PreSCRIMP");
     pre_scrimp(&ts, s, exclusion_zone, &mut mp, &mut indices, &fft_data, &mut rng);
 
-    // run scrimp
-    scrimp(&ts, exclusion_zone, fraction, &mut mp, &mut indices, &mut rng);
-
+    eprintln!("Getting motifs");
     let mut topk = TopK::new(args.motifs, exclusion_zone);
     for (i, (j, d)) in indices.iter().zip(mp.iter()).enumerate() {
         let m = Motif {
@@ -279,11 +223,13 @@ fn main() -> Result<()> {
         };
         topk.insert(m);
     }
+    eprintln!("Writing output");
     let mut motifs = topk.to_vec();
     for m in motifs.iter_mut() {
         m.elapsed.replace(timer.elapsed());
     }
-    output_csv(&args.output, &motifs);
+    output_csv(&args.output, &motifs)?;
+    eprintln!("Done");
 
     Ok(())
 }
