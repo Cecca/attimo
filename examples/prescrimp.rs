@@ -6,9 +6,9 @@ use attimo::timeseries::*;
 use attimo::distance::*;
 use attimo::motifs::{Motif, TopK};
 use std::time::Instant;
-use rand::prelude::*;
-use rand_xoshiro::Xoshiro256StarStar;
 use rayon::prelude::*;
+use thread_local::ThreadLocal;
+use std::cell::RefCell;
 
 
 fn seq_by(min: usize, max: usize, by: usize) -> Vec<usize> {
@@ -29,27 +29,6 @@ fn seq_by(min: usize, max: usize, by: usize) -> Vec<usize> {
     res
 }
 
-fn rand_seq<R: Rng>(min: usize, max: usize, by: usize, rng: &mut R) -> Vec<usize> {
-    eprint!("Computing shuffled sequence...");
-    let mut i = min;
-    let mut res: Vec<usize> = if by == 1 {
-        (min..max).collect()
-    } else {
-        std::iter::from_fn(|| {
-            if i >= max {
-                return None;
-            }
-            let res = Some(i);
-            i += by;
-            res
-        })
-        .collect()
-    };
-    res.shuffle(rng);
-    eprintln!(" done");
-    res
-}
-
 fn zeucl_to_dotp(w: usize, d: f64, ma: f64, mb: f64, sa: f64, sb: f64) -> f64 {
     let w = w as f64;
     (1.0 - d*d / (2.0*w)) * w * sa * sb + w * ma * mb
@@ -58,6 +37,27 @@ fn zeucl_to_dotp(w: usize, d: f64, ma: f64, mb: f64, sa: f64, sb: f64) -> f64 {
 fn dotp_to_zeucl(w: usize, q: f64, ma: f64, mb: f64, sa: f64, sb: f64) -> f64 {
     let w = w as f64;
     (2.0 * w * (1.0 - (q - w*ma*mb) / (w*sa*sb))).sqrt()
+}
+
+struct MatrixProfile {
+    dists: Vec<f64>,
+    indices: Vec<usize>
+}
+
+impl MatrixProfile {
+    fn new(n: usize) -> Self {
+        Self {
+            dists: vec![0.0; n],
+            indices: vec![0; n],
+        }
+    }
+
+    fn iter_mut(&mut self) -> impl Iterator<Item = (&mut f64, &mut usize)> {
+        self.dists.iter_mut().zip(self.indices.iter_mut())
+    }
+    fn iter(&self) -> impl Iterator<Item = (&f64, &usize)> {
+        self.dists.iter().zip(self.indices.iter())
+    }
 }
 
 fn pre_scrimp(
@@ -73,17 +73,25 @@ fn pre_scrimp(
     let ns = ts.num_subsequences();
     let w = ts.w;
 
-    let mut dists = vec![0.0; ts.num_subsequences()];
-    let mut buf = vec![0.0; ts.w];
+    let tl_mp = ThreadLocal::new();
+    let tl_dists = ThreadLocal::new();
+    let tl_buf = ThreadLocal::new();
 
     let pbar = ProgressBar::new((ns / s) as u64);
     pbar.set_style(ProgressStyle::default_bar()
         .template("[{elapsed_precise}] {bar:40.cyan/blue} ETA: {eta} {pos:>7}/{len:7} {msg}"));
-    for i in seq_by(0, ns, s) {
+
+    // We don't shuffle the indices, since we are not going to stop pre_scrimp
+    // arbitrarily. This saves a a little time.
+    seq_by(0, ns, s).into_par_iter().for_each(|i| {
+        let mut mp = tl_mp.get_or(|| RefCell::new(MatrixProfile::new(ns))).borrow_mut();
+        let mut dists = tl_dists.get_or(|| RefCell::new(vec![0.0; ts.num_subsequences()])).borrow_mut();
+        let mut buf = tl_buf.get_or(|| RefCell::new(vec![0.0; ts.w])).borrow_mut();
         ts.distance_profile(fft_data, i, &mut dists, &mut buf);
 
         // update the running matrix profile
-        for (j, ((mp_val, index_val), dp_val)) in mp.iter_mut().zip(indices.iter_mut()).zip(dists.iter()).enumerate() {
+        // for (j, ((mp_val, index_val), dp_val)) in mp.dists.iter_mut().zip(mp.indices.iter_mut()).zip(dists.iter()).enumerate() {
+        for (j, ((mp_val, index_val), dp_val)) in mp.iter_mut().zip(dists.iter()).enumerate() {
             if (i as isize - j as isize).abs() >= exclusion_zone as isize && *dp_val < *mp_val {
                 *mp_val = *dp_val;
                 *index_val = i;
@@ -122,13 +130,13 @@ fn pre_scrimp(
             //     "actual {} expected {}",
             //     d, zeucl(ts, i, j)
             // );
-            if d < mp[i+k] {
-                mp[i+k] = d;
-                indices[i+k] = j+k;
+            if d < mp.dists[i+k] {
+                mp.dists[i+k] = d;
+                mp.indices[i+k] = j+k;
             }
-            if d < mp[j+k] {
-                mp[j+k] = d;
-                indices[j+k] = i+k;
+            if d < mp.dists[j+k] {
+                mp.dists[j+k] = d;
+                mp.indices[j+k] = i+k;
             }
         }
 
@@ -141,18 +149,27 @@ fn pre_scrimp(
                   + ts.data[j - k] * ts.data[i - k];
             let d = dotp_to_zeucl(w, q, ts.mean(i - k), ts.mean(j-k), ts.sd(i-k), ts.sd(j-k));
             // debug_assert!((d - zeucl(ts, i, j)).abs() <= 0.00000001);
-            if d < mp[i-k] {
-                mp[i-k] = d;
-                indices[i-k] = j-k;
+            if d < mp.dists[i-k] {
+                mp.dists[i-k] = d;
+                mp.indices[i-k] = j-k;
             }
-            if d < mp[j-k] {
-                mp[j-k] = d;
-                indices[j-k] = i-k;
+            if d < mp.dists[j-k] {
+                mp.dists[j-k] = d;
+                mp.indices[j-k] = i-k;
             }
         }
         pbar.inc(1);
-    }
+    });
     pbar.finish_and_clear();
+
+    tl_mp.into_iter().for_each(|tmp| {
+        for ((out_d, out_i), (d, i)) in mp.iter_mut().zip(indices.iter_mut()).zip(tmp.borrow().iter()) {
+            if *d < *out_d {
+                *out_d = *d;
+                *out_i = *i;
+            }
+        }
+    });
 }
 
 /// Compute the approximate matrix profile using SCRIMP++
@@ -224,8 +241,6 @@ fn main() -> Result<()> {
     let fft_data = FFTData::new(&ts);
     let s = (args.skip * (w as f64)) as usize;
     let exclusion_zone = w;
-
-    let mut rng = Xoshiro256StarStar::seed_from_u64(args.seed);
 
     let timer = Instant::now();
     let mut mp = vec![f64::INFINITY; ts.num_subsequences()];
