@@ -57,8 +57,9 @@ impl WindowedTimeseries {
         &self.data[i..i + self.w]
     }
 
-    pub fn znormalized(&self, i: usize, output: &mut Vec<f64>) {
-        output.resize(self.w, 0.0);
+    pub fn znormalized(&self, i: usize, output: &mut [f64]) {
+        assert!(output.len() == self.w);
+        // output.resize(self.w, 0.0);
         let m = self.mean(i);
         let s = self.sd(i);
         for (i, &x) in self.subsequence(i).iter().enumerate() {
@@ -202,23 +203,25 @@ impl WindowedTimeseries {
         }
     }
 
-    pub fn distance_profile(&self, fft_data: &FFTData, from: usize) -> Vec<f64> {
-        let mut dp = vec![0.0; self.num_subsequences()];
-        let mut buf = vec![0.0; self.w];
+    pub fn distance_profile(&self, fft_data: &FFTData, from: usize, out: &mut [f64], buf: &mut [f64]) {
+        assert!(out.len() == self.num_subsequences());
+        assert!(buf.len() == self.w);
+        // let mut dp = vec![0.0; self.num_subsequences()];
+        // let mut buf = vec![0.0; self.w];
 
-        self.znormalized(from, &mut buf);
-        self.znormalized_sliding_dot_product(&fft_data, &buf, &mut dp);
+        self.znormalized(from, buf);
+        self.znormalized_sliding_dot_product(&fft_data, &buf, out);
 
         for i in 0..self.num_subsequences() {
             if i == from {
-                dp[i] = 0.0;
+                out[i] = 0.0;
             } else {
                 debug_assert!(
-                    self.w as f64 > dp[i],
+                    self.w as f64 > out[i],
                     "i = {} w = {} dp[i] = {} zdot = {} zeucl = {}",
                     i,
                     self.w,
-                    dp[i],
+                    out[i],
                     zdot(
                         self.subsequence(from),
                         self.mean(from),
@@ -237,13 +240,13 @@ impl WindowedTimeseries {
                         self.subsequence(i),
                         self.mean(i),
                         self.sd(i)
-                    ) - dp[i])
+                    ) - out[i])
                         .abs()
                         <= 0.0000000001,
                     "i = {} w = {} dp[i] = {} zdot = {} zeucl = {}",
                     i,
                     self.w,
-                    dp[i],
+                    out[i],
                     zdot(
                         self.subsequence(from),
                         self.mean(from),
@@ -254,18 +257,17 @@ impl WindowedTimeseries {
                     ),
                     zeucl(self, i, from)
                 );
-                dp[i] = (2.0 * self.w as f64 - 2.0 * dp[i]).sqrt();
-                assert!(!dp[i].is_nan());
+                out[i] = (2.0 * self.w as f64 - 2.0 * out[i]).sqrt();
+                assert!(!out[i].is_nan());
                 debug_assert!(
-                    (dp[i] - zeucl(self, from, i)).abs() < 0.0001,
+                    (out[i] - zeucl(self, from, i)).abs() < 0.0001,
                     "dp[i]={} zeucl={} diff={}",
-                    dp[i],
+                    out[i],
                     zeucl(self, from, i),
-                    (dp[i] - zeucl(self, from, i))
+                    (out[i] - zeucl(self, from, i))
                 );
             }
         }
-        dp
     }
 
     // #[cfg(test)]

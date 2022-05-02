@@ -8,6 +8,26 @@ use attimo::motifs::{Motif, TopK};
 use std::time::Instant;
 use rand::prelude::*;
 use rand_xoshiro::Xoshiro256StarStar;
+use rayon::prelude::*;
+
+
+fn seq_by(min: usize, max: usize, by: usize) -> Vec<usize> {
+    let mut i = min;
+    let mut res: Vec<usize> = if by == 1 {
+        (min..max).collect()
+    } else {
+        std::iter::from_fn(|| {
+            if i >= max {
+                return None;
+            }
+            let res = Some(i);
+            i += by;
+            res
+        })
+        .collect()
+    };
+    res
+}
 
 fn rand_seq<R: Rng>(min: usize, max: usize, by: usize, rng: &mut R) -> Vec<usize> {
     eprint!("Computing shuffled sequence...");
@@ -40,25 +60,27 @@ fn dotp_to_zeucl(w: usize, q: f64, ma: f64, mb: f64, sa: f64, sb: f64) -> f64 {
     (2.0 * w * (1.0 - (q - w*ma*mb) / (w*sa*sb))).sqrt()
 }
 
-fn pre_scrimp<R: Rng>(
+fn pre_scrimp(
     ts: &WindowedTimeseries,
     s: usize,
     exclusion_zone: usize,
     mp: &mut [f64],
     indices: &mut [usize],
     fft_data: &FFTData,
-    rng: &mut R,
 ) {
     // note that here we are considering sequences which are s > ts.w apart, so
     // we have no trivial matches
     let ns = ts.num_subsequences();
     let w = ts.w;
 
+    let mut dists = vec![0.0; ts.num_subsequences()];
+    let mut buf = vec![0.0; ts.w];
+
     let pbar = ProgressBar::new((ns / s) as u64);
     pbar.set_style(ProgressStyle::default_bar()
         .template("[{elapsed_precise}] {bar:40.cyan/blue} ETA: {eta} {pos:>7}/{len:7} {msg}"));
-    for i in rand_seq(0, ns, s, rng) {
-        let dists = ts.distance_profile(fft_data, i);
+    for i in seq_by(0, ns, s) {
+        ts.distance_profile(fft_data, i, &mut dists, &mut buf);
 
         // update the running matrix profile
         for (j, ((mp_val, index_val), dp_val)) in mp.iter_mut().zip(indices.iter_mut()).zip(dists.iter()).enumerate() {
@@ -210,7 +232,7 @@ fn main() -> Result<()> {
     let mut indices = vec![0; ts.num_subsequences()];
 
     eprintln!("Running PreSCRIMP");
-    pre_scrimp(&ts, s, exclusion_zone, &mut mp, &mut indices, &fft_data, &mut rng);
+    pre_scrimp(&ts, s, exclusion_zone, &mut mp, &mut indices, &fft_data);
 
     eprintln!("Getting motifs");
     let mut topk = TopK::new(args.motifs, exclusion_zone);
