@@ -139,8 +139,8 @@ fn test_zeucl() {
     for i in 0..ts.num_subsequences() {
         for j in i..ts.num_subsequences() {
             dbg!((i, j));
-            let mut za = Vec::new();
-            let mut zb = Vec::new();
+            let mut za = vec![0.0; w];
+            let mut zb = vec![0.0; w];
             ts.znormalized(i, &mut za);
             ts.znormalized(j, &mut zb);
             let expected = euclidean(&za, &zb);

@@ -48,7 +48,9 @@ fn main() -> Result<()> {
     let lids: Vec<(usize, Measures)> = idxs
         .into_par_iter()
         .map(|i| {
-            let mut dp = ts.distance_profile(&fft_data, i);
+            let mut dp = vec![0.0; ts.num_subsequences()];
+            let mut buf = vec![0.0; ts.w];
+            ts.distance_profile(&fft_data, i, &mut dp, &mut buf);
             let mut dp: Vec<f64> = dp
                 .drain(..)
                 .enumerate()

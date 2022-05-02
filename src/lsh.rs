@@ -173,8 +173,6 @@ impl HashCollection {
         let nhashes = pools.len();
         let uns_pools = UnsafeSlice::new(&mut pools);
 
-        let tl_buffer = ThreadLocal::new();
-
         let timer = Instant::now();
         //// Instead of doing a double nested loop over the repetitions and K, we flatten all
         //// the iterations (which are independent) so to expose more parallelism
@@ -183,27 +181,18 @@ impl HashCollection {
             .map(|hash_idx| {
                 let repetition = hash_idx / K;
                 let k = hash_idx % K;
-                // info!("hashing"; "repetition" => repetition, "k" => k);
 
-                let mut buffer = tl_buffer
-                    .get_or(|| RefCell::new(vec![0.0; ns]))
-                    .borrow_mut();
-
-                let oob = hasher.hash_all(&ts, fft_data, k, repetition, &mut buffer);
-                for (i, h) in buffer.iter().enumerate() {
+                let oob = hasher.hash_all(&ts, fft_data, k, repetition, |i, h| {
                     let idx = K * ns * repetition + i * K + k;
                     assert!(idx < nhashes);
-                    let h = ((*h as i64 & 0xFFi64) as i8) as u8;
+                    let h = ((h as i64 & 0xFFi64) as i8) as u8;
                     //// This operation is `unsafe` but each index is accessed only once,
                     //// so there are no data races, despite not using synchronization.
                     unsafe { uns_pools.write(idx, h) };
-                }
+                });
                 oob
             })
             .sum::<usize>();
-
-        // Free resurces
-        tl_buffer.into_iter().for_each(|buf| drop(buf));
 
         let elapsed = timer.elapsed();
         info!("tensor pool building";
@@ -649,28 +638,26 @@ impl Hasher {
     }
 
     //// With this function we hash all the subsequences of the timeseries in one go.
-    //// The hash values are placed in the output buffer, which can be reused across calls.
-    pub fn hash_all(
+    pub fn hash_all<F: FnMut(usize, f64)>(
         &self,
         ts: &WindowedTimeseries,
         fft_data: &FFTData,
         k: usize,
         repetition: usize,
-        buffer: &mut [f64],
+        mut callback: F,
     ) -> usize {
-        assert!(buffer.len() == ts.num_subsequences());
         let v = self.get_vector(repetition, k);
         let shift = self.shifts[repetition * K + k];
         let mut oob = 0; // count how many out of bounds we have
-        ts.znormalized_sliding_dot_product(fft_data, v, buffer);
-        for h in buffer.iter_mut() {
-            *h = (*h + shift) / self.width;
+        ts.znormalized_sliding_dot_product_for_each(fft_data, v, |i, mut h| {
+            h = (h + shift) / self.width;
             //// Count if the value is out of bounds to be repre
             if h.abs() > 128.0 {
                 oob += 1;
-                *h = h.signum() * 127.0;
-            }
-        }
+                h = h.signum() * 127.0;
+            } 
+            callback(i, h);
+        });
         oob
     }
 }

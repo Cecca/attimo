@@ -39,7 +39,9 @@ fn main() -> Result<()> {
     let fft_data = FFTData::new(&ts);
 
     println!("[{:?}] Computing distance profile", timer.elapsed());
-    let dp = ts.distance_profile(&fft_data, args.from);
+    let mut dp = vec![0.0; ts.num_subsequences()];
+    let mut buf = vec![0.0; ts.w];
+    ts.distance_profile(&fft_data, args.from, &mut dp, &mut buf);
 
     let thresh = args.threshold.unwrap_or(f64::INFINITY);
 
