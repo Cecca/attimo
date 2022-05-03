@@ -1,5 +1,7 @@
 use std::fmt::Debug;
 
+use crate::lsh::HashValue;
+
 pub trait GetByte {
     fn num_bytes(&self) -> usize;
     fn get_byte(&self, i: usize) -> u8;
@@ -228,3 +230,104 @@ fn test_radix_sort_u8() {
         expected, actual
     );
 }
+
+macro_rules! getbyte {
+    ($x: expr, $b: literal) => {
+        (($x >> 8*$b) & 0xff) as usize
+    };
+}
+
+pub fn sort_hash_pairs(
+    data: &mut [(HashValue, u32)],
+    scratch: &mut [(HashValue, u32)]
+) {
+    assert!(data.len() == scratch.len());
+
+    // build histograms in a first pass over the data
+    let mut b0 = [0usize; 256];
+    let mut b1 = [0usize; 256];
+    let mut b2 = [0usize; 256];
+    let mut b3 = [0usize; 256];
+
+    for (h, _) in data.iter() {
+        let h = h.0;
+        b0[getbyte!(h, 0)] += 1;
+        b1[getbyte!(h, 1)] += 1;
+        b2[getbyte!(h, 2)] += 1;
+        b3[getbyte!(h, 3)] += 1;
+    }
+
+    // set write heads
+    let mut tmp = 0;
+    let mut sum0 = 0;
+    let mut sum1 = 0;
+    let mut sum2 = 0;
+    let mut sum3 = 0;
+    for i in 0..256 {
+        tmp = sum0 + b0[i];
+        b0[i] = sum0;
+        sum0 = tmp;
+        
+        tmp = sum1 + b1[i];
+        b1[i] = sum1;
+        sum1 = tmp;
+
+        tmp = sum2 + b2[i];
+        b2[i] = sum2;
+        sum2 = tmp;
+
+        tmp = sum3 + b3[i];
+        b3[i] = sum3;
+        sum3 = tmp;
+    }
+
+    // Sort the data in four more passes
+    for pair in data.iter() {
+        let b = getbyte!((pair.0).0, 0);
+        let t = b0[b];
+        b0[b] += 1;
+        scratch[t] = *pair;
+    }
+    for pair in scratch.iter() {
+        let b = getbyte!((pair.0).0, 1);
+        let t = b1[b];
+        b1[b] += 1;
+        data[t] = *pair;
+    }
+    for pair in data.iter() {
+        let b = getbyte!((pair.0).0, 2);
+        let t = b2[b];
+        b2[b] += 1;
+        scratch[t] = *pair;
+    }
+    for pair in scratch.iter() {
+        let b = getbyte!((pair.0).0, 3);
+        let t = b3[b];
+        b3[b] += 1;
+        data[t] = *pair;
+    }
+}
+
+#[test]
+fn test_radix_sort_hash_pairs() {
+    use rand::prelude::*;
+    use rand_distr::Uniform;
+    use rand_xoshiro::Xoshiro256PlusPlus;
+
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(12435);
+    let unif = Uniform::new_inclusive(u32::MIN, u32::MAX);
+    let v: Vec<(HashValue, u32)> = unif.sample_iter(&mut rng).take(100000).enumerate().map(|(i, h)| (HashValue(h), i as u32)).collect();
+    let mut expected = v.clone();
+    let mut actual = v.clone();
+    let mut scratch: Vec<(HashValue, u32)> = Vec::new();
+    scratch.resize_with(v.len(), Default::default);
+
+    expected.sort_unstable();
+    sort_hash_pairs(&mut actual, &mut scratch);
+    assert_eq!(
+        expected, actual,
+        "expected: {:#x?}\nactual: {:#x?}",
+        expected, actual
+    );
+}
+
