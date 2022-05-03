@@ -62,8 +62,8 @@ pub const K_HALF: usize = K / 2;
 
 //// That said, here is the definition of a hash value, with several
 //// utility implementations following.
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
-pub struct HashValue(u32);
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Default)]
+pub struct HashValue(pub u32);
 
 impl GetByte for HashValue {
     fn num_bytes(&self) -> usize {
