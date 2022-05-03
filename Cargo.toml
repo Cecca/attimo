@@ -28,6 +28,7 @@ slog-scope = "4.4"
 slog-async = "2.7"
 flate2 = "1"
 claxon = "0.4"
+xxhash-rust = { version = "0.8.5", features = ["xxh32"] }
 
 [profile.release]
 debug = true

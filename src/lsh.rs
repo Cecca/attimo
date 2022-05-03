@@ -210,13 +210,13 @@ impl HashCollection {
         }
     }
 
-    fn left(&self, i: usize, repetition: usize) -> &[u8] {
+    pub fn left(&self, i: usize, repetition: usize) -> &[u8] {
         let trep = repetition % self.hasher.tensor_repetitions;
         let idx = K * self.n_subsequences * trep + i * K;
         &self.pools[idx..idx + K_HALF]
     }
 
-    fn right(&self, i: usize, repetition: usize) -> &[u8] {
+    pub fn right(&self, i: usize, repetition: usize) -> &[u8] {
         let trep = repetition / self.hasher.tensor_repetitions;
         let idx = K * self.n_subsequences * trep + i * K + K_HALF;
         &self.pools[idx..idx + K_HALF]
@@ -236,29 +236,37 @@ impl HashCollection {
         output
     }
 
-    fn k_pair(k: usize) -> (usize, usize) {
+    pub fn k_pair(k: usize) -> (usize, usize) {
         let k_left = (k as f64 / 2.0).ceil() as usize;
         let k_right = (k as f64 / 2.0).floor() as usize;
         (k_left, k_right)
     }
 
     pub fn hash_value(&self, i: usize, prefix: usize, repetition: usize) -> HashValue {
-        use std::hash::Hasher;
-        let mut hasher = std::collections::hash_map::DefaultHasher::default();
-        let (k_left, k_right) = Self::k_pair(prefix);
+        let mut hv: [u8; 32] = [0; 32];
         let l = &self.left(i, repetition);
         let r = &self.right(i, repetition);
-        let mut h = 0;
-        while h < k_left || h < k_right {
-            if h < k_left {
-                hasher.write_u8(l[h]);
-            }
-            if h < k_right {
-                hasher.write_u8(r[h]);
-            }
-            h += 1;
+        for h in 0..(prefix/2) {
+            hv[2*h] = l[h];
+            hv[2*h+1] = r[h];
         }
-        HashValue(hasher.finish() as u32)
+        HashValue(xxhash_rust::xxh32::xxh32(&hv[..prefix], 1234))
+        // use std::hash::Hasher;
+        // let mut hasher = std::collections::hash_map::DefaultHasher::default();
+        // let (k_left, k_right) = Self::k_pair(prefix);
+        // let l = &self.left(i, repetition);
+        // let r = &self.right(i, repetition);
+        // let mut h = 0;
+        // while h < k_left || h < k_right {
+        //     if h < k_left {
+        //         hasher.write_u8(l[h]);
+        //     }
+        //     if h < k_right {
+        //         hasher.write_u8(r[h]);
+        //     }
+        //     h += 1;
+        // }
+        // HashValue(hasher.finish() as u32)
     }
 
     pub fn fraction_oob(&self) -> f64 {
