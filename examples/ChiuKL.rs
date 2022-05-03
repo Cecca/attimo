@@ -1,18 +1,14 @@
-use std::collections::HashMap;
-
 /// This is an implementation of [Probabilistic discovery of time series motifs](https://www.cs.ucr.edu/~eamonn/SIGKDD_Motif.pdf).
 
+use std::{time::Instant, collections::BTreeMap};
 use anyhow::Result;
 use argh::FromArgs;
-use attimo::{timeseries::WindowedTimeseries, load::loadts};
-use rayon::iter::IndexedParallelIterator;
-use statrs::distribution::{Normal, ContinuousCDF, Continuous};
+use attimo::{timeseries::WindowedTimeseries, load::loadts, motifs::{TopK, Motif}, distance::zeucl};
 use rand::prelude::*;
 use rand_xoshiro::Xoshiro256PlusPlus;
+use rayon::prelude::*;
 
 struct SaxTransformer {
-    /// size of the alphabet
-    alphabet: usize,
     /// lenght of the PAA window
     paa_window: usize,
     /// the length of the transformed subsequence
@@ -33,7 +29,7 @@ impl SaxTransformer {
         };
         let transformed_length = ts.w / paa_window;
         Self {
-            alphabet, paa_window, word_length: transformed_length, breakpoints
+            paa_window, word_length: transformed_length, breakpoints
         }
     }
 
@@ -91,13 +87,17 @@ impl SaxTimeseries {
     }
 }
 
-fn projection_motifs(ts: &WindowedTimeseries, saxts: &SaxTimeseries, k: usize, repetitions: usize, seed: u64) {
+fn projection_motifs(ts: &WindowedTimeseries, saxts: &SaxTimeseries, motifs: usize, k: usize, repetitions: usize, seed: u64) -> Vec<Motif> {
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+    let start = Instant::now();
 
-    let mut collision_matrix: HashMap<(usize, usize), usize> = HashMap::new();
+    // benchmarking shows that BTreeMap works better than HashMap in this use case
+    let mut collision_matrix: BTreeMap<(usize, usize), usize> = BTreeMap::new();
 
     let indices: Vec<usize> = (0..saxts.word_length).collect();
+    println!("rep,comp,time");
     for rep in 0..repetitions {
+        let rep_start = Instant::now();
         eprintln!("Repetition {rep}");
         let proj: Vec<usize> = indices.choose_multiple(&mut rng, k).cloned().collect();
         let mut hashed: Vec<(Vec<u8>, usize)> = saxts
@@ -106,8 +106,12 @@ fn projection_motifs(ts: &WindowedTimeseries, saxts: &SaxTimeseries, k: usize, r
                 let hash: Vec<u8> = proj.iter().map(move |h| word[*h]).collect();
                 (hash, i)
             }).collect();
-        hashed.sort_unstable();
-
+        println!("{},hashing,{}", rep, rep_start.elapsed().as_secs_f64());
+        let sort_start = Instant::now();
+        hashed.par_sort_unstable();
+        println!("{},sorting,{}", rep, sort_start.elapsed().as_secs_f64());
+        
+        let counting_start = Instant::now();
         // define the buckets and count collisions
         let mut start = 0;
         let mut end = start + 1;
@@ -121,22 +125,51 @@ fn projection_motifs(ts: &WindowedTimeseries, saxts: &SaxTimeseries, k: usize, r
                 for j in (i+1)..end {
                     let a = std::cmp::min(i, j);
                     let b = std::cmp::max(i, j);
-                    collision_matrix.entry((a, b)).and_modify(|c| *c += 1).or_insert(1);
+                    if b - a > ts.w {
+                        collision_matrix.entry((a, b)).and_modify(|c| *c += 1).or_insert(1);
+                    }
                 }
             }
 
             start = end;
             end = start + 1;
         }
+        println!("{},counting,{:?}", rep, counting_start.elapsed().as_secs_f64());
+        eprintln!("rep {} took {:?}", rep, rep_start.elapsed());
     }
 
     let mut collision_matrix: Vec<(usize, (usize, usize))> = collision_matrix.into_iter().map(|pair| (pair.1, pair.0)).collect();
     collision_matrix.sort_unstable_by(|a, b| a.cmp(b).reverse());
 
+    let mut topk = TopK::new(motifs, ts.w);
+
     eprintln!("collision matrix has {} entries", collision_matrix.len());
-    for (count, pair) in collision_matrix.iter() {
-        println!("  {}: {} -- {}", count, pair.0, pair.1);
+    let mut cur_count = collision_matrix[0].0;
+    for (count, (a, b)) in collision_matrix.iter() {
+        if *count == cur_count {
+            if b - a > ts.w {
+                let d = zeucl(ts, *a, *b);
+                let m = Motif {
+                    idx_a: *a,
+                    idx_b: *b,
+                    distance: d,
+                    elapsed: None
+                };
+                topk.insert(m);
+            }
+        } else {
+            topk.for_each(|m| {
+                dbg!(&m);
+                m.elapsed = Some(start.elapsed());
+            });
+            // if we have enough elements in the topk, we stop
+            if topk.num_confirmed() == motifs {
+                return topk.to_vec();
+            }
+            cur_count = *count;
+        }
     }
+    panic!("Could not find enough motifs")
 }
 
 /// Compute the approximate matrix profile using SCRIMP++
@@ -191,6 +224,24 @@ fn default_output() -> String {
     "scrimp.csv".to_owned()
 }
 
+fn output_csv(path: &str, motifs: &[Motif]) -> Result<()> {
+    use std::io::prelude::*;
+    let mut f = std::fs::File::create(path)?;
+    for m in motifs {
+        if let Some(confirmation_time) = m.elapsed {
+            writeln!(
+                f,
+                "{}, {}, {}, {}",
+                m.idx_a,
+                m.idx_b,
+                m.distance,
+                confirmation_time.as_secs_f64()
+            )?;
+        }
+    }
+    Ok(())
+}
+
 
 fn main() -> Result<()> {
     let args: Args = argh::from_env();
@@ -202,6 +253,7 @@ fn main() -> Result<()> {
     let saxts = transformer.transform(&ts);
     eprintln!("The sax words are {}", saxts.indices.len());
     
-    projection_motifs(&ts, &saxts, args.k, args.repetitions, args.seed);
+    let motifs = projection_motifs(&ts, &saxts, args.motifs, args.k, args.repetitions, args.seed);
+    output_csv(&args.output, &motifs)?;
     Ok(())
 }
