@@ -142,10 +142,11 @@ def get_db():
         print("  Bump version to 3")
     if dbver < 4:
         db.execute("""
-        CREATE TABLE IF NOT EXISTS scrimp (
+        CREATE TABLE IF NOT EXISTS prescrimp (
             hostname     TEXT,
             dataset      TEXT,
             window       INT,
+            motifs       INT,
             stepsize     REAL,   -- As a fraction of window
             time_s       REAL,
             motif_pairs  TEXT
@@ -170,12 +171,12 @@ def prefix(path, n):
 
 def get_datasets():
     return [
-        # ("data/GAP.csv", 600),
+        ("data/GAP.csv.gz", 600),
         ## ("data/EMG.csv", 500),
-        # ("data/freezer.txt", 5000),
-        ("data/ASTRO.csv", 100),
-        # ("data/ECG.csv", 1000),
-        # ("data/HumanY.txt", 18000),
+        ("data/freezer.txt.gz", 5000),
+        ("data/ASTRO.csv.gz", 100),
+        ("data/ECG.csv.gz", 1000),
+        ("data/HumanY.txt.gz", 18000),
         # (prefix("data/VCAB_BP2_580_days.txt", 100000000), 100)
     ]
 
@@ -524,23 +525,25 @@ def run_ll():
 
 
 def run_prescrimp():
-    install_prescrimp()
     db = get_db()
     datasets = get_datasets()
     stepsize = 0.25
+    motifs = 10
     for dataset, window in datasets:
         execid = db.execute("""
-            SELECT rowid from scrimp
+            SELECT rowid from prescrimp
             where hostname=:hostname
               and dataset=:dataset
               and stepsize=:stepsize
               and window=:window
+              and motifs=:motifs
             """,
             {
                 "hostname": HOSTNAME,
                 "dataset": dataset,
                 "stepsize": stepsize,
                 "window": window,
+                "motifs": motifs
             }
         ).fetchone()
         if execid is not None:
@@ -550,34 +553,35 @@ def run_prescrimp():
         print(f"running PreSCRIMP on {dataset} with w={window} and stepsize={stepsize}... ")
         start = time.time()
         sp.run([
-            "./prescrimp", 
+            "cargo", 
+            "run",
+            "--release",
+            "--example",
+            "prescrimp",
+            "--",
             dataset,
-            str(window),
-            str(stepsize)
+            "--window", str(window),
+            "--skip", str(stepsize),
+            "--motifs", str(motifs),
+            "--output", "/tmp/prescrimp.csv"
         ]).check_returncode()
         end = time.time()
         elapsed = end - start
         print(f"{elapsed} seconds")
-        outfname = "PreSCRIMP_MatrixProfile_and_Index_{}_{}".format(window, dataset)
-        df = pd.read_csv(outfname, header=None, names=['dist', 'b'])
-        df['a'] = np.arange(len(df))
-        df = df.sort_values('dist')
-        df = df[df['a'] < df['b']]
-        df = remove_trivial(df, window)
-        motifs = df.head(100)[['a', 'b', 'dist']].to_json(orient='records')
-
-        os.remove(outfname)
+        motif_pairs = pd.read_csv('/tmp/prescrimp.csv', names=['a', 'b','dist', 'confirmation_time']).to_json(orient='records')
+        os.remove("/tmp/prescrimp.csv")
 
         db.execute("""
-            INSERT INTO scrimp VALUES (:hostname,:dataset,:window,:stepsize,:elapsed,:motifs);
+        INSERT INTO prescrimp VALUES (:hostname,:dataset,:window,:motifs,:stepsize,:elapsed,:motif_pairs);
             """,
             {
                 "hostname": HOSTNAME,
                 "dataset": dataset,
                 "window": window,
+                "motifs": motifs,
                 "stepsize": stepsize,
                 "elapsed": elapsed,
-                "motifs": motifs
+                "motif_pairs": motif_pairs
             }
         )
 
