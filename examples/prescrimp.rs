@@ -12,7 +12,7 @@ use thread_local::ThreadLocal;
 
 fn seq_by(min: usize, max: usize, by: usize) -> Vec<usize> {
     let mut i = min;
-    let mut res: Vec<usize> = if by == 1 {
+    let res: Vec<usize> = if by == 1 {
         (min..max).collect()
     } else {
         std::iter::from_fn(|| {
@@ -46,7 +46,7 @@ struct MatrixProfile {
 impl MatrixProfile {
     fn new(n: usize) -> Self {
         Self {
-            dists: vec![0.0; n],
+            dists: vec![f64::INFINITY; n],
             indices: vec![0; n],
         }
     }
@@ -213,10 +213,6 @@ struct Args {
     #[argh(option, default = "0.25")]
     /// the skip for pre-scrimp, as a fraction of the window size
     pub skip: f64,
-
-    #[argh(option, default = "12453")]
-    /// seed for the psudorandom number generator
-    pub seed: u64,
 
     #[argh(switch)]
     /// wether meand and std computations should be at the best precision, at the expense of running time
