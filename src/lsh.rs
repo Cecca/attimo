@@ -655,7 +655,7 @@ impl Hasher {
             if h.abs() > 128.0 {
                 oob += 1;
                 h = h.signum() * 127.0;
-            } 
+            }
             callback(i, h);
         });
         oob

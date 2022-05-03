@@ -238,6 +238,10 @@ impl TopK {
         self.top.iter_mut().for_each(f)
     }
 
+    pub fn len(&self) -> usize {
+        self.top.len()
+    }
+
     pub fn to_vec(&self) -> Vec<Motif> {
         self.top.clone().into_iter().collect()
     }

@@ -1,12 +1,18 @@
-/// This is an implementation of [Probabilistic discovery of time series motifs](https://www.cs.ucr.edu/~eamonn/SIGKDD_Motif.pdf).
-
-use std::{time::Instant, collections::BTreeMap};
 use anyhow::Result;
 use argh::FromArgs;
-use attimo::{timeseries::WindowedTimeseries, load::loadts, motifs::{TopK, Motif}, distance::zeucl};
+use attimo::{
+    distance::zeucl,
+    load::loadts,
+    motifs::{Motif, TopK},
+    timeseries::WindowedTimeseries,
+};
 use rand::prelude::*;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
+use std::cell::RefCell;
+/// This is an implementation of [Probabilistic discovery of time series motifs](https://www.cs.ucr.edu/~eamonn/SIGKDD_Motif.pdf).
+use std::{collections::BTreeMap, time::Instant};
+use thread_local::ThreadLocal;
 
 struct SaxTransformer {
     /// lenght of the PAA window
@@ -29,11 +35,13 @@ impl SaxTransformer {
         };
         let transformed_length = ts.w / paa_window;
         Self {
-            paa_window, word_length: transformed_length, breakpoints
+            paa_window,
+            word_length: transformed_length,
+            breakpoints,
         }
     }
 
-    fn transform_single(&self, ts: &WindowedTimeseries, j: usize, out: &mut[u8], buf: &mut [f64]) {
+    fn transform_single(&self, ts: &WindowedTimeseries, j: usize, out: &mut [u8], buf: &mut [f64]) {
         assert!(buf.len() == ts.w);
         assert!(out.len() == ts.w / self.paa_window);
         ts.znormalized(j, buf);
@@ -57,7 +65,7 @@ impl SaxTransformer {
         let mut saxw = vec![0u8; self.word_length];
         for i in 1..ns {
             self.transform_single(ts, i, &mut saxw, &mut buf);
-            if saxw != sax_words[sax_words.len()-self.word_length..] {
+            if saxw != sax_words[sax_words.len() - self.word_length..] {
                 // If the word is different from the previous one, then we skip it
                 sax_words.extend_from_slice(&saxw);
                 indices.push(i);
@@ -65,8 +73,8 @@ impl SaxTransformer {
         }
         SaxTimeseries {
             word_length: self.word_length,
-            indices, 
-            sax_words
+            indices,
+            sax_words,
         }
     }
 }
@@ -74,7 +82,7 @@ impl SaxTransformer {
 struct SaxTimeseries {
     /// the length of a single SAX word
     word_length: usize,
-    /// indices into the original timeseries. This allows for 
+    /// indices into the original timeseries. This allows for
     /// run-length encoding by skipping redundant entries
     indices: Vec<usize>,
     /// the words corresponding the the indices
@@ -82,21 +90,37 @@ struct SaxTimeseries {
 }
 
 impl SaxTimeseries {
-    fn iter(&self) -> impl Iterator<Item=(usize, &[u8])> + '_{
-        self.indices.iter().copied().zip(self.sax_words.chunks_exact(self.word_length))
+    fn iter(&self) -> impl Iterator<Item = (usize, &[u8])> + '_ {
+        self.indices
+            .iter()
+            .copied()
+            .zip(self.sax_words.chunks_exact(self.word_length))
     }
 }
 
-fn projection_motifs(ts: &WindowedTimeseries, saxts: &SaxTimeseries, motifs: usize, k: usize, repetitions: usize, seed: u64) -> Vec<Motif> {
+fn projection_motifs(
+    ts: &WindowedTimeseries,
+    saxts: &SaxTimeseries,
+    motifs: usize,
+    k: usize,
+    repetitions: usize,
+    seed: u64,
+) -> Vec<Motif> {
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
     let start = Instant::now();
 
+    let rngs: Vec<(usize, Xoshiro256PlusPlus)> = (0..repetitions).map(|rep| {
+        rng.jump();
+        let r = rng.clone();
+        (rep, r)
+    }).collect();
+
     // benchmarking shows that BTreeMap works better than HashMap in this use case
-    let mut collision_matrix: BTreeMap<(usize, usize), usize> = BTreeMap::new();
+    let mut collision_matrix = BTreeMap::new();
 
     let indices: Vec<usize> = (0..saxts.word_length).collect();
     println!("rep,comp,time");
-    for rep in 0..repetitions {
+    rngs.into_iter().for_each(|(rep, mut rng)| {
         let rep_start = Instant::now();
         eprintln!("Repetition {rep}");
         let proj: Vec<usize> = indices.choose_multiple(&mut rng, k).cloned().collect();
@@ -105,12 +129,13 @@ fn projection_motifs(ts: &WindowedTimeseries, saxts: &SaxTimeseries, motifs: usi
             .map(|(i, word)| {
                 let hash: Vec<u8> = proj.iter().map(move |h| word[*h]).collect();
                 (hash, i)
-            }).collect();
+            })
+            .collect();
         println!("{},hashing,{}", rep, rep_start.elapsed().as_secs_f64());
         let sort_start = Instant::now();
-        hashed.par_sort_unstable();
+        hashed.sort_unstable();
         println!("{},sorting,{}", rep, sort_start.elapsed().as_secs_f64());
-        
+
         let counting_start = Instant::now();
         // define the buckets and count collisions
         let mut start = 0;
@@ -122,11 +147,14 @@ fn projection_motifs(ts: &WindowedTimeseries, saxts: &SaxTimeseries, motifs: usi
             }
 
             for i in start..end {
-                for j in (i+1)..end {
+                for j in (i + 1)..end {
                     let a = std::cmp::min(i, j);
                     let b = std::cmp::max(i, j);
                     if b - a > ts.w {
-                        collision_matrix.entry((a, b)).and_modify(|c| *c += 1).or_insert(1);
+                        collision_matrix
+                            .entry((a, b))
+                            .and_modify(|c| *c += 1)
+                            .or_insert(1);
                     }
                 }
             }
@@ -134,11 +162,18 @@ fn projection_motifs(ts: &WindowedTimeseries, saxts: &SaxTimeseries, motifs: usi
             start = end;
             end = start + 1;
         }
-        println!("{},counting,{:?}", rep, counting_start.elapsed().as_secs_f64());
+        println!(
+            "{},counting,{:?}",
+            rep,
+            counting_start.elapsed().as_secs_f64()
+        );
         eprintln!("rep {} took {:?}", rep, rep_start.elapsed());
-    }
+    });
 
-    let mut collision_matrix: Vec<(usize, (usize, usize))> = collision_matrix.into_iter().map(|pair| (pair.1, pair.0)).collect();
+    let mut collision_matrix: Vec<(usize, (usize, usize))> = collision_matrix
+        .into_iter()
+        .map(|pair| (pair.1, pair.0))
+        .collect();
     collision_matrix.sort_unstable_by(|a, b| a.cmp(b).reverse());
 
     let mut topk = TopK::new(motifs, ts.w);
@@ -153,17 +188,17 @@ fn projection_motifs(ts: &WindowedTimeseries, saxts: &SaxTimeseries, motifs: usi
                     idx_a: *a,
                     idx_b: *b,
                     distance: d,
-                    elapsed: None
+                    elapsed: None,
                 };
                 topk.insert(m);
             }
         } else {
-            topk.for_each(|m| {
-                dbg!(&m);
-                m.elapsed = Some(start.elapsed());
-            });
             // if we have enough elements in the topk, we stop
-            if topk.num_confirmed() == motifs {
+            if topk.len() == motifs {
+                topk.for_each(|m| {
+                    dbg!(&m);
+                    m.elapsed = Some(start.elapsed());
+                });
                 return topk.to_vec();
             }
             cur_count = *count;
@@ -221,7 +256,7 @@ struct Args {
 }
 
 fn default_output() -> String {
-    "scrimp.csv".to_owned()
+    "ChiuKL.csv".to_owned()
 }
 
 fn output_csv(path: &str, motifs: &[Motif]) -> Result<()> {
@@ -242,7 +277,6 @@ fn output_csv(path: &str, motifs: &[Motif]) -> Result<()> {
     Ok(())
 }
 
-
 fn main() -> Result<()> {
     let args: Args = argh::from_env();
 
@@ -252,8 +286,15 @@ fn main() -> Result<()> {
     let transformer = SaxTransformer::new(&ts, args.alphabet, args.paa);
     let saxts = transformer.transform(&ts);
     eprintln!("The sax words are {}", saxts.indices.len());
-    
-    let motifs = projection_motifs(&ts, &saxts, args.motifs, args.k, args.repetitions, args.seed);
+
+    let motifs = projection_motifs(
+        &ts,
+        &saxts,
+        args.motifs,
+        args.k,
+        args.repetitions,
+        args.seed,
+    );
     output_csv(&args.output, &motifs)?;
     Ok(())
 }

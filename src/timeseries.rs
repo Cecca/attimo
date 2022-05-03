@@ -79,7 +79,12 @@ impl WindowedTimeseries {
         self.data.len() - self.w
     }
 
-    pub fn sliding_dot_product_for_each<F: FnMut(usize, f64)>(&self, fft_data: &FFTData, v: &[f64], mut action: F) {
+    pub fn sliding_dot_product_for_each<F: FnMut(usize, f64)>(
+        &self,
+        fft_data: &FFTData,
+        v: &[f64],
+        mut action: F,
+    ) {
         // let n = self.data_fft.len();
         assert!(v.len() == self.w);
 
@@ -163,11 +168,21 @@ impl WindowedTimeseries {
     //// This function allows to compute the sliding dot product between the input vector
     //// and the z-normalized subsequences of the time series. Note that the input
     //// is not z-normalized by this function.
-    pub fn znormalized_sliding_dot_product(&self, fft_data: &FFTData, v: &[f64], output: &mut [f64]) {
+    pub fn znormalized_sliding_dot_product(
+        &self,
+        fft_data: &FFTData,
+        v: &[f64],
+        output: &mut [f64],
+    ) {
         self.znormalized_sliding_dot_product_for_each(fft_data, v, |i, val| output[i] = val);
     }
 
-    pub fn znormalized_sliding_dot_product_for_each<F: FnMut(usize, f64)>(&self, fft_data: &FFTData, v: &[f64], mut action: F) {
+    pub fn znormalized_sliding_dot_product_for_each<F: FnMut(usize, f64)>(
+        &self,
+        fft_data: &FFTData,
+        v: &[f64],
+        mut action: F,
+    ) {
         let sumv: f64 = v.iter().sum();
         self.sliding_dot_product_for_each(fft_data, v, |i, val| {
             let m = self.mean(i);
@@ -193,7 +208,13 @@ impl WindowedTimeseries {
         }
     }
 
-    pub fn distance_profile(&self, fft_data: &FFTData, from: usize, out: &mut [f64], buf: &mut [f64]) {
+    pub fn distance_profile(
+        &self,
+        fft_data: &FFTData,
+        from: usize,
+        out: &mut [f64],
+        buf: &mut [f64],
+    ) {
         assert!(out.len() == self.num_subsequences());
         assert!(buf.len() == self.w);
         // let mut dp = vec![0.0; self.num_subsequences()];

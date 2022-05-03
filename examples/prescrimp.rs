@@ -1,15 +1,14 @@
-use argh::FromArgs;
-use indicatif::{ProgressBar, ProgressStyle};
 use anyhow::Result;
-use attimo::load::loadts;
-use attimo::timeseries::*;
+use argh::FromArgs;
 use attimo::distance::*;
+use attimo::load::loadts;
 use attimo::motifs::{Motif, TopK};
-use std::time::Instant;
+use attimo::timeseries::*;
+use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use thread_local::ThreadLocal;
 use std::cell::RefCell;
-
+use std::time::Instant;
+use thread_local::ThreadLocal;
 
 fn seq_by(min: usize, max: usize, by: usize) -> Vec<usize> {
     let mut i = min;
@@ -31,17 +30,17 @@ fn seq_by(min: usize, max: usize, by: usize) -> Vec<usize> {
 
 fn zeucl_to_dotp(w: usize, d: f64, ma: f64, mb: f64, sa: f64, sb: f64) -> f64 {
     let w = w as f64;
-    (1.0 - d*d / (2.0*w)) * w * sa * sb + w * ma * mb
+    (1.0 - d * d / (2.0 * w)) * w * sa * sb + w * ma * mb
 }
 
 fn dotp_to_zeucl(w: usize, q: f64, ma: f64, mb: f64, sa: f64, sb: f64) -> f64 {
     let w = w as f64;
-    (2.0 * w * (1.0 - (q - w*ma*mb) / (w*sa*sb))).sqrt()
+    (2.0 * w * (1.0 - (q - w * ma * mb) / (w * sa * sb))).sqrt()
 }
 
 struct MatrixProfile {
     dists: Vec<f64>,
-    indices: Vec<usize>
+    indices: Vec<usize>,
 }
 
 impl MatrixProfile {
@@ -78,14 +77,20 @@ fn pre_scrimp(
     let tl_buf = ThreadLocal::new();
 
     let pbar = ProgressBar::new((ns / s) as u64);
-    pbar.set_style(ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} ETA: {eta} {pos:>7}/{len:7} {msg}"));
+    pbar.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} ETA: {eta} {pos:>7}/{len:7} {msg}"),
+    );
 
     // We don't shuffle the indices, since we are not going to stop pre_scrimp
     // arbitrarily. This saves a a little time.
     seq_by(0, ns, s).into_par_iter().for_each(|i| {
-        let mut mp = tl_mp.get_or(|| RefCell::new(MatrixProfile::new(ns))).borrow_mut();
-        let mut dists = tl_dists.get_or(|| RefCell::new(vec![0.0; ts.num_subsequences()])).borrow_mut();
+        let mut mp = tl_mp
+            .get_or(|| RefCell::new(MatrixProfile::new(ns)))
+            .borrow_mut();
+        let mut dists = tl_dists
+            .get_or(|| RefCell::new(vec![0.0; ts.num_subsequences()]))
+            .borrow_mut();
         let mut buf = tl_buf.get_or(|| RefCell::new(vec![0.0; ts.w])).borrow_mut();
         ts.distance_profile(fft_data, i, &mut dists, &mut buf);
 
@@ -107,55 +112,69 @@ fn pre_scrimp(
             .unwrap();
 
         let mut q = zeucl_to_dotp(w, *d, ts.mean(i), ts.mean(j), ts.sd(i), ts.sd(j));
-        debug_assert!((q - dot(ts.subsequence(i), ts.subsequence(j))).abs() < 0.00001,
+        debug_assert!(
+            (q - dot(ts.subsequence(i), ts.subsequence(j))).abs() < 0.00001,
             "actual {} expectd {}",
             q,
             dot(ts.subsequence(i), ts.subsequence(j))
         );
         let q_prime = q;
 
-        for k in 1..(s-1) {
+        for k in 1..(s - 1) {
             if i + k >= ns || j + k >= ns {
                 break;
             }
-            q = q - ts.data[i + k] * ts.data[j+k]
-                  + ts.data[i + k + w] * ts.data[j + k + w];
-            debug_assert!((q - dot(ts.subsequence(i+k), ts.subsequence(j+k))).abs() < 0.1,
+            q = q - ts.data[i + k] * ts.data[j + k] + ts.data[i + k + w] * ts.data[j + k + w];
+            debug_assert!(
+                (q - dot(ts.subsequence(i + k), ts.subsequence(j + k))).abs() < 0.1,
                 "actual {} expectd {}",
                 q,
-                dot(ts.subsequence(i+k), ts.subsequence(j+k))
+                dot(ts.subsequence(i + k), ts.subsequence(j + k))
             );
-            let d = dotp_to_zeucl(w, q, ts.mean(i+k), ts.mean(j+k), ts.sd(i+k), ts.sd(j+k));
+            let d = dotp_to_zeucl(
+                w,
+                q,
+                ts.mean(i + k),
+                ts.mean(j + k),
+                ts.sd(i + k),
+                ts.sd(j + k),
+            );
             // debug_assert!((d - zeucl(ts, i, j)).abs() <= 0.001,
             //     "actual {} expected {}",
             //     d, zeucl(ts, i, j)
             // );
-            if d < mp.dists[i+k] {
-                mp.dists[i+k] = d;
-                mp.indices[i+k] = j+k;
+            if d < mp.dists[i + k] {
+                mp.dists[i + k] = d;
+                mp.indices[i + k] = j + k;
             }
-            if d < mp.dists[j+k] {
-                mp.dists[j+k] = d;
-                mp.indices[j+k] = i+k;
+            if d < mp.dists[j + k] {
+                mp.dists[j + k] = d;
+                mp.indices[j + k] = i + k;
             }
         }
 
         q = q_prime;
-        for k in 1..(s-1) {
+        for k in 1..(s - 1) {
             if k > i || k > j {
                 break;
             }
-            q = q - ts.data[i - k + w] * ts.data[j - k + w]
-                  + ts.data[j - k] * ts.data[i - k];
-            let d = dotp_to_zeucl(w, q, ts.mean(i - k), ts.mean(j-k), ts.sd(i-k), ts.sd(j-k));
+            q = q - ts.data[i - k + w] * ts.data[j - k + w] + ts.data[j - k] * ts.data[i - k];
+            let d = dotp_to_zeucl(
+                w,
+                q,
+                ts.mean(i - k),
+                ts.mean(j - k),
+                ts.sd(i - k),
+                ts.sd(j - k),
+            );
             // debug_assert!((d - zeucl(ts, i, j)).abs() <= 0.00000001);
-            if d < mp.dists[i-k] {
-                mp.dists[i-k] = d;
-                mp.indices[i-k] = j-k;
+            if d < mp.dists[i - k] {
+                mp.dists[i - k] = d;
+                mp.indices[i - k] = j - k;
             }
-            if d < mp.dists[j-k] {
-                mp.dists[j-k] = d;
-                mp.indices[j-k] = i-k;
+            if d < mp.dists[j - k] {
+                mp.dists[j - k] = d;
+                mp.indices[j - k] = i - k;
             }
         }
         pbar.inc(1);
@@ -163,7 +182,11 @@ fn pre_scrimp(
     pbar.finish_and_clear();
 
     tl_mp.into_iter().for_each(|tmp| {
-        for ((out_d, out_i), (d, i)) in mp.iter_mut().zip(indices.iter_mut()).zip(tmp.borrow().iter()) {
+        for ((out_d, out_i), (d, i)) in mp
+            .iter_mut()
+            .zip(indices.iter_mut())
+            .zip(tmp.borrow().iter())
+        {
             if *d < *out_d {
                 *out_d = *d;
                 *out_i = *i;
@@ -187,7 +210,7 @@ struct Args {
     /// consider only the given number of points from the input
     pub prefix: Option<usize>,
 
-    #[argh(option, default="0.25")]
+    #[argh(option, default = "0.25")]
     /// the skip for pre-scrimp, as a fraction of the window size
     pub skip: f64,
 
@@ -231,7 +254,10 @@ fn output_csv(path: &str, motifs: &[Motif]) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    debug_assert!(false, "This software should run only in Release mode, times are important");
+    debug_assert!(
+        false,
+        "This software should run only in Release mode, times are important"
+    );
     let args: Args = argh::from_env();
 
     eprintln!("Reading input");
