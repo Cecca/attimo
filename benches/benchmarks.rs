@@ -158,9 +158,11 @@ pub fn bench_sort_hashes(c: &mut Criterion) {
 
     let h = Arc::new(Hasher::new(w, repetitions, 16.0, 12345));
     let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&h));
-    let vals: Vec<HashValue> = (0..ts.num_subsequences())
-        .map(|i| pools.hash_value(i, K, 0))
+    let vals: Vec<(HashValue, u32)> = (0..ts.num_subsequences())
+        .map(|i| (pools.hash_value(i, K, 0), i as u32))
         .collect();
+    let mut scratch: Vec<(HashValue, u32)> = Vec::new();
+    scratch.resize(vals.len(), Default::default());
 
     group.bench_function("rust unstable sort", |b| {
         b.iter_batched(
@@ -170,10 +172,18 @@ pub fn bench_sort_hashes(c: &mut Criterion) {
         )
     });
 
-    group.bench_function("radix sort", |b| {
+    // group.bench_function("radix sort", |b| {
+    //     b.iter_batched(
+    //         || vals.clone(),
+    //         |mut vals| vals.radix_sort(),
+    //         criterion::BatchSize::LargeInput,
+    //     )
+    // });
+
+    group.bench_function("radix sort 5pass", |b| {
         b.iter_batched(
             || vals.clone(),
-            |mut vals| vals.radix_sort(),
+            |mut vals| sort_hash_pairs(&mut vals, &mut scratch),
             criterion::BatchSize::LargeInput,
         )
     });
