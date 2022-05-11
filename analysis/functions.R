@@ -18,6 +18,9 @@ dataset_info <- function() {
         "GAP", 2049279,
         "freezer", 7430755,
         "Seismic", 100000000
+    ) %>%
+    mutate(
+        size_gb = (n * 8) / (1024^3) # assuming a 64 bit representation of each value
     )
 }
 
@@ -37,6 +40,7 @@ fix_names <- function(df) {
         mutate(
             path = dataset,
             dataset = if_else(str_detect(dataset, "VCAB"), "Seismic", dataset),
+            dataset = str_remove(dataset, ".gz")
         )
 }
 
@@ -151,6 +155,22 @@ load_attimo <- function() {
         reorder_datasets()
 }
 
+
+load_prescrimp <- function() {
+    conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
+    tbl <- tbl(conn, "prescrimp") %>%
+        collect() %>%
+        filter(!str_detect(dataset, "EMG")) %>%
+        fix_names() %>%
+        add_prefix_info() %>%
+        right_join(allowed_combinations) %>%
+        mutate(algorithm = "prescrimp") %>%
+        mutate(max_mem_gb = max_mem_bytes / (1024^3)) %>%
+        reorder_datasets()
+    DBI::dbDisconnect(conn)
+    tbl
+}
+
 load_scamp <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "scamp") %>%
@@ -160,6 +180,7 @@ load_scamp <- function() {
         add_prefix_info() %>%
         right_join(allowed_combinations) %>%
         mutate(algorithm = "scamp") %>%
+        mutate(max_mem_gb = max_mem_bytes / (1024^3)) %>%
         reorder_datasets()
     DBI::dbDisconnect(conn)
     tbl
@@ -174,6 +195,7 @@ load_ll <- function() {
         add_prefix_info() %>%
         semi_join(allowed_combinations) %>%
         mutate(algorithm = "ll") %>%
+        mutate(max_mem_gb = max_mem_bytes / (1024^3)) %>%
         reorder_datasets()
     DBI::dbDisconnect(conn)
     tbl
@@ -474,22 +496,25 @@ latex_info <- function(data_motif_measures) {
         write_file("imgs/dataset-info.tex")
 }
 
-get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluster) {
-    print(data_gpucluster)
+get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluster, data_prescrimp) {
     bind_rows(
         data_attimo %>%
             filter((repetitions == 200) | (dataset == "Seismic")) %>%
             select(
                 algorithm, hostname, dataset, is_full_dataset, threads, window,
-                repetitions, motifs, delta, time_s, distances_fraction
+                repetitions, motifs, delta, time_s, max_mem_gb, distances_fraction
             ) %>% filter(motifs == 1),
         select(
             data_scamp, algorithm, hostname, dataset, is_full_dataset,
-            threads, window, time_s
+            threads, window, max_mem_gb, time_s
+        ),
+        select(
+            data_prescrimp, algorithm, hostname, dataset, is_full_dataset,
+            window, max_mem_gb, time_s
         ),
         select(
             data_ll, algorithm, hostname, dataset, is_full_dataset, window,
-            time_s
+            max_mem_gb, time_s
         ),
         select(data_gpucluster, algorithm, dataset, window = w, time_s) %>% mutate(is_full_dataset = T)
     ) %>%
@@ -499,7 +524,7 @@ get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluste
         slice_min(time_s) %>%
         ungroup() %>%
         inner_join(dataset_info()) %>%
-        select(algorithm, dataset, n, window, time_s, distances_fraction)
+        select(algorithm, dataset, n, size_gb, window, time_s, max_mem_gb, distances_fraction)
 }
 
 do_tab_speedup <- function(data_comparison) {
@@ -533,37 +558,44 @@ do_tab_time_comparison <- function(data_comparison, file_out) {
     data_comparison %>%
         mutate(
             time_s = scales::number(time_s, accuracy = 0.1),
+            mem_overhead_gb = scales::number(max_mem_gb - size_gb, accuracy = 0.001),
             distances_fraction = scales::scientific(
                 distances_fraction,
                 prefix = "$",
                 suffix = "}$",
                 digits = 2
             ) %>% str_replace("e", "\\\\cdot 10^{"),
-            time_s = if_else(algorithm == "attimo",
-                str_c(time_s, " (", distances_fraction, ")"),
-                time_s
-            )
         ) %>%
-        select(dataset, algorithm, time_s) %>%
-        pivot_wider(names_from = algorithm, values_from = time_s) %>%
+        select(dataset, algorithm, time_s, mem_overhead_gb, distances_fraction) %>% 
+        pivot_wider(names_from = algorithm, values_from = c(time_s, mem_overhead_gb, distances_fraction)) %>%
         mutate(across(!matches("dataset"), ~if_else(is.na(.), "-", .))) %>%
         reorder_datasets() %>%
         arrange(dataset) %>%
-        select(dataset, `\\attimo`=attimo, `\\scamp-gpu`=`scamp-gpu`, `\\scamp`=scamp, `\\LL`=ll) %>%
-        kbl(
-            format = "latex", booktabs = T, linesep = "", align = "lrrrr",
-            escape = F
-            # caption = "Time to find the top motif at different window lengths. For \\our,
-            # the number in parentheses reports the fraction of distance computations
-            # performed to find the solution."
+        select(dataset,
+            # time
+            `\\attimo` = time_s_attimo,
+            `\\scamp-gpu` = `time_s_scamp-gpu`,
+            `\\scamp`=time_s_scamp,
+            `\\prescrimp`=time_s_prescrimp,
+            `\\LL`=time_s_ll,
+            # memory
+            `\\attimo ` = mem_overhead_gb_attimo,
+            `\\scamp-gpu ` = `mem_overhead_gb_scamp-gpu`,
+            `\\scamp `=mem_overhead_gb_scamp,
+            `\\prescrimp `=mem_overhead_gb_prescrimp,
+            `\\LL `=mem_overhead_gb_ll,
         ) %>%
-        # kable_styling() %>%
-        add_header_above(c(" " = 1, "Time (s)" = 4)) %>%
+        kbl(
+            format = "latex", booktabs = T, linesep = "", align = "l rrrrr rrrrr",
+            escape = F
+        ) %>%
+        add_header_above(c(" " = 1, "Time (s)" = 5, "Memory (Gb)" = 5), escape = F) %>%
         write_file(file_out)
 }
 
 compute_distance_distibution <- function(data_attimo) {
     do_compute <- function(dataset, path, window) {
+        print(paste("dataset", dataset, "window", window))
         out <- paste0(path, ".", window, ".dists")
         if (!file.exists(out) || !file.exists(paste0(out, ".gz"))) {
             print(paste("Compute", out))

@@ -28,26 +28,30 @@ list(
         load_scamp()
     ),
     tar_target(
+        data_prescrimp,
+        load_prescrimp()
+    ),
+    tar_target(
         data_ll,
         load_ll()
     ),
-    tar_target(
-        data_scalability,
-        bind_rows(
-            data_attimo %>%
-                filter(!is.na(perc_size)) %>%
-                filter(delta == 0.001) %>%
-                select(algorithm, dataset, perc_size, time_s),
-            data_scamp %>%
-                filter(!is.na(perc_size)) %>%
-                select(algorithm, dataset, perc_size, time_s),
-            read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
-                fix_names() %>%
-                add_prefix_info() %>%
-                mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
-                select(algorithm, dataset, perc_size, time_s)
-        )
-    ),
+    # tar_target(
+    #     data_scalability,
+    #     bind_rows(
+    #         data_attimo %>%
+    #             filter(!is.na(perc_size)) %>%
+    #             filter(delta == 0.01) %>%
+    #             select(algorithm, dataset, perc_size, time_s),
+    #         data_scamp %>%
+    #             filter(!is.na(perc_size)) %>%
+    #             select(algorithm, dataset, perc_size, time_s),
+    #         read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
+    #             fix_names() %>%
+    #             add_prefix_info() %>%
+    #             mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
+    #             select(algorithm, dataset, perc_size, time_s)
+    #     )
+    # ),
     tar_target(
         data_gpucluster,
         read_csv("gpucluster.csv") %>%
@@ -64,10 +68,6 @@ list(
             filter((repetitions == 400) | (dataset == "Seismic"), motifs == 10) %>% 
             add_recall()
     ),
-    # tar_target(
-    #     data_depths,
-    #     get_data_depths(data_attimo)
-    # ),
     tar_target(
         data_measures,
         dataset_measures(data_attimo, data_distances)
@@ -83,7 +83,7 @@ list(
     ),
     tar_target(
         data_comparison,
-        get_data_comparison(filter(data_attimo, delta == delta_val), data_scamp, data_ll, data_gpucluster)
+        get_data_comparison(filter(data_attimo, delta == delta_val), data_scamp, data_ll, data_gpucluster, data_prescrimp)
     ),
 
     # Figure motifs ------------------------------------------------------------
@@ -93,15 +93,15 @@ list(
     # ),
 
     # Figure scalability -------------------------------------------------------
-    tar_target(
-        img_scalability_n,
-        ggsave("imgs/scalability_n.png",
-            plot = plot_scalability_n_alt(data_scalability),
-            width = 5,
-            height = 3,
-            dpi = 300
-        )
-    ),
+    # tar_target(
+    #     img_scalability_n,
+    #     ggsave("imgs/scalability_n.png",
+    #         plot = plot_scalability_n_alt(data_scalability),
+    #         width = 5,
+    #         height = 3,
+    #         dpi = 300
+    #     )
+    # ),
 
     # Time comparison -----------------------------------------------
     tar_target(
