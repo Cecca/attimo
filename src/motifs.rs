@@ -22,28 +22,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use thread_local::ThreadLocal;
-
-pub enum Repetitions {
-    Exact(usize),
-    Bounded(usize),
-}
-
-impl Repetitions {
-    fn get_upper_bound(&self) -> Option<usize> {
-        match self {
-            Repetitions::Exact(_) => None,
-            Repetitions::Bounded(reps) => Some(*reps),
-        }
-    }
-
-    fn get_exact(&self) -> Option<usize> {
-        match self {
-            Repetitions::Exact(reps) => Some(*reps),
-            Repetitions::Bounded(_) => None,
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, PartialOrd)]
 struct OrderedF64(f64);
 
@@ -280,7 +258,7 @@ impl TopK {
 pub fn motifs(
     ts: &WindowedTimeseries,
     topk: usize,
-    repetitions: Repetitions,
+    repetitions: usize,
     delta: f64,
     max_correlation: Option<f64>,
     min_correlation: Option<f64>,
@@ -299,23 +277,13 @@ pub fn motifs(
         min_dist, max_dist
     );
 
-    let (hasher_width, estimated_repetitions) = Hasher::estimate_width(
+    let hasher_width = Hasher::estimate_width(
         &ts,
         &fft_data,
         topk,
         min_dist,
-        repetitions.get_upper_bound(),
         seed,
     );
-    let repetitions = if let Some(reps) = repetitions.get_exact() {
-        reps
-    } else {
-        println!(
-            "Using automatically estimated repetitions {}",
-            estimated_repetitions.unwrap()
-        );
-        estimated_repetitions.unwrap()
-    };
     info!("Computed hasher width"; "hasher_width" => hasher_width);
 
     info!("hash computation"; "tag" => "phase");
@@ -654,7 +622,7 @@ mod test {
             let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
 
-            let motif = *motifs(&ts, 1, Repetitions::Exact(20), 0.001, None, None, 12435)
+            let motif = *motifs(&ts, 1,20, 0.001, None, None, 12435)
                 .first()
                 .unwrap();
             println!(
@@ -679,7 +647,7 @@ mod test {
             let ts = WindowedTimeseries::new(ts, w, true);
             // assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
 
-            let motif = *motifs(&ts, 1, Repetitions::Exact(200), 0.001, None, None, 12435)
+            let motif = *motifs(&ts, 1, 200, 0.001, None, None, 12435)
                 .first()
                 .unwrap();
             println!("Motif distance {}", motif.distance);
@@ -713,7 +681,7 @@ mod test {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", None).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
-        let motifs = motifs(&ts, 10, Repetitions::Exact(200), 0.01, None, None, 12435);
+        let motifs = motifs(&ts, 10, 200, 0.01, None, None, 12435);
         for (a, b, dist) in top10 {
             // look for this in the motifs, allowing up to w displacement
             println!("looking for ({a} {b} {dist})");
@@ -758,7 +726,7 @@ mod test {
         let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", None).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
-        let motifs = motifs(&ts, 10, Repetitions::Exact(800), 0.01, None, None, 12435);
+        let motifs = motifs(&ts, 10, 800, 0.01, None, None, 12435);
         for (a, b, dist) in top10 {
             // look for this in the motifs, allowing up to w displacement
             println!("looking for ({a} {b} {dist})");

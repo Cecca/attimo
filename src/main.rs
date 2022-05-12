@@ -2,7 +2,7 @@ use anyhow::Result;
 use argh::FromArgs;
 use attimo::allocator::{self, allocated, CountingAllocator};
 use attimo::load::*;
-use attimo::motifs::{motifs, Motif, Repetitions};
+use attimo::motifs::{motifs, Motif};
 use attimo::timeseries::*;
 use slog::*;
 use slog_scope::GlobalLoggerGuard;
@@ -42,11 +42,7 @@ struct Config {
 
     #[argh(option)]
     /// the number of repetitions to perform
-    pub repetitions: Option<usize>,
-
-    #[argh(option)]
-    /// the maximum number of repetitions to perform
-    pub max_repetitions: Option<usize>,
+    pub repetitions: usize,
 
     #[argh(option)]
     /// consider only the given number of points from the input
@@ -79,19 +75,6 @@ fn default_output() -> String {
 
 fn default_log_path() -> String {
     ".trace.json".to_owned()
-}
-
-fn get_reps(conf: &Config) -> Repetitions {
-    if let Some(reps) = conf.repetitions {
-        assert!(conf.max_repetitions.is_none());
-        Repetitions::Exact(reps)
-    } else if let Some(reps) = conf.max_repetitions {
-        assert!(conf.repetitions.is_none());
-        Repetitions::Bounded(reps)
-    } else {
-        // TODO do some computation based on the available memory
-        Repetitions::Bounded(1000)
-    }
 }
 
 fn main() -> Result<()> {
@@ -129,11 +112,10 @@ fn main() -> Result<()> {
         "time_s" => input_elapsed.as_secs_f64()
     );
 
-    let repetitions = get_reps(&config);
     let motifs = motifs(
         &ts,
         config.motifs,
-        repetitions,
+        config.repetitions,
         config.delta,
         config.max_correlation,
         config.min_correlation,
