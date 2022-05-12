@@ -35,6 +35,10 @@ list(
         data_ll,
         load_ll()
     ),
+    tar_target(
+        data_rproj,
+        load_rproj()
+    ),
     # tar_target(
     #     data_scalability,
     #     bind_rows(
@@ -83,7 +87,7 @@ list(
     ),
     tar_target(
         data_comparison,
-        get_data_comparison(filter(data_attimo, delta == delta_val), data_scamp, data_ll, data_gpucluster, data_prescrimp)
+        get_data_comparison(filter(data_attimo, delta == delta_val), data_scamp, data_ll, data_gpucluster, data_prescrimp, data_rproj)
     ),
 
     # Figure motifs ------------------------------------------------------------

@@ -156,6 +156,22 @@ load_attimo <- function() {
 }
 
 
+load_rproj <- function() {
+    conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
+    tbl <- tbl(conn, "projection") %>%
+        collect() %>%
+        filter(!str_detect(dataset, "EMG")) %>%
+        fix_names() %>%
+        add_prefix_info() %>%
+        right_join(allowed_combinations) %>%
+        mutate(algorithm = "rproj") %>%
+        mutate(max_mem_gb = max_mem_bytes / (1024^3)) %>%
+        reorder_datasets()
+    DBI::dbDisconnect(conn)
+    tbl
+}
+
+
 load_prescrimp <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "prescrimp") %>%
@@ -496,7 +512,7 @@ latex_info <- function(data_motif_measures) {
         write_file("imgs/dataset-info.tex")
 }
 
-get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluster, data_prescrimp) {
+get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluster, data_prescrimp, data_rproj) {
     bind_rows(
         data_attimo %>%
             filter((repetitions == 200) | (dataset == "Seismic")) %>%
@@ -514,6 +530,10 @@ get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluste
         ),
         select(
             data_ll, algorithm, hostname, dataset, is_full_dataset, window,
+            max_mem_gb, time_s
+        ),
+        select(
+            data_rproj, algorithm, hostname, dataset, is_full_dataset, window,
             max_mem_gb, time_s
         ),
         select(data_gpucluster, algorithm, dataset, window = w, time_s) %>% mutate(is_full_dataset = T)
@@ -578,18 +598,20 @@ do_tab_time_comparison <- function(data_comparison, file_out) {
             `\\scamp`=time_s_scamp,
             `\\prescrimp`=time_s_prescrimp,
             `\\LL`=time_s_ll,
+            `\\rproj`=time_s_rproj,
             # memory
             `\\attimo ` = mem_overhead_gb_attimo,
             `\\scamp-gpu ` = `mem_overhead_gb_scamp-gpu`,
             `\\scamp `=mem_overhead_gb_scamp,
             `\\prescrimp `=mem_overhead_gb_prescrimp,
             `\\LL `=mem_overhead_gb_ll,
+            `\\rproj `=mem_overhead_gb_rproj,
         ) %>%
         kbl(
             format = "latex", booktabs = T, linesep = "", align = "l rrrrr rrrrr",
             escape = F
         ) %>%
-        add_header_above(c(" " = 1, "Time (s)" = 5, "Memory (Gb)" = 5), escape = F) %>%
+        add_header_above(c(" " = 1, "Time (s)" = 6, "Memory (Gb)" = 6), escape = F) %>%
         write_file(file_out)
 }
 
@@ -683,6 +705,7 @@ dataset_measures <- function(data_attimo, data_distances) {
 plot_memory_time <- function(data_attimo) {
     data_attimo %>%
         filter(motifs == 10) %>%
+        filter(time_s < 5000) %>%
         group_by(dataset, window, repetitions) %>%
         summarise(
             time_s = mean(time_s),
