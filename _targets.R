@@ -74,12 +74,12 @@ list(
     ),
     tar_target(
         data_measures,
-        dataset_measures(data_attimo, data_distances)
+        dataset_measures(data_attimo)
     ),
-    tar_target(
-        data_distances,
-        compute_distance_distibution(data_attimo)
-    ),
+    # tar_target(
+    #     data_distances,
+    #     compute_distance_distibution(data_attimo)
+    # ),
     # The motif occurences
     tar_target(
         data_motif_occurences,

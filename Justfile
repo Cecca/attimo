@@ -13,3 +13,4 @@ analysis:
 copy: analysis
         cp imgs/time-comparison.tex ../Attimo-paper/figs/
         cp imgs/repetitions.png ../Attimo-paper/figs/
+        cp imgs/dataset-info.tex ../Attimo-paper/figs/

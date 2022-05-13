@@ -10,14 +10,16 @@ theme_paper <- function() {
 
 dataset_info <- function() {
     tribble(
-        ~dataset, ~n,
-        "ASTRO", 1151349,
-        "ECG", 7871870,
-        # "EMG", 543893,
-        "HumanY", 26415045,
-        "GAP", 2049279,
-        "freezer", 7430755,
-        "Seismic", 100000000
+        ~dataset, ~n, ~avg_dist, ~window,
+        "ASTRO", 1151349, 13.954815, 100,
+        "ECG", 7871870, 44.087175, 1000,
+        # "EMG", 543893, NA,
+        "HumanY", 26415045, 176.138839, 18000,
+        "GAP", 2049279, 34.235004, 600,
+        "freezer", 7430755, 99.810919, 5000,
+        "Seismic", 10000000, NA, 100,
+        "SeismicB", 1000000000, 14.114333, 100,
+        "Whales", 308941605, 16.715681, 140
     ) %>%
     mutate(
         size_gb = (n * 8) / (1024^3) # assuming a 64 bit representation of each value
@@ -32,7 +34,8 @@ allowed_combinations <- tibble::tribble(
     "ECG", 1000,
     "freezer", 5000,
     "ASTRO", 100,
-    "Seismic", 100
+    "Seismic", 100,
+    "Whales", 140
 )
 
 fix_names <- function(df) {
@@ -40,6 +43,7 @@ fix_names <- function(df) {
         mutate(
             path = dataset,
             dataset = if_else(str_detect(dataset, "VCAB"), "Seismic", dataset),
+            dataset = if_else(str_detect(dataset, "Whales"), "Whales", dataset),
             dataset = str_remove(dataset, ".gz")
         )
 }
@@ -47,7 +51,7 @@ fix_names <- function(df) {
 reorder_datasets <- function(df) {
     df %>%
         mutate(
-            dataset = factor(dataset, c("freezer", "ASTRO", "GAP", "Seismic", "ECG", "HumanY"), ordered = T)
+            dataset = factor(dataset, c("freezer", "ASTRO", "GAP", "Seismic", "Whales", "ECG", "HumanY"), ordered = T)
         )
 }
 
@@ -515,7 +519,7 @@ latex_info <- function(data_motif_measures) {
 get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluster, data_prescrimp, data_rproj) {
     bind_rows(
         data_attimo %>%
-            filter((repetitions == 200) | (dataset == "Seismic")) %>%
+            filter((repetitions == 200) | (dataset == "Seismic") | (dataset == "Whales")) %>%
             select(
                 algorithm, hostname, dataset, is_full_dataset, threads, window,
                 repetitions, motifs, delta, time_s, max_mem_gb, distances_fraction
@@ -647,46 +651,46 @@ compute_distance_distibution <- function(data_attimo) {
         summarise(do_compute(dataset, path, window))
 }
 
-compute_measures <- function(path, window, idxs) {
-    out <- paste0(path, ".", window, ".measures")
-    if (!file.exists(out) || !file.exists(paste0(out, ".gz"))) {
-        system2(
-            "target/release/examples/measures",
-            c(
-                "--window", window,
-                "--path", path,
-                "--output", out,
-                idxs
-            )
-        )
-    }
-    if (file.exists(paste0(out, ".gz"))) {
-        out <- paste0(out, ".gz")
-    }
-    dat <- readr::read_csv(out) %>%
-        mutate(
-            motif_idx = row_number(),
-            nn_corr = 1 - nn^2 / (2 * window)
-        )
-    dat
-}
+# compute_measures <- function(path, window, idxs) {
+#     out <- paste0(path, ".", window, ".measures")
+#     if (!file.exists(out) || !file.exists(paste0(out, ".gz"))) {
+#         system2(
+#             "target/release/examples/measures",
+#             c(
+#                 "--window", window,
+#                 "--path", path,
+#                 "--output", out,
+#                 idxs
+#             )
+#         )
+#     }
+#     if (file.exists(paste0(out, ".gz"))) {
+#         out <- paste0(out, ".gz")
+#     }
+#     dat <- readr::read_csv(out) %>%
+#         mutate(
+#             motif_idx = row_number(),
+#             nn_corr = 1 - nn^2 / (2 * window)
+#         )
+#     dat
+# }
 
-dataset_measures <- function(data_attimo, data_distances) {
-    avg_dists <- data_distances %>%
-        group_by(dataset, window) %>%
-        summarise(avg_distance = mean(distance))
+dataset_measures <- function(data_attimo) {
+    # avg_dists <- data_distances %>%
+    #     group_by(dataset, window) %>%
+    #     summarise(avg_distance = mean(distance))
 
     data_attimo %>%
+        inner_join(dataset_info()) %>%
         filter(motifs == 10) %>%
         group_by(path, dataset, window) %>%
         slice(1) %>%
         as_tbl_json(json.column = "motif_pairs") %>%
-        select(path, dataset, window) %>%
+        select(path, dataset, window, avg_dist) %>%
         gather_array() %>%
         spread_all() %>%
         rename(motif_idx = array.index) %>%
-        inner_join(avg_dists) %>%
-        mutate(rc1 = avg_distance / dist)
+        mutate(rc1 = avg_dist / dist)
 
     # data_attimo %>%
     #     filter(motifs == 10) %>%
