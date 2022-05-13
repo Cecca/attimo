@@ -263,8 +263,8 @@ pub fn motifs(
     max_correlation: Option<f64>,
     min_correlation: Option<f64>,
     seed: u64,
+    start: Instant, // when the program started, to compute elapsed confirmation times
 ) -> Vec<Motif> {
-    let start = Instant::now();
 
     //// We set the exclusion zone to the motif length, so that motifs cannot overlap at all.
     let exclusion_zone = ts.w;
