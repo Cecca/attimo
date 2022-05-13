@@ -59,6 +59,10 @@ impl MatrixProfile {
     }
 }
 
+fn relative_error(actual: f64, expected: f64) -> f64 {
+    (actual - expected).abs() / expected
+}
+
 fn pre_scrimp(
     ts: &WindowedTimeseries,
     s: usize,
@@ -113,8 +117,8 @@ fn pre_scrimp(
 
         let mut q = zeucl_to_dotp(w, *d, ts.mean(i), ts.mean(j), ts.sd(i), ts.sd(j));
         debug_assert!(
-            (q - dot(ts.subsequence(i), ts.subsequence(j))).abs() < 0.00001,
-            "actual {} expectd {}",
+            relative_error(q, dot(ts.subsequence(i), ts.subsequence(j))) <= 0.00001,
+            "zeucl_to_dotp: actual {} expectd {}",
             q,
             dot(ts.subsequence(i), ts.subsequence(j))
         );
@@ -124,10 +128,10 @@ fn pre_scrimp(
             if i + k >= ns || j + k >= ns {
                 break;
             }
-            q = q - ts.data[i + k] * ts.data[j + k] + ts.data[i + k + w] * ts.data[j + k + w];
+            q = q - ts.data[i + k - 1] * ts.data[j + k - 1] + ts.data[i + k + w - 1] * ts.data[j + k + w - 1];
             debug_assert!(
-                (q - dot(ts.subsequence(i + k), ts.subsequence(j + k))).abs() < 0.1,
-                "actual {} expectd {}",
+                relative_error(q, dot(ts.subsequence(i + k), ts.subsequence(j + k))) <= 0.00001,
+                "sliding dot product: actual {} expectd {}",
                 q,
                 dot(ts.subsequence(i + k), ts.subsequence(j + k))
             );
@@ -139,10 +143,11 @@ fn pre_scrimp(
                 ts.sd(i + k),
                 ts.sd(j + k),
             );
-            // debug_assert!((d - zeucl(ts, i, j)).abs() <= 0.001,
-            //     "actual {} expected {}",
-            //     d, zeucl(ts, i, j)
-            // );
+            debug_assert!(
+                relative_error(d, zeucl(ts, i+k, j+k)) <= 0.00001,
+                "dotp_to_zeucl: actual {} expected {}",
+                d, zeucl(ts, i+k, j+k)
+            );
             if d < mp.dists[i + k] {
                 mp.dists[i + k] = d;
                 mp.indices[i + k] = j + k;
@@ -159,6 +164,12 @@ fn pre_scrimp(
                 break;
             }
             q = q - ts.data[i - k + w] * ts.data[j - k + w] + ts.data[j - k] * ts.data[i - k];
+            debug_assert!(
+                relative_error(q, dot(ts.subsequence(i - k), ts.subsequence(j - k))) <= 0.00001,
+                "sliding dot product: actual {} expectd {}",
+                q,
+                dot(ts.subsequence(i - k), ts.subsequence(j - k))
+            );
             let d = dotp_to_zeucl(
                 w,
                 q,
@@ -167,7 +178,11 @@ fn pre_scrimp(
                 ts.sd(i - k),
                 ts.sd(j - k),
             );
-            // debug_assert!((d - zeucl(ts, i, j)).abs() <= 0.00000001);
+            debug_assert!(
+                relative_error(d, zeucl(ts, i-k, j-k)) <= 0.00001,
+                "dotp_to_zeucl: actual {} expected {}",
+                d, zeucl(ts, i-k, j-k)
+            );
             if d < mp.dists[i - k] {
                 mp.dists[i - k] = d;
                 mp.indices[i - k] = j - k;
@@ -285,6 +300,12 @@ fn main() -> Result<()> {
     eprintln!("Writing output");
     let mut motifs = topk.to_vec();
     for m in motifs.iter_mut() {
+        debug_assert!(
+            m.distance >= zeucl(&ts, m.idx_a, m.idx_b) - 0.000001, // allow for some tolerance for numerical instabilities
+            "Computed distance is smaller than true distance: {} < {}",
+            m.distance,
+            zeucl(&ts, m.idx_a, m.idx_b)
+        );
         m.elapsed.replace(timer.elapsed());
     }
     output_csv(&args.output, &motifs)?;
