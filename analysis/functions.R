@@ -17,8 +17,8 @@ dataset_info <- function() {
         "HumanY", 26415045, 176.138839, 18000,
         "GAP", 2049279, 34.235004, 600,
         "freezer", 7430755, 99.810919, 5000,
-        "Seismic", 10000000, NA, 100,
-        "SeismicB", 1000000000, 14.114333, 100,
+        "SeismicOld", 10000000, NA, 100,
+        "Seismic", 1000000000, 14.114333, 100,
         "Whales", 308941605, 16.715681, 140
     ) %>%
     mutate(
@@ -40,6 +40,7 @@ allowed_combinations <- tibble::tribble(
 
 fix_names <- function(df) {
     df %>%
+        filter(!str_detect(dataset, "data/VCAB_BP2_580_days-100000000.txt")) %>% 
         mutate(
             path = dataset,
             dataset = if_else(str_detect(dataset, "VCAB"), "Seismic", dataset),
@@ -523,7 +524,11 @@ get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluste
             select(
                 algorithm, hostname, dataset, is_full_dataset, threads, window,
                 repetitions, motifs, delta, time_s, max_mem_gb, distances_fraction
-            ) %>% filter(motifs == 1),
+            ) %>% 
+            filter(motifs == 1) %>%
+            group_by(algorithm, hostname, dataset, window) %>%
+            slice_min(time_s)
+            ,
         select(
             data_scamp, algorithm, hostname, dataset, is_full_dataset,
             threads, window, max_mem_gb, time_s
@@ -835,14 +840,10 @@ plot_motifs_10_alt <- function(data_attimo, data_scamp, data_measures) {
 }
 
 plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_scamp_gpu, data_measures) {
-    # data_depths <- semi_join(data_depths, data_attimo)
-    print(data_scamp_gpu)
-    
     pdata <- data_attimo %>%
-        # left_join(select(filter(data_scamp, is_full_dataset), dataset, window, time_scamp_s = time_s)) %>%
         left_join(select(data_scamp_gpu, dataset, window = w, time_scamp_gpu_s = time_s)) %>%
         filter(motifs == 10) %>%
-        filter((repetitions == 400) | (dataset == "Seismic")) %>%
+        filter((repetitions == 400) | (dataset == "Seismic") | (dataset == "Whales")) %>%
         group_by(dataset, window) %>%
         slice_min(time_s) %>%
         ungroup() %>%
@@ -869,7 +870,11 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
             confirmation_time = as.numeric(confirmation_time),
             preprocessing = as.numeric(preprocessing)
         )  %>%
-        reorder_datasets()
+        # reorder_datasets()
+        inner_join(dataset_info()) %>%
+        mutate(
+            dataset = fct_reorder(dataset, n)
+        )
 
     maxval <- pdata %>% summarise(max(time_s)) %>% pull()
 
