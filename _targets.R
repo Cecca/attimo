@@ -57,18 +57,24 @@ list(
         )
     ),
     tar_target(
-        # A model for the performance of SCAMP-gpu, fitting a quadratic polynomial
-        scamp_gpu_model,
+        # A model for the performance of SCAMP, fitting a quadratic polynomial
+        scamp_model,
+        lm(time_s ~ poly(n, 2), drop_na(select(data_scamp, n, time_s)))
+    ),
+    tar_target(
+        data_scamp_gpu_scalability,
         read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
             fix_names() %>%
             add_prefix_info() %>%
             mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
             select(algorithm, dataset, perc_size, time_s) %>%
             inner_join(dataset_info()) %>%
-            mutate(n = perc_size * n) %>%
-            (function(d) {
-                lm(time_s ~ poly(n, 2), d)
-            })
+            mutate(scaled_n = perc_size * n)
+    ),
+    tar_target(
+        # A model for the performance of SCAMP-gpu, fitting a quadratic polynomial
+        scamp_gpu_model,
+        lm(time_s ~ poly(scaled_n, 2), data_scamp_gpu_scalability)
     ),
     tar_target(
         data_gpucluster,

@@ -43,9 +43,9 @@ fix_names <- function(df) {
         filter(!str_detect(dataset, "data/VCAB_BP2_580_days-100000000.txt")) %>% 
         mutate(
             path = dataset,
+            dataset = if_else(str_detect(dataset, "Whales"), "Whales", dataset),
             dataset = if_else(str_detect(dataset, "VCAB.*100000000"), "Seismic100M", dataset),
             dataset = if_else(str_detect(dataset, "VCAB_noised"), "Seismic", dataset),
-            dataset = if_else(str_detect(dataset, "Whales"), "Whales", dataset),
             dataset = str_remove(dataset, ".gz")
         )
 }
@@ -177,7 +177,6 @@ load_rproj <- function() {
     tbl
 }
 
-
 load_prescrimp <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "prescrimp") %>%
@@ -185,12 +184,41 @@ load_prescrimp <- function() {
         filter(!str_detect(dataset, "EMG")) %>%
         fix_names() %>%
         add_prefix_info() %>%
-        right_join(allowed_combinations) %>%
+        # right_join(allowed_combinations) %T>%
         mutate(algorithm = "prescrimp") %>%
         mutate(max_mem_gb = max_mem_bytes / (1024^3)) %>%
         reorder_datasets()
+    
+    tbl_measured <- tbl %>%
+        filter(is_full_dataset) %>%
+        mutate(is_estimate = F)
+
+    smaller <- tbl %>%
+        filter(!is_full_dataset)
+    models <- smaller %>%
+        group_by(dataset, window, stepsize) %>%
+        do(
+            model_time_s = lm(time_s ~ poly(prefix, 2), data=.),
+            model_max_mem_gb = lm(max_mem_gb ~ prefix, data=.)
+        )
+
+    predictions <- tbl %>%
+        # Select the combinations for which measurements are missing
+        filter(is_full_dataset) %>%
+        right_join(allowed_combinations) %>%
+        filter(is.na(time_s)) %>%
+        select(dataset, window,) %>%
+        inner_join(models) %>%
+        inner_join(dataset_info()) %>%
+        group_by(dataset, window, stepsize, n) %>%
+        do(tibble(
+            time_s = predict(.$model_time_s[[1]], tibble(prefix=.$n)),
+            max_mem_gb = predict(.$model_max_mem_gb[[1]], tibble(prefix=.$n)),
+        )) %>%
+        mutate(is_estimate = T, is_full_dataset = T, algorithm = 'prescrimp')
+
     DBI::dbDisconnect(conn)
-    tbl
+    bind_rows(tbl_measured, predictions)
 }
 
 load_scamp <- function() {
@@ -200,12 +228,42 @@ load_scamp <- function() {
         filter(!str_detect(dataset, "EMG")) %>%
         fix_names() %>%
         add_prefix_info() %>%
-        right_join(allowed_combinations) %>%
+        # right_join(allowed_combinations) %>%
         mutate(algorithm = "scamp") %>%
         mutate(max_mem_gb = max_mem_bytes / (1024^3)) %>%
         reorder_datasets()
+
+    tbl_measured <- tbl %>%
+        filter(is_full_dataset) %>%
+        mutate(is_estimate = F)
+
+    smaller <- tbl %>%
+        filter(!is_full_dataset)
+    models <- smaller %>%
+        group_by(dataset, window, threads) %>%
+        do(
+            model_time_s = lm(time_s ~ poly(prefix, 2), data=.),
+            model_max_mem_gb = lm(max_mem_gb ~ poly(prefix, 2), data=.)
+        )
+
+    predictions <- tbl %>%
+        # Select the combinations for which measurements are missing
+        filter(is_full_dataset) %>%
+        right_join(allowed_combinations) %>%
+        filter(is.na(time_s)) %>%
+        select(dataset) %>%
+        inner_join(models) %>%
+        inner_join(dataset_info()) %>%
+        group_by(dataset, window, threads, n) %>%
+        do(tibble(
+            time_s = predict(.$model_time_s[[1]], tibble(prefix=.$n)),
+            max_mem_gb = predict(.$model_max_mem_gb[[1]], tibble(prefix=.$n)),
+        )) %>%
+        mutate(is_estimate = T, is_full_dataset = T, algorithm = 'scamp')
+
+
     DBI::dbDisconnect(conn)
-    tbl
+    bind_rows(tbl_measured, predictions)
 }
 
 load_ll <- function() {
@@ -531,11 +589,11 @@ get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluste
             slice_min(time_s)
             ,
         select(
-            data_scamp, algorithm, hostname, dataset, is_full_dataset,
+            data_scamp, algorithm, hostname, dataset, is_full_dataset, is_estimate,
             threads, window, max_mem_gb, time_s
         ),
         select(
-            data_prescrimp, algorithm, hostname, dataset, is_full_dataset,
+            data_prescrimp, algorithm, hostname, dataset, is_full_dataset, is_estimate,
             window, max_mem_gb, time_s
         ),
         select(
@@ -548,13 +606,14 @@ get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluste
         ),
         select(data_gpucluster, algorithm, dataset, window = w, time_s) %>% mutate(is_full_dataset = T)
     ) %>%
+        replace_na(list(is_estimate = F)) %>%
         semi_join(allowed_combinations) %>%
         filter(is_full_dataset) %>%
         group_by(dataset, algorithm) %>%
         slice_min(time_s) %>%
         ungroup() %>%
         inner_join(dataset_info()) %>%
-        select(algorithm, dataset, n, size_gb, window, time_s, max_mem_gb, distances_fraction)
+        select(is_estimate, algorithm, dataset, n, size_gb, window, time_s, max_mem_gb, distances_fraction)
 }
 
 do_tab_speedup <- function(data_comparison) {
@@ -588,7 +647,15 @@ do_tab_time_comparison <- function(data_comparison, file_out) {
     data_comparison %>%
         mutate(
             time_s = scales::number(time_s, accuracy = 0.1),
-            mem_overhead_gb = scales::number(max_mem_gb - size_gb, accuracy = 0.001),
+            time_s = if_else(is_estimate,
+                str_c("{\\small(", time_s,")}"),
+                time_s
+            ),
+            mem_overhead_gb = scales::number(max_mem_gb - size_gb, accuracy = 0.1),
+            mem_overhead_gb = if_else(is_estimate,
+                str_c("{\\small(", mem_overhead_gb, ")}"),
+                mem_overhead_gb
+            ),
             distances_fraction = scales::scientific(
                 distances_fraction,
                 prefix = "$",
