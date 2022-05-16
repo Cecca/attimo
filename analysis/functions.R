@@ -17,8 +17,8 @@ dataset_info <- function() {
         "HumanY", 26415045, 176.138839, 18000,
         "GAP", 2049279, 34.235004, 600,
         "freezer", 7430755, 99.810919, 5000,
-        "SeismicOld", 10000000, NA, 100,
-        "Seismic", 1000000000, 14.114333, 100,
+        "Seismic100M", 10^8, NA, 100,
+        "Seismic", 10^9, 14.114333, 100,
         "Whales", 308941605, 16.715681, 140
     ) %>%
     mutate(
@@ -43,7 +43,8 @@ fix_names <- function(df) {
         filter(!str_detect(dataset, "data/VCAB_BP2_580_days-100000000.txt")) %>% 
         mutate(
             path = dataset,
-            dataset = if_else(str_detect(dataset, "VCAB"), "Seismic", dataset),
+            dataset = if_else(str_detect(dataset, "VCAB.*100000000"), "Seismic100M", dataset),
+            dataset = if_else(str_detect(dataset, "VCAB_noised"), "Seismic", dataset),
             dataset = if_else(str_detect(dataset, "Whales"), "Whales", dataset),
             dataset = str_remove(dataset, ".gz")
         )
@@ -947,6 +948,155 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
 
     bars
 }
+
+plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu, data_measures) {
+    scamp_thresh <- 2200
+    textsize <- 4
+
+    pdata <- data_attimo %>%
+        left_join(select(data_scamp_gpu, dataset, window = w, time_scamp_gpu_s = time_s)) %>%
+        filter(motifs == 10) %>%
+        filter((repetitions == 400) | (dataset == "Seismic") | (dataset == "Whales")) %>%
+        group_by(dataset, window) %>%
+        slice_min(time_s) %>%
+        ungroup() %>%
+        as_tbl_json(json.column = "motif_pairs") %>%
+        gather_array() %>%
+        spread_all() %>%
+        rename(motif_idx = array.index) %>%
+        as_tibble() %>%
+        select(dataset, window, time_s, time_scamp_gpu_s, dist, motif_idx, confirmation_time, preprocessing) %>%
+        mutate(
+            time_scamp_s_hline = if_else(
+                (time_scamp_gpu_s < scamp_thresh) & (motif_idx == 1),
+                time_scamp_gpu_s,
+                as.double(NA)
+            ),
+            time_scamp_s_label = if_else(
+                time_scamp_gpu_s >= scamp_thresh & (motif_idx == 1),
+                time_scamp_gpu_s,
+                as.double(NA)
+            ),
+            label_just = if_else(
+                time_scamp_gpu_s >= 1000 & (motif_idx == 1),
+                1,
+                0
+            ),
+            segment_offset = if_else(
+                time_scamp_gpu_s >= 1000 & (motif_idx == 1),
+                -40,
+                40
+            )
+        ) %>%
+        mutate(
+            confirmation_time = as.numeric(confirmation_time),
+            preprocessing = as.numeric(preprocessing)
+        )  %>%
+        inner_join(dataset_info()) %>%
+        mutate(
+            dataset = fct_reorder(dataset, n)
+        )
+
+    maxval <- pdata %>% summarise(max(time_s)) %>% pull()
+
+    bars <- ggplot(pdata, aes(y = confirmation_time, x = 0)) +
+        geom_segment(
+            mapping = aes(yend = time_s, y = 0, xend = 0),
+            color = "lightgray",
+            size = 1,
+            data = function(d) {
+                group_by(d, dataset) %>% slice(1)
+            },
+        ) +
+        geom_segment(
+            mapping = aes(yend = preprocessing, y = 0, xend = 0),
+            color = "#f78a36",
+            size = 3,
+            # alpha = 0.3,
+            data = function(d) {
+                group_by(d, dataset) %>% slice(1)
+            },
+        ) +
+        geom_point(shape="|", size = 2) +
+        geom_segment(
+            aes(y = time_scamp_s_hline, yend = time_scamp_s_hline),
+            x = 0,
+            xend = -0.9,
+            linetype = "solid",
+            color = "gray40",
+            size = 0.3,
+        ) +
+        geom_segment(
+            aes(y = time_scamp_s_hline, yend = time_scamp_s_hline + segment_offset),
+            x = -0.9,
+            xend = -0.9,
+            linetype = "solid",
+            color = "gray40",
+            size = 0.3,
+        ) +
+        geom_text(
+            aes(
+                label = scales::number(
+                    time_scamp_s_hline,
+                    accuracy = 1,
+                    prefix = "Scamp-gpu: ",
+                    suffix = " s",
+                ),
+                hjust = label_just,
+                x = -0.8,
+                y = time_scamp_s_hline + segment_offset
+            ),
+            color = "gray40",
+            size = textsize,
+            vjust = 0
+        ) +
+        geom_text(
+            aes(
+                label = scales::number(
+                    time_scamp_s_label,
+                    accuracy = 1,
+                    prefix = "Scamp-gpu: ",
+                    suffix = " s →"
+                ),
+                x = dist # * 1.2
+            ),
+            # y = 500,
+            y = maxval,
+            size = textsize,
+            hjust = 1,
+            vjust = 0
+        ) +
+        geom_text(
+            aes(label = dataset, x=0),
+            y = 0,
+            nudge_x = 0.8,
+            size = textsize,
+            hjust = 0
+        ) +
+        scale_y_continuous(limits = c(0, NA)) +
+        scale_x_continuous(limits = c(-1, 1)) +
+        facet_wrap(vars(dataset), ncol = 1, scales = "free_y", strip.position = "left") +
+        labs(
+            x = "",
+            y = "time (s)"
+        ) +
+        coord_flip(clip='off') +
+        theme_paper() +
+        theme(
+            axis.line.y = element_blank(),
+            axis.text.y = element_blank(),
+            axis.title.y = element_blank(),
+            axis.ticks.y = element_blank(),
+            # axis.line.x = element_blank(),
+            # axis.text.x = element_blank(),
+            # axis.ticks.x = element_blank(),
+            strip.text = element_blank(),
+            panel.spacing = unit(2, "mm")
+        )
+
+    bars
+}
+
 
 
 plot_distributions <- function(data_measures, data_distances) {
