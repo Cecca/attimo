@@ -8,17 +8,14 @@ import sqlite3
 import os
 import socket
 import multiprocessing
-import psutil
 
 HOSTNAME = socket.gethostname()
 NUM_CPUS = multiprocessing.cpu_count()
 
-SCAMP_EXE = './SCAMP-' + HOSTNAME
-LL_EXE = './LL-' + HOSTNAME
 
 def install_scamp():
     try:
-        if sp.run([SCAMP_EXE, "--version"]).returncode == 0:
+        if sp.run(["./SCAMP", "--version"]).returncode == 0:
             return
     except:
         print("Installing SCAMP....")
@@ -29,8 +26,7 @@ def install_scamp():
             ("mkdir build"                                          , "/tmp/SCAMP"),
             ("cmake .."                                             , "/tmp/SCAMP/build"),
             ("cmake --build . --config Release"                     , "/tmp/SCAMP/build"),
-            ("cp /tmp/SCAMP/build/SCAMP {}".format(SCAMP_EXE)       , "."),
-            ("rm -rf /tmp/SCAMP"                                    , ".")
+            ("cp /tmp/SCAMP/build/SCAMP ."                          , "."),
         ]
         for cmd, d in commands:
             sp.run(shlex.split(cmd), cwd=d).check_returncode()
@@ -50,7 +46,7 @@ def install_prescrimp():
             sp.run(shlex.split(cmd), cwd=d).check_returncode()
 
 def install_ll():
-    if os.path.isfile(LL_EXE):
+    if os.path.isfile("./LL"):
         return
     else:
         print("Installing LL....")
@@ -58,8 +54,7 @@ def install_ll():
             ("git clone https://github.com/xiaoshengli/LL.git /tmp/LL"  , "/tmp"),
             ("git checkout 6a20ec1"                                     , "/tmp/LL"),
             ("g++ -O3 -o LL LL.cpp -std=c++11"                          , "/tmp/LL"),
-            ("cp /tmp/LL/LL {}".format(LL_EXE)                          , "."),
-            ("rm -rf /tmp/LL"                                           , ".")
+            ("cp /tmp/LL/LL ."                                          , "."),
         ]
         for cmd, d in commands:
             sp.run(shlex.split(cmd), cwd=d).check_returncode()
@@ -157,62 +152,12 @@ def get_db():
             motif_pairs  TEXT
         )
         """)
-        db.execute("PRAGMA user_version = 4;")
+        db.execute("PRAGMA user_version = 3;")
         print("  Bump version to 4")
-    if dbver < 5:
-        db.execute("""
-        CREATE TABLE IF NOT EXISTS projection (
-            hostname     TEXT,
-            dataset      TEXT,
-            window       INT,
-            motifs       INT,
-            paa          INT,
-            alphabet     INT,
-            repetitions  INT,
-            k            INT,
-            seed         INT,
-            time_s       REAL,
-            outcome      TEXT,  -- one of 'ok', 'timeout', 'fail'
-            motif_pairs  TEXT
-        )
-        """)
-        db.execute("PRAGMA user_version = 5;")
-        print("  Bump version to 5")
-    if dbver < 6:
-        db.executescript("""
-        ALTER TABLE scamp ADD COLUMN max_mem_bytes;
-        ALTER TABLE prescrimp ADD COLUMN max_mem_bytes;
-        ALTER TABLE ll ADD COLUMN max_mem_bytes;
-        ALTER TABLE projection ADD COLUMN max_mem_bytes;
-        PRAGMA user_version = 6;
-        """)
-        print("  Bump version to 6")
     
     print("Database initialized")
 
     return db
-
-
-def run(cmdline, stdout=None, timeout=None):
-    """Run the given command, and return the maximum memory in bytes used by the child process, along with the outcome (one of "ok", "timeout", or "crash")"""
-    mem = 0
-    start = time.time()
-    try:
-        child = sp.Popen(cmdline, stdout)
-        p = psutil.Process(child.pid)
-        while child.poll() is None:
-            time.sleep(0.5)
-            m = p.memory_info().rss
-            mem = max(mem, m)
-            if timeout is not None and time.time() > start + timeout:
-                child.kill()
-                return mem, "timeout"
-            retcode = child.poll()
-        assert child.returncode == 0
-        outcome = "ok"
-    except sp.CalledProcessError:
-        outcome = "crash"
-    return mem, outcome
 
 
 def prefix(path, n):
@@ -226,13 +171,12 @@ def prefix(path, n):
 
 def get_datasets():
     return [
-        # ("data/ASTRO.csv.gz", 100),
-        # ("data/GAP.csv.gz", 600),
-        # ("data/freezer.txt.gz", 5000),
-        # ("data/ECG.csv.gz", 1000),
-        # ("data/HumanY.txt.gz", 18000),
-        ("data/Whales-amplitude-noised.txt.gz", 140)
-        # ("data/VCAB_noised.txt.gz", 100)
+        ("data/GAP.csv.gz", 600),
+        ## ("data/EMG.csv", 500),
+        ("data/freezer.txt.gz", 5000),
+        ("data/ASTRO.csv.gz", 100),
+        ("data/ECG.csv.gz", 1000),
+        ("data/HumanY.txt.gz", 18000),
         # (prefix("data/VCAB_BP2_580_days.txt", 100000000), 100)
     ]
 
@@ -366,8 +310,8 @@ def run_attimo():
     threads = NUM_CPUS
     delta = 0.01
     for seed in [14514]:#, 1346, 2524]:
-        for repetitions in [100]:#, 200, 400, 800, 1600]:
-            for motifs in [10, 1]:
+        for repetitions in [50]:
+            for motifs in [10]:
                 for dataset, window in datasets:
                     print("==== Looking for", motifs, "in", dataset,
                           "window",window, "with repetitions", repetitions)
@@ -533,11 +477,6 @@ def run_ll():
     threads = NUM_CPUS
     grids = 4
     for dataset, window in datasets:
-        if dataset.endswith('.gz'):
-            if not os.path.isfile(dataset.replace('.gz', '')):
-                sp.run(['gunzip', '--keep', dataset])
-            dataset = dataset.replace('.gz','')
-
         execid = db.execute("""
             SELECT rowid from ll
             where hostname=:hostname
@@ -558,22 +497,21 @@ def run_ll():
             print("Experiment already executed (ll id={})".format(execid[0]))
             continue
 
-
         print(f"running on {dataset} with w={window} and {threads} threads... ")
         start = time.time()
-        mem, outcome = run([
-            LL_EXE,
+        sp.run([
+            "./LL", 
             dataset,
             str(wc(dataset)),
             str(window),
             str(grids)
-        ], stdout=sp.DEVNULL)
+        ], stdout=sp.DEVNULL).check_returncode()
         end = time.time()
         elapsed = end - start
         print(f"{elapsed} seconds")
 
         db.execute("""
-        INSERT INTO ll VALUES (:hostname,:dataset,:threads,:window,:grids,:elapsed,:max_mem_bytes);
+            INSERT INTO ll VALUES (:hostname,:dataset,:threads,:window,:grids,:elapsed);
             """,
             {
                 "hostname": HOSTNAME,
@@ -581,8 +519,7 @@ def run_ll():
                 "threads": threads,
                 "window": window,
                 "grids": grids,
-                "elapsed": elapsed,
-                "max_mem_bytes": mem
+                "elapsed": elapsed
             }
         )
 
@@ -615,7 +552,7 @@ def run_prescrimp():
 
         print(f"running PreSCRIMP on {dataset} with w={window} and stepsize={stepsize}... ")
         start = time.time()
-        mem_bytes, outcome = run([
+        sp.run([
             "cargo", 
             "run",
             "--release",
@@ -627,7 +564,7 @@ def run_prescrimp():
             "--skip", str(stepsize),
             "--motifs", str(motifs),
             "--output", "/tmp/prescrimp.csv"
-        ])
+        ]).check_returncode()
         end = time.time()
         elapsed = end - start
         print(f"{elapsed} seconds")
@@ -635,7 +572,7 @@ def run_prescrimp():
         os.remove("/tmp/prescrimp.csv")
 
         db.execute("""
-        INSERT INTO prescrimp VALUES (:hostname,:dataset,:window,:motifs,:stepsize,:elapsed,:motif_pairs,:max_mem_bytes);
+        INSERT INTO prescrimp VALUES (:hostname,:dataset,:window,:motifs,:stepsize,:elapsed,:motif_pairs);
             """,
             {
                 "hostname": HOSTNAME,
@@ -644,101 +581,10 @@ def run_prescrimp():
                 "motifs": motifs,
                 "stepsize": stepsize,
                 "elapsed": elapsed,
-                "motif_pairs": motif_pairs,
-                "max_mem_bytes": mem_bytes
+                "motif_pairs": motif_pairs
             }
         )
 
-
-def run_projection():
-    sp.run(["cargo", "build", "--release", "--example", "ChiuKL"])
-    db = get_db()
-    datasets = get_datasets()
-    stepsize = 0.25
-    motifs = 10
-    alphabet = 6
-    repetitions = 50
-    seed = 1234
-    for k in [5,4,3]:
-        for dataset, window in datasets:
-            paa = window // 10
-            execid = db.execute("""
-                SELECT rowid from projection
-                where hostname=:hostname
-                  and dataset=:dataset
-                  and window=:window
-                  and paa=:paa
-                  and repetitions=:repetitions
-                  and alphabet=:alphabet
-                  and seed=:seed
-                  and k=:k
-                  and motifs=:motifs
-                """,
-                {
-                    "hostname": HOSTNAME,
-                    "dataset": dataset,
-                    "window": window,
-                    "motifs": motifs,
-                    "repetitions": repetitions,
-                    "paa": paa,
-                    "alphabet": alphabet,
-                    "k": k,
-                    "seed": seed
-                }
-            ).fetchone()
-            if execid is not None:
-                print("Experiment already executed (projection id={})".format(execid[0]))
-                continue
-
-            print(f"running Projection on {dataset} with w={window} and stepsize={stepsize}... ")
-            start = time.time()
-            mem_bytes, outcome = run([
-                "cargo", 
-                "run",
-                "--release",
-                "--example",
-                "ChiuKL",
-                "--",
-                dataset,
-                "--window", str(window),
-                "--paa", str(paa),
-                "--k", str(k),
-                "--seed", str(seed),
-                "--repetitions", str(repetitions),
-                "--alphabet", str(alphabet),
-                "--motifs", str(motifs),
-                "--output", "/tmp/projection.csv"
-            ], timeout=3600)
-            end = time.time()
-            elapsed = end - start
-            print(f"{elapsed} seconds, outcome {outcome}")
-            if outcome == "ok":
-                motif_pairs = pd.read_csv('/tmp/projection.csv', names=['a', 'b','dist', 'confirmation_time']).to_json(orient='records')
-            else:
-                motif_pairs = None
-            if os.path.isfile("/tmp/projection.csv"):
-                os.remove("/tmp/projection.csv")
-
-
-            db.execute("""
-            INSERT INTO projection VALUES (:hostname,:dataset,:window,:motifs,:paa,:alphabet,:repetitions,:k,:seed,:elapsed,:outcome,:motif_pairs,:max_mem_bytes);
-                """,
-                {
-                    "hostname": HOSTNAME,
-                    "dataset": dataset,
-                    "window": window,
-                    "motifs": motifs,
-                    "repetitions": repetitions,
-                    "paa": paa,
-                    "alphabet": alphabet,
-                    "k": k,
-                    "seed": seed,
-                    "elapsed": elapsed,
-                    "outcome": outcome,
-                    "motif_pairs": motif_pairs,
-                    "max_mem_bytes": mem_bytes
-                }
-            )
 
 
 
@@ -748,11 +594,6 @@ def run_scamp():
     datasets = get_datasets()
     threads = NUM_CPUS
     for dataset, window in datasets:
-        if dataset.endswith('.gz'):
-            if not os.path.isfile(dataset.replace('.gz', '')):
-                sp.run(['gunzip', '--keep', dataset])
-            dataset = dataset.replace('.gz','')
-
         execid = db.execute("""
             SELECT rowid from scamp
             where hostname=:hostname
@@ -773,35 +614,31 @@ def run_scamp():
 
         print(f"running on {dataset} with w={window} and {threads} threads... ")
         start = time.time()
-        mem_bytes, outcome = run([
-            SCAMP_EXE,
+        sp.run([
+            "./SCAMP", 
             "--window={}".format(str(window)), 
             "--input_a_file_name={}".format(dataset),
-            "--no_gpu", # we want to measure the time without the GPU, only using the CPU
             "--num_cpu_workers={}".format(threads)
-        ])
-        print('memory is', mem_bytes)
-        assert outcome == 'ok'
+        ]).check_returncode()
         end = time.time()
         elapsed = end - start
         print(f"{elapsed} seconds")
-        # dists = np.loadtxt('mp_columns_out')
-        # idxs  = np.loadtxt('mp_columns_out_index')
-        # df = pd.DataFrame({
-        #     "a": np.arange(len(idxs)),
-        #     "b": idxs.astype('int'),
-        #     "dist": dists
-        # }).sort_values('dist')
-        # df = df[df['a'] < df['b']]
-        # df = remove_trivial(df, window)
-        # motifs = df.head(100)[['a', 'b', 'dist']].to_json(orient='records')
-        motifs = '{}' # don't collect the motifs, we don't use this information
+        dists = np.loadtxt('mp_columns_out')
+        idxs  = np.loadtxt('mp_columns_out_index')
+        df = pd.DataFrame({
+            "a": np.arange(len(idxs)),
+            "b": idxs.astype('int'),
+            "dist": dists
+        }).sort_values('dist')
+        df = df[df['a'] < df['b']]
+        df = remove_trivial(df, window)
+        motifs = df.head(100)[['a', 'b', 'dist']].to_json(orient='records')
 
-        # os.remove("mp_columns_out")
-        # os.remove("mp_columns_out_index")
+        os.remove("mp_columns_out")
+        os.remove("mp_columns_out_index")
 
         db.execute("""
-        INSERT INTO scamp VALUES (:hostname,:dataset,:threads,:window,:elapsed,:motifs,:max_mem_bytes);
+            INSERT INTO scamp VALUES (:hostname,:dataset,:threads,:window,:elapsed,:motifs);
             """,
             {
                 "hostname": HOSTNAME,
@@ -809,8 +646,7 @@ def run_scamp():
                 "threads": threads,
                 "window": window,
                 "elapsed": elapsed,
-                "motifs": motifs,
-                "max_mem_bytes": mem_bytes
+                "motifs": motifs
             }
         )
 
@@ -923,10 +759,9 @@ def scalability_attimo():
 
 if __name__ == "__main__":
     # scalability_attimo()
-    run_attimo()
+    # run_attimo()
     # run_attimo_recall()
     # run_scamp()
-    # run_projection()
     run_prescrimp()
     # run_ll()
     # run_mk()
