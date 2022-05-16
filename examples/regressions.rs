@@ -37,7 +37,7 @@ fn run(path: &str, w: usize, topk: usize, reps: usize, runs: usize, csv: &str) -
     let ts = WindowedTimeseries::new(loadts("data/ECG.csv.gz", None)?, 1000, false);
     for _ in 0..runs {
         let timer = Instant::now();
-        motifs(&ts, 10, 200, 0.01, None, None, 1234);
+        motifs(&ts, 10, 200, 0.01, None, None, 1234, Instant::now());
         writeln!(
             f,
             "{},{},{},{},{},{},{},{}",

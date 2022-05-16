@@ -1,5 +1,6 @@
 use crate::distance::{zdot, zeucl};
 use rand_distr::num_traits::Zero;
+use rayon::prelude::*;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::{cell::RefCell, convert::TryFrom, fmt::Display, sync::Arc, time::Instant};
 use thread_local::ThreadLocal;
@@ -148,6 +149,72 @@ impl WindowedTimeseries {
         }
     }
 
+    pub fn sliding_dot_product_par(
+        &self,
+        fft_data: &FFTData,
+        v: &[f64],
+        out: &mut [f64]
+    ) {
+        assert!(out.len() == self.num_subsequences());
+        assert!(v.len() == self.w);
+
+        let stride = fft_data.fft_length - self.w;
+
+        let fftfun = Arc::clone(&fft_data.fftfun);
+        let ifftfun = Arc::clone(&fft_data.ifftfun);
+        let fft_length = fft_data.fft_length;
+
+        //// Iterate over the chunks
+        fft_data.fft_chunks.par_iter().zip(out.par_chunks_mut(stride)).enumerate().for_each(|(chunk_idx, (chunk, out_chunk))| {
+            let mut scratch = fft_data
+                .scratch
+                .get_or(|| {
+                    RefCell::new(vec![
+                        Complex::zero();
+                        fft_data.ifftfun.get_inplace_scratch_len()
+                    ])
+                })
+                .borrow_mut();
+            let mut vfft = fft_data
+                .buf_vfft
+                .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
+                .borrow_mut();
+            vfft.fill(Complex::zero());
+            for (i, &x) in v.iter().enumerate() {
+                vfft[self.w - i - 1] = Complex {
+                    re: x as f64,
+                    im: 0.0,
+                };
+            }
+            fftfun
+                .process_with_scratch(&mut vfft, &mut scratch);
+
+            let mut ivfft = fft_data
+                .buf_ivfft
+                .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
+                .borrow_mut();
+            ivfft.fill(Complex::zero());
+            //// Then compute the element-wise multiplication between the dot products, inplace
+            for i in 0..fft_data.fft_length {
+                ivfft[i] = vfft[i] * chunk[i];
+            }
+
+            //// And go back to the time domain
+            ifftfun
+                .process_with_scratch(&mut ivfft, &mut scratch);
+
+            let offset = chunk_idx * stride;
+            for i in 0..(fft_length - self.w) {
+                if i + offset < self.num_subsequences() {
+                    let val = (ivfft[(i + v.len() - 1) % fft_length].re
+                        / fft_length as f64) as f64;
+                    out_chunk[i] = val;
+                }
+            }
+        });
+    }
+
+
     pub fn sliding_dot_product(&self, fft_data: &FFTData, v: &[f64], output: &mut [f64]) {
         self.sliding_dot_product_for_each(fft_data, v, |i, v| output[i] = v);
     }
@@ -206,6 +273,34 @@ impl WindowedTimeseries {
             self.znormalized(i, &mut buffer);
             output[i] = dot(&v, &buffer);
         }
+    }
+
+    pub fn distance_profile_par(
+        &self,
+        fft_data: &FFTData,
+        from: usize,
+        out: &mut [f64],
+        buf: &mut [f64],
+    ) {
+        assert!(out.len() == self.num_subsequences());
+        assert!(buf.len() == self.w);
+        self.znormalized(from, buf);
+        self.sliding_dot_product_par(fft_data, buf, out);
+
+        let sumv: f64 = buf.iter().sum();
+
+        out.par_iter_mut().enumerate().for_each(|(i, v)| {
+            if i == from {
+                *v = 0.0;
+            } else {
+                let m = self.mean(i);
+                let sd = self.sd(i);
+                let d = *v / sd - sumv * m / sd; // z-normalize
+                // dbg!((i, &v, d, self.w));
+                *v = (2.0 * self.w as f64 - 2.0 * d).sqrt();
+            }
+        });
+
     }
 
     pub fn distance_profile(
@@ -541,24 +636,30 @@ mod test {
                     let v: Vec<f64> = rng.sample_iter(StandardNormal).take(w).collect();
                     let mut expected = vec![0.0; ts.num_subsequences()];
                     let mut actual = vec![0.0; ts.num_subsequences()];
+                    let mut actual_par = vec![0.0; ts.num_subsequences()];
 
                     ts.sliding_dot_product_slow(&v, &mut expected);
                     ts.sliding_dot_product(&fft_data, &v, &mut actual);
+                    ts.sliding_dot_product_par(&fft_data, &v, &mut actual_par);
                     // dump_vec(format!("/tmp/sliding-expected-{}-{}.txt", n, w), &expected);
                     // dump_vec(format!("/tmp/sliding-actual-{}-{}.txt", n, w), &actual);
 
-                    for (e, a) in expected.into_iter().zip(actual) {
+                    for (e, a) in expected.iter().zip(actual) {
                         assert!(
-                            (e - a).abs() <= 0.000000001,
+                            (*e - a).abs() <= 0.000000001,
                             "{} != {} (expected != actual)",
                             e,
                             a
                         );
                     }
-                    // assert!(expected
-                    //     .into_iter()
-                    //     .zip(actual.into_iter())
-                    //     .all(|(e, a)| (e - a).abs() <= 0.0000001));
+                    for (e, a) in expected.into_iter().zip(actual_par) {
+                        assert!(
+                            (e - a).abs() <= 0.000000001,
+                            "{} != {} (expected != actual_par)",
+                            e,
+                            a
+                        );
+                    }
                 }
             }
         }
@@ -666,14 +767,19 @@ mod test {
         let fft_data = FFTData::new(&ts);
 
         let mut actual = vec![0.0; ts.num_subsequences()];
+        let mut actual_par = vec![0.0; ts.num_subsequences()];
         let mut buf = vec![0.0; w];
 
         ts.distance_profile(&fft_data, 0, &mut actual, &mut buf);
+        ts.distance_profile_par(&fft_data, 0, &mut actual_par, &mut buf);
         let expected = ts.distance_profile_slow(0, zeucl);
 
         assert_eq!(actual.len(), expected.len());
         for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
             assert!((a - e).abs() < 0.00000000001, "[{}] a = {} e = {}", i, a, e);
+        }
+        for (i, (a, e)) in actual_par.iter().zip(expected.iter()).enumerate() {
+            assert!((a - e).abs() < 0.00000000001, "[{}] a_par = {} e = {}", i, a, e);
         }
     }
 }

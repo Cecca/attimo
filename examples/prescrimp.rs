@@ -7,10 +7,16 @@ use attimo::timeseries::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::cell::RefCell;
-use std::time::Instant;
+use std::sync::atomic::AtomicUsize;
+use std::time::{Instant, Duration};
 use thread_local::ThreadLocal;
+use attimo::allocator::*;
+
+#[global_allocator]
+static A: CountingAllocator = CountingAllocator;
 
 fn seq_by(min: usize, max: usize, by: usize) -> Vec<usize> {
+    eprintln!("    Getting sequence of diagonals");
     let mut i = min;
     let res: Vec<usize> = if by == 1 {
         (min..max).collect()
@@ -40,21 +46,24 @@ fn dotp_to_zeucl(w: usize, q: f64, ma: f64, mb: f64, sa: f64, sb: f64) -> f64 {
 
 struct MatrixProfile {
     dists: Vec<f64>,
-    indices: Vec<usize>,
+    indices: Vec<u32>,
 }
 
 impl MatrixProfile {
     fn new(n: usize) -> Self {
+        let size_dists = PrettyBytes(8 * n);
+        let size_indices = PrettyBytes(4 * n);
+        eprintln!(" Allocating matrixprofile: dists {size_dists} indices {size_indices}");
         Self {
             dists: vec![f64::INFINITY; n],
-            indices: vec![0; n],
+            indices: vec![0u32; n],
         }
     }
 
-    fn iter_mut(&mut self) -> impl Iterator<Item = (&mut f64, &mut usize)> {
+    fn iter_mut(&mut self) -> impl Iterator<Item = (&mut f64, &mut u32)> {
         self.dists.iter_mut().zip(self.indices.iter_mut())
     }
-    fn iter(&self) -> impl Iterator<Item = (&f64, &usize)> {
+    fn iter(&self) -> impl Iterator<Item = (&f64, &u32)> {
         self.dists.iter().zip(self.indices.iter())
     }
 }
@@ -68,13 +77,15 @@ fn pre_scrimp(
     s: usize,
     exclusion_zone: usize,
     mp: &mut [f64],
-    indices: &mut [usize],
+    indices: &mut [u32],
     fft_data: &FFTData,
-) {
+) -> usize {
     // note that here we are considering sequences which are s > ts.w apart, so
     // we have no trivial matches
     let ns = ts.num_subsequences();
     let w = ts.w;
+
+    let g_cnt_dists = AtomicUsize::new(0);
 
     let tl_mp = ThreadLocal::new();
     let tl_dists = ThreadLocal::new();
@@ -88,7 +99,8 @@ fn pre_scrimp(
 
     // We don't shuffle the indices, since we are not going to stop pre_scrimp
     // arbitrarily. This saves a a little time.
-    seq_by(0, ns, s).into_par_iter().for_each(|i| {
+    seq_by(0, ns, s).into_iter().for_each(|i| {
+        let mut cnt_dists = 0;
         let mut mp = tl_mp
             .get_or(|| RefCell::new(MatrixProfile::new(ns)))
             .borrow_mut();
@@ -96,20 +108,26 @@ fn pre_scrimp(
             .get_or(|| RefCell::new(vec![0.0; ts.num_subsequences()]))
             .borrow_mut();
         let mut buf = tl_buf.get_or(|| RefCell::new(vec![0.0; ts.w])).borrow_mut();
-        ts.distance_profile(fft_data, i, &mut dists, &mut buf);
+        let t_dist_prof = Instant::now();
+        ts.distance_profile_par(fft_data, i, &mut dists, &mut buf);
+        let d_dist_prof = t_dist_prof.elapsed();
+        let alloc = allocated();
+        // eprintln!("  distance profile {d_dist_prof:?}, {alloc} bytes");
+        cnt_dists += ts.num_subsequences();
 
+        let t_adjust = Instant::now();
         // update the running matrix profile
         // for (j, ((mp_val, index_val), dp_val)) in mp.dists.iter_mut().zip(mp.indices.iter_mut()).zip(dists.iter()).enumerate() {
         for (j, ((mp_val, index_val), dp_val)) in mp.iter_mut().zip(dists.iter()).enumerate() {
             if (i as isize - j as isize).abs() >= exclusion_zone as isize && *dp_val < *mp_val {
                 *mp_val = *dp_val;
-                *index_val = i;
+                *index_val = i as u32;
             }
         }
 
         // nearest neighbor index, excluding trivial matches
         let (j, d) = dists
-            .iter()
+            .par_iter()
             .enumerate()
             .filter(|(j, _)| (*j as isize - i as isize).abs() >= exclusion_zone as isize)
             .min_by(|p1, p2| p1.1.partial_cmp(p2.1).unwrap())
@@ -148,13 +166,14 @@ fn pre_scrimp(
                 "dotp_to_zeucl: actual {} expected {}",
                 d, zeucl(ts, i+k, j+k)
             );
+            cnt_dists += 1;
             if d < mp.dists[i + k] {
                 mp.dists[i + k] = d;
-                mp.indices[i + k] = j + k;
+                mp.indices[i + k] = (j + k) as u32;
             }
             if d < mp.dists[j + k] {
                 mp.dists[j + k] = d;
-                mp.indices[j + k] = i + k;
+                mp.indices[j + k] = (i + k) as u32;
             }
         }
 
@@ -183,15 +202,21 @@ fn pre_scrimp(
                 "dotp_to_zeucl: actual {} expected {}",
                 d, zeucl(ts, i-k, j-k)
             );
+            cnt_dists += 1;
             if d < mp.dists[i - k] {
                 mp.dists[i - k] = d;
-                mp.indices[i - k] = j - k;
+                mp.indices[i - k] = (j - k) as u32;
             }
             if d < mp.dists[j - k] {
                 mp.dists[j - k] = d;
-                mp.indices[j - k] = i - k;
+                mp.indices[j - k] = (i - k) as u32;
             }
         }
+
+        g_cnt_dists.fetch_add(cnt_dists, std::sync::atomic::Ordering::SeqCst);
+
+        let d_adjust = t_adjust.elapsed();
+        // eprintln!("  adjustments {d_adjust:?}");
         pbar.inc(1);
     });
     pbar.finish_and_clear();
@@ -208,6 +233,8 @@ fn pre_scrimp(
             }
         }
     });
+
+    g_cnt_dists.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Compute the approximate matrix profile using SCRIMP++
@@ -281,17 +308,20 @@ fn main() -> Result<()> {
 
     let timer = Instant::now();
     let mut mp = vec![f64::INFINITY; ts.num_subsequences()];
-    let mut indices = vec![0; ts.num_subsequences()];
+    let mut indices = vec![0u32; ts.num_subsequences()];
 
     eprintln!("Running PreSCRIMP");
-    pre_scrimp(&ts, s, exclusion_zone, &mut mp, &mut indices, &fft_data);
+    let computed_distances = pre_scrimp(&ts, s, exclusion_zone, &mut mp, &mut indices, &fft_data);
+    eprintln!("Computed {computed_distances} distances");
 
     eprintln!("Getting motifs");
     let mut topk = TopK::new(args.motifs, exclusion_zone);
     for (i, (j, d)) in indices.iter().zip(mp.iter()).enumerate() {
+        let i = i as usize;
+        let j = *j as usize;
         let m = Motif {
-            idx_a: std::cmp::min(i, *j),
-            idx_b: std::cmp::max(i, *j),
+            idx_a: std::cmp::min(i, j),
+            idx_b: std::cmp::max(i, j),
             distance: *d,
             elapsed: None,
         };
