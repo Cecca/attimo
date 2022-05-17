@@ -39,23 +39,43 @@ list(
         data_rproj,
         load_rproj()
     ),
-    # tar_target(
-    #     data_scalability,
-    #     bind_rows(
-    #         data_attimo %>%
-    #             filter(!is.na(perc_size)) %>%
-    #             filter(delta == 0.01) %>%
-    #             select(algorithm, dataset, perc_size, time_s),
-    #         data_scamp %>%
-    #             filter(!is.na(perc_size)) %>%
-    #             select(algorithm, dataset, perc_size, time_s),
-    #         read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
-    #             fix_names() %>%
-    #             add_prefix_info() %>%
-    #             mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
-    #             select(algorithm, dataset, perc_size, time_s)
-    #     )
-    # ),
+    tar_target(
+        data_scalability,
+        bind_rows(
+            data_attimo %>%
+                filter(!is.na(perc_size)) %>%
+                filter(delta == 0.01) %>%
+                select(algorithm, dataset, perc_size, time_s),
+            data_scamp %>%
+                filter(!is.na(perc_size)) %>%
+                select(algorithm, dataset, perc_size, time_s),
+            read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
+                fix_names() %>%
+                add_prefix_info() %>%
+                mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
+                select(algorithm, dataset, perc_size, time_s)
+        )
+    ),
+    tar_target(
+        # A model for the performance of SCAMP, fitting a quadratic polynomial
+        scamp_model,
+        lm(time_s ~ poly(n, 2), drop_na(select(data_scamp, n, time_s)))
+    ),
+    tar_target(
+        data_scamp_gpu_scalability,
+        read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
+            fix_names() %>%
+            add_prefix_info() %>%
+            mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
+            select(algorithm, dataset, perc_size, time_s) %>%
+            inner_join(dataset_info()) %>%
+            mutate(scaled_n = perc_size * n)
+    ),
+    tar_target(
+        # A model for the performance of SCAMP-gpu, fitting a quadratic polynomial
+        scamp_gpu_model,
+        lm(time_s ~ poly(scaled_n, 2), data_scamp_gpu_scalability)
+    ),
     tar_target(
         data_gpucluster,
         read_csv("gpucluster.csv") %>%
@@ -122,7 +142,7 @@ list(
         img_motifs_10,
         ggsave(
             "imgs/10-motifs.png",
-            plot = plot_motifs_10_alt2(filter(data_attimo, delta == delta_val), 
+            plot = plot_motifs_10_alt3(filter(data_attimo, delta == delta_val), 
                                        data_scamp, 
                                        data_gpucluster,
                                        data_measures),
