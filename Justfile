@@ -3,7 +3,7 @@ all: copy
 # sync data from the remote machine where experiments have been run
 sync:
         rsync --progress gpucluster:attimo-rs/attimo-results.db .
-        rm _targets/objects/data_{attimo,prescrimp,scamp,ll}
+        rm _targets/objects/data_{attimo,prescrimp,scamp,scamp_gpu,ll}
 
 # run the R code for the analysis
 analysis:

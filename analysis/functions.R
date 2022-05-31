@@ -8,6 +8,22 @@ theme_paper <- function() {
         )
 }
 
+fmt_duration <- function(d_secs) {
+    inner <- function(d_secs) {
+        scaling <- c(
+            "s" = 1,
+            "m" = 60,
+            "h" = 60*60,
+            "days" = 60*60*24,
+            "years" = 60*60*24*365
+        )
+        scaled <- d_secs / scaling
+        lastentry <- tail(scaled[scaled >= 1], 1)
+        str_c(scales::number(lastentry, accuracy = 0.1), names(lastentry), sep=" ")
+    }
+    sapply(d_secs, inner)
+}
+
 dataset_info <- function() {
     tribble(
         ~dataset, ~n, ~avg_dist, ~window,
@@ -53,7 +69,16 @@ fix_names <- function(df) {
 reorder_datasets <- function(df) {
     df %>%
         mutate(
-            dataset = factor(dataset, c("freezer", "ASTRO", "GAP", "Seismic", "Whales", "ECG", "HumanY"), ordered = T)
+            dataset = factor(dataset, c(
+                "ASTRO",
+                "GAP",
+                "freezer",
+                "ECG",
+                "HumanY",
+                "Whales",
+                "Seismic"
+            ), 
+            ordered = T)
         )
 }
 
@@ -177,6 +202,8 @@ load_rproj <- function() {
     tbl
 }
 
+# The original prescrimp implementation takes 72 minutes on GAP, 
+# with the same parameterization we use.
 load_prescrimp <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "prescrimp") %>%
@@ -221,6 +248,52 @@ load_prescrimp <- function() {
     bind_rows(tbl_measured, predictions)
 }
 
+load_scamp_gpu <- function() {
+    conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
+    tbl <- tbl(conn, "scamp_gpu") %>%
+        collect() %>%
+        filter(!str_detect(dataset, "EMG")) %>%
+        fix_names() %>%
+        add_prefix_info() %>%
+        # right_join(allowed_combinations) %>%
+        mutate(algorithm = "scamp-gpu") %>%
+        mutate(max_mem_gb = max_mem_bytes / (1024^3)) %>%
+        reorder_datasets()
+
+    tbl_measured <- tbl %>%
+        filter(is_full_dataset) %>%
+        mutate(is_estimate = F)
+
+    smaller <- tbl %>%
+        filter(!is_full_dataset)
+    models <- smaller %>%
+        group_by(dataset, window) %>%
+        do(
+            model_time_s = lm(time_s ~ poly(prefix, 2), data=.),
+            model_max_mem_gb = lm(max_mem_gb ~ poly(prefix, 1), data=.)
+        )
+
+    predictions <- tbl %>%
+        # Select the combinations for which measurements are missing
+        filter(is_full_dataset) %>%
+        right_join(allowed_combinations) %>%
+        filter(is.na(time_s)) %>%
+        select(dataset) %>%
+        inner_join(models) %>%
+        inner_join(dataset_info()) %>%
+        group_by(dataset, window, n) %>%
+        do(tibble(
+            time_s = predict(.$model_time_s[[1]], tibble(prefix=.$n)),
+            max_mem_gb = predict(.$model_max_mem_gb[[1]], tibble(prefix=.$n)),
+        )) %>%
+        mutate(is_estimate = T, is_full_dataset = T, algorithm = 'scamp-gpu')
+
+
+    DBI::dbDisconnect(conn)
+    bind_rows(tbl_measured, predictions)
+}
+
+
 load_scamp <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "scamp") %>%
@@ -243,7 +316,7 @@ load_scamp <- function() {
         group_by(dataset, window, threads) %>%
         do(
             model_time_s = lm(time_s ~ poly(prefix, 2), data=.),
-            model_max_mem_gb = lm(max_mem_gb ~ poly(prefix, 2), data=.)
+            model_max_mem_gb = lm(max_mem_gb ~ poly(prefix, 1), data=.)
         )
 
     predictions <- tbl %>%
@@ -576,7 +649,7 @@ latex_info <- function(data_motif_measures) {
         write_file("imgs/dataset-info.tex")
 }
 
-get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluster, data_prescrimp, data_rproj) {
+get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_scamp_gpu, data_prescrimp, data_rproj) {
     bind_rows(
         data_attimo %>%
             filter((repetitions == 200) | (dataset == "Seismic") | (dataset == "Whales")) %>%
@@ -604,7 +677,7 @@ get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluste
             data_rproj, algorithm, hostname, dataset, is_full_dataset, window,
             max_mem_gb, time_s
         ),
-        select(data_gpucluster, algorithm, dataset, window = w, time_s) %>% mutate(is_full_dataset = T)
+        select(data_scamp_gpu, algorithm, dataset, window, time_s, max_mem_gb, is_full_dataset, is_estimate)
     ) %>%
         replace_na(list(is_estimate = F)) %>%
         semi_join(allowed_combinations) %>%
@@ -645,10 +718,20 @@ do_tab_time_comparison_normalized <- function(data_comparison) {
 
 do_tab_time_comparison <- function(data_comparison, file_out) {
     data_comparison %>%
+        group_by(dataset) %>%
         mutate(
-            time_s = scales::number(time_s, accuracy = 0.1),
+            is_best = time_s == min(time_s),
+            # time_s = scales::number(time_s, accuracy = 0.1),
+            time_s = if_else(time_s > 2*3600,
+                fmt_duration(time_s),
+                scales::number(time_s, accuracy=0.1)
+            ),
             time_s = if_else(is_estimate,
                 str_c("{\\small(", time_s,")}"),
+                time_s
+            ),
+            time_s = if_else(is_best,
+                str_c("\\underline{", time_s, "}"),
                 time_s
             ),
             mem_overhead_gb = scales::number(max_mem_gb - size_gb, accuracy = 0.1),

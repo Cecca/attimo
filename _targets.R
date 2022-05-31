@@ -28,6 +28,10 @@ list(
         load_scamp()
     ),
     tar_target(
+        data_scamp_gpu,
+        load_scamp_gpu()
+    ),
+    tar_target(
         data_prescrimp,
         load_prescrimp()
     ),
@@ -77,6 +81,7 @@ list(
         lm(time_s ~ poly(scaled_n, 2), data_scamp_gpu_scalability)
     ),
     tar_target(
+        # DEPRECATED
         data_gpucluster,
         read_csv("gpucluster.csv") %>%
             group_by(dataset, w) %>%
@@ -107,7 +112,15 @@ list(
     ),
     tar_target(
         data_comparison,
-        get_data_comparison(filter(data_attimo, delta == delta_val), data_scamp, data_ll, data_gpucluster, data_prescrimp, data_rproj)
+        get_data_comparison(
+            filter(data_attimo, delta == delta_val),
+            data_scamp,
+            data_ll,
+            # data_gpucluster,
+            data_scamp_gpu,
+            data_prescrimp,
+            data_rproj
+        )
     ),
 
     # Figure motifs ------------------------------------------------------------
@@ -132,10 +145,10 @@ list(
         tab_time_comparison,
         do_tab_time_comparison(data_comparison, "imgs/time-comparison.tex")
     ),
-    tar_target(
-        tab_time_comparison_normalized,
-        do_tab_time_comparison_normalized(data_comparison)
-    ),
+    # tar_target(
+    #     tab_time_comparison_normalized,
+    #     do_tab_time_comparison_normalized(data_comparison)
+    # ),
 
     # Figure motifs 10 -----------------------------------------------------
     tar_target(
