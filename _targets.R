@@ -13,6 +13,7 @@ tar_option_set(packages = c(
     "ggrepel",
     "ggbeeswarm",
     "patchwork",
+    "latex2exp",
     "kableExtra"
 ))
 
@@ -45,20 +46,21 @@ list(
     ),
     tar_target(
         data_scalability,
-        bind_rows(
-            data_attimo %>%
-                filter(!is.na(perc_size)) %>%
-                filter(delta == 0.01) %>%
-                select(algorithm, dataset, perc_size, time_s),
-            data_scamp %>%
-                filter(!is.na(perc_size)) %>%
-                select(algorithm, dataset, perc_size, time_s),
-            read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
-                fix_names() %>%
-                add_prefix_info() %>%
-                mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
-                select(algorithm, dataset, perc_size, time_s)
-        )
+        load_scalability()
+        # bind_rows(
+        #     data_attimo %>%
+        #         filter(!is.na(perc_size)) %>%
+        #         filter(delta == 0.01) %>%
+        #         select(algorithm, dataset, perc_size, time_s),
+        #     data_scamp %>%
+        #         filter(!is.na(perc_size)) %>%
+        #         select(algorithm, dataset, perc_size, time_s),
+        #     read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
+        #         fix_names() %>%
+        #         add_prefix_info() %>%
+        #         mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
+        #         select(algorithm, dataset, perc_size, time_s)
+        # )
     ),
     tar_target(
         # A model for the performance of SCAMP, fitting a quadratic polynomial
@@ -130,15 +132,15 @@ list(
     # ),
 
     # Figure scalability -------------------------------------------------------
-    # tar_target(
-    #     img_scalability_n,
-    #     ggsave("imgs/scalability_n.png",
-    #         plot = plot_scalability_n_alt(data_scalability),
-    #         width = 5,
-    #         height = 3,
-    #         dpi = 300
-    #     )
-    # ),
+    tar_target(
+        img_scalability_n,
+        ggsave("imgs/scalability_n.png",
+            plot = plot_scalability_n_alt(data_scalability),
+            width = 5,
+            height = 3,
+            dpi = 300
+        )
+    ),
 
     # Time comparison -----------------------------------------------
     tar_target(
@@ -191,8 +193,9 @@ list(
         ggsave(
             "imgs/repetitions.png",
             plot = fig_repetitions,
-            width = 10,
-            height = 1.7,
+            # width = 10,
+            width = 4.5,
+            height = 3,
             dpi = 300
         )
     ),
