@@ -923,7 +923,8 @@ plot_memory_time <- function(data_attimo) {
             time_s = mean(time_s),
             preprocessing = mean(preprocessing)
         ) %>%
-        group_by(dataset, window) %>%
+        # group_by(dataset, window) %>%
+        inner_join(dataset_info()) %>%
         mutate(
             labelpos = time_s + 0.1 * max(time_s),
             tickpos = -0.1 * max(time_s),
