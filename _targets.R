@@ -159,8 +159,7 @@ list(
             "imgs/10-motifs.png",
             plot = plot_motifs_10_alt3(filter(data_attimo, delta == delta_val), 
                                        data_scamp, 
-                                       data_gpucluster,
-                                       data_measures),
+                                       data_scamp_gpu),
             width = 5,
             height = 5,
             dpi = 300

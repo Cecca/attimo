@@ -704,7 +704,8 @@ get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_scamp_gpu
                 algorithm, hostname, dataset, is_full_dataset, threads, window,
                 repetitions, motifs, delta, time_s, max_mem_gb, distances_fraction
             ) %>% 
-            filter(motifs == 1) %>%
+            filter(motifs == 1) %T>%
+            print() %>%
             group_by(algorithm, hostname, dataset, window) %>%
             slice_min(time_s)
             ,
@@ -912,9 +913,12 @@ dataset_measures <- function(data_attimo) {
 plot_memory_time <- function(data_attimo) {
     data_attimo %>%
         filter(motifs == 10) %>%
-        filter(time_s < 10000) %>%
         filter(dataset != 'Seismic') %>%
+        filter((dataset != 'HumanY') | (repetitions < 800)) %>%
+        group_by(dataset, window) %>%
+        slice_min(time_s, n=5) %>%
         group_by(dataset, window, repetitions) %>%
+        filter(time_s < 10000) %>%
         summarise(
             time_s = mean(time_s),
             preprocessing = mean(preprocessing)
@@ -1150,12 +1154,12 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
     bars
 }
 
-plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu, data_measures) {
-    scamp_thresh <- 2200
+plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu) {
+    scamp_thresh <- 2300
     textsize <- 4
 
     pdata <- data_attimo %>%
-        left_join(select(data_scamp_gpu, dataset, window = w, time_scamp_gpu_s = time_s)) %>%
+        left_join(select(data_scamp_gpu, dataset, window, time_scamp_gpu_s = time_s)) %>%
         filter(motifs == 10) %>%
         filter((repetitions == 400) | (dataset == "Seismic") | (dataset == "Whales")) %>%
         group_by(dataset, window) %>%
@@ -1199,11 +1203,23 @@ plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
         )
 
     maxval <- pdata %>% summarise(max(time_s)) %>% pull()
+    maxval <- scamp_thresh
 
     bars <- ggplot(pdata, aes(y = confirmation_time, x = 0)) +
         geom_segment(
+            mapping = aes(yend = time_scamp_gpu_s, y = 0, xend = 0),
+            color = "gray80",
+            size = 0.2,
+            data = function(d) {
+                d %>%
+                    filter(time_scamp_gpu_s < scamp_thresh) %>%
+                    # mutate(time_scamp_gpu_s = min(time_scamp_gpu_s, 2204)) %>%
+                    group_by(dataset) %>% slice(1)
+            },
+        ) +
+        geom_segment(
             mapping = aes(yend = time_s, y = 0, xend = 0),
-            color = "lightgray",
+            color = "gray30",
             size = 1,
             data = function(d) {
                 group_by(d, dataset) %>% slice(1)
@@ -1218,13 +1234,16 @@ plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
                 group_by(d, dataset) %>% slice(1)
             },
         ) +
-        geom_point(shape="|", size = 2) +
+        geom_point(
+            shape="|", 
+            size = 2
+        ) +
         geom_segment(
             aes(y = time_scamp_s_hline, yend = time_scamp_s_hline),
             x = 0,
             xend = -0.9,
             linetype = "solid",
-            color = "gray40",
+            color = "gray80",
             size = 0.3,
         ) +
         geom_segment(
@@ -1232,7 +1251,7 @@ plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
             x = -0.9,
             xend = -0.9,
             linetype = "solid",
-            color = "gray40",
+            color = "gray80",
             size = 0.3,
         ) +
         geom_text(
@@ -1256,12 +1275,13 @@ plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
                 label = scales::number(
                     time_scamp_s_label,
                     accuracy = 1,
-                    prefix = "Scamp-gpu: ",
-                    suffix = " s →"
+                    prefix = "Scamp-gpu: (",
+                    suffix = " s) →"
                 ),
-                x = dist # * 1.2
+                x = -0.8 # * 1.2
             ),
             # y = 500,
+            color = "gray40",
             y = maxval,
             size = textsize,
             hjust = 1,
