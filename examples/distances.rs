@@ -21,15 +21,18 @@ struct Args {
     path: PathBuf,
     #[argh(option)]
     /// path to output
-    output: PathBuf,
+    output: Option<PathBuf>,
     #[argh(option)]
     /// number of pairs to sample
     samples: usize,
+    #[argh(option)]
+    /// prefix of the time series to load
+    prefix: Option<usize>,
 }
 
 fn main() -> Result<()> {
     let args: Args = argh::from_env();
-    let ts = WindowedTimeseries::new(loadts(&args.path, None)?, args.window, false);
+    let ts = WindowedTimeseries::new(loadts(&args.path, args.prefix)?, args.window, false);
 
     let mut rng = rand_xoshiro::Xoshiro256StarStar::seed_from_u64(1234);
     let uniform = Uniform::new(0, ts.num_subsequences());
@@ -58,11 +61,15 @@ fn main() -> Result<()> {
 
     pbar.finish_and_clear();
 
-    let output_path = args.output;
-    let mut output_file = BufWriter::new(std::fs::File::create(output_path)?);
-    writeln!(output_file, "w, distance")?;
-    for d in distances {
-        writeln!(output_file, "{},{}", ts.w, d)?;
+    if let Some(output_path) = args.output {
+        let mut output_file = BufWriter::new(std::fs::File::create(output_path)?);
+        writeln!(output_file, "w, distance")?;
+        for d in distances {
+            writeln!(output_file, "{},{}", ts.w, d)?;
+        }
+    } else {
+        let mean = distances.iter().sum::<f64>() / (distances.len() as f64);
+        println!("{mean}");
     }
 
     Ok(())

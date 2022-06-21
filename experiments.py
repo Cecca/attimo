@@ -187,32 +187,70 @@ def get_db():
         PRAGMA user_version = 6;
         """)
         print("  Bump version to 6")
+    if dbver < 7:
+        db.executescript("""
+        CREATE TABLE IF NOT EXISTS scamp_gpu (
+            hostname     TEXT,
+            dataset      TEXT,
+            window       INT,
+            time_s       REAL,
+            motif_pairs  TEXT,
+            max_mem_bytes  INT
+        );
+        PRAGMA user_version = 7;
+        """)
     
     print("Database initialized")
 
     return db
 
 
-def run(cmdline, stdout=None, timeout=None):
+def _get_gpu_memory_bytes():
+    suffix = {
+        'KiB': 1000,
+        'MiB': 1000*1000,
+        'GiB': 1000*1000*1000
+    }
+    output_to_list = lambda x: x.decode('ascii').split('\n')[:-1]
+    ACCEPTABLE_AVAILABLE_MEMORY = 1024
+    COMMAND = "nvidia-smi --query-gpu=memory.used --format=csv"
+    try:
+        memory_use_info = output_to_list(sp.check_output(COMMAND.split(),stderr=sp.STDOUT))[1:]
+    except sp.CalledProcessError as e:
+        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+    tot = 0
+    for mem in memory_use_info:
+        m, unit = mem.split()
+        tot += int(m) * suffix[unit]
+    # print("memory of GPU:", tot)
+    return tot
+
+
+def run(cmdline, stdout=None, timeout=None, measure_mem_gpu=False):
     """Run the given command, and return the maximum memory in bytes used by the child process, along with the outcome (one of "ok", "timeout", or "crash")"""
     mem = 0
+    mem_gpu = 0
     start = time.time()
     try:
-        child = sp.Popen(cmdline, stdout)
+        child = sp.Popen(cmdline, stdout=stdout)
         p = psutil.Process(child.pid)
         while child.poll() is None:
             time.sleep(0.5)
             m = p.memory_info().rss
             mem = max(mem, m)
+            if measure_mem_gpu:
+                mem_gpu = max(mem_gpu, _get_gpu_memory_bytes())
             if timeout is not None and time.time() > start + timeout:
                 child.kill()
                 return mem, "timeout"
             retcode = child.poll()
-        assert child.returncode == 0
-        outcome = "ok"
+        if child.returncode == 0:
+            outcome = "ok"
+        else:
+            outcome = "crash"
     except sp.CalledProcessError:
         outcome = "crash"
-    return mem, outcome
+    return mem + mem_gpu, outcome
 
 
 def prefix(path, n):
@@ -225,16 +263,35 @@ def prefix(path, n):
 
 
 def get_datasets():
+    synth = [
+        ("data/synth-w100-n{}-rc{}.txt.gz".format(n, rc), 100)
+        for n in 2 ** np.arange(19, 25, step=2)
+        # for n in 2 ** np.arange(19, 28, step=2)
+        for rc in [
+            '100-easy',
+            '50-middle',
+            '20-difficult'
+        ]
+    ]
     return [
         # ("data/ASTRO.csv.gz", 100),
         # ("data/GAP.csv.gz", 600),
         # ("data/freezer.txt.gz", 5000),
         # ("data/ECG.csv.gz", 1000),
-        # ("data/HumanY.txt.gz", 18000),
-        ("data/Whales-amplitude-noised.txt.gz", 140)
+        ("data/HumanY.txt.gz", 18000),
+        # ("data/Whales-amplitude-noised.txt.gz", 140)
         # ("data/VCAB_noised.txt.gz", 100)
-        # (prefix("data/VCAB_BP2_580_days.txt", 100000000), 100)
-    ]
+        #### Prefix datasets for runtime estimation
+        # ("data/Whales-amplitude-noised-1000000.txt.gz", 140),
+        # ("data/Whales-amplitude-noised-2000000.txt.gz", 140),
+        # ("data/Whales-amplitude-noised-4000000.txt.gz", 140),
+        # ("data/VCAB_noised-1000000.txt.gz", 100),
+        # ("data/VCAB_noised-2000000.txt.gz", 100),
+        # ("data/VCAB_noised-4000000.txt.gz", 100),
+        # ("data/HumanY-1000000.txt.gz", 18000),
+        # ("data/HumanY-2000000.txt.gz", 18000),
+        # ("data/HumanY-4000000.txt.gz", 18000),
+    ] #+ synth
 
 def remove_trivial(df, w):
     def is_trivial(a1, b1, a2, b2):
@@ -366,8 +423,9 @@ def run_attimo():
     threads = NUM_CPUS
     delta = 0.01
     for seed in [14514]:#, 1346, 2524]:
-        for repetitions in [100]:#, 200, 400, 800, 1600]:
-            for motifs in [10, 1]:
+        # for repetitions in [r*r for r in [9, 8]]:#, 200, 400, 800, 1600]:
+        for repetitions in [200]:
+            for motifs in [10]:
                 for dataset, window in datasets:
                     print("==== Looking for", motifs, "in", dataset,
                           "window",window, "with repetitions", repetitions)
@@ -408,7 +466,6 @@ def run_attimo():
                         "--repetitions", str(repetitions),
                         "--delta", str(delta),
                         "--seed", str(seed),
-                        "--min-correlation", "0.9",
                         "--log-path", "/tmp/attimo.json",
                         "--output", "/tmp/motifs.csv",
                         dataset
@@ -554,6 +611,7 @@ def run_ll():
                 "grids": grids
             }
         ).fetchone()
+        execid = None
         if execid is not None:
             print("Experiment already executed (ll id={})".format(execid[0]))
             continue
@@ -655,11 +713,11 @@ def run_projection():
     db = get_db()
     datasets = get_datasets()
     stepsize = 0.25
-    motifs = 10
-    alphabet = 6
-    repetitions = 50
+    motifs = 1
+    alphabet = 3 # 6
+    repetitions = 10
     seed = 1234
-    for k in [5,4,3]:
+    for k in [6,5,4,3]:
         for dataset, window in datasets:
             paa = window // 10
             execid = db.execute("""
@@ -742,7 +800,7 @@ def run_projection():
 
 
 
-def run_scamp():
+def run_scamp(gpu=False):
     install_scamp()
     db = get_db()
     datasets = get_datasets()
@@ -753,33 +811,55 @@ def run_scamp():
                 sp.run(['gunzip', '--keep', dataset])
             dataset = dataset.replace('.gz','')
 
-        execid = db.execute("""
-            SELECT rowid from scamp
-            where hostname=:hostname
-              and dataset=:dataset
-              and threads=:threads
-              and window=:window
-            """,
-            {
-                "hostname": HOSTNAME,
-                "dataset": dataset,
-                "threads": threads,
-                "window": window,
-            }
-        ).fetchone()
+        if gpu:
+            execid = db.execute("""
+                SELECT rowid from scamp_gpu
+                where hostname=:hostname
+                  and dataset=:dataset
+                  and window=:window
+                """,
+                {
+                    "hostname": HOSTNAME,
+                    "dataset": dataset,
+                    "window": window,
+                }
+            ).fetchone()
+        else:
+            execid = db.execute("""
+                SELECT rowid from scamp
+                where hostname=:hostname
+                  and dataset=:dataset
+                  and threads=:threads
+                  and window=:window
+                """,
+                {
+                    "hostname": HOSTNAME,
+                    "dataset": dataset,
+                    "threads": threads,
+                    "window": window,
+                }
+            ).fetchone()
+
         if execid is not None:
             print("Experiment already executed (scamp id={})".format(execid[0]))
             continue
 
         print(f"running on {dataset} with w={window} and {threads} threads... ")
         start = time.time()
-        mem_bytes, outcome = run([
-            SCAMP_EXE,
-            "--window={}".format(str(window)), 
-            "--input_a_file_name={}".format(dataset),
-            "--no_gpu", # we want to measure the time without the GPU, only using the CPU
-            "--num_cpu_workers={}".format(threads)
-        ])
+        if gpu:
+            mem_bytes, outcome = run([
+                SCAMP_EXE,
+                "--window={}".format(str(window)), 
+                "--input_a_file_name={}".format(dataset)
+            ], measure_mem_gpu=True)
+        else:
+            mem_bytes, outcome = run([
+                SCAMP_EXE,
+                "--window={}".format(str(window)), 
+                "--input_a_file_name={}".format(dataset),
+                "--no_gpu", # we want to measure the time without the GPU, only using the CPU
+                "--num_cpu_workers={}".format(threads)
+            ])
         print('memory is', mem_bytes)
         assert outcome == 'ok'
         end = time.time()
@@ -800,19 +880,33 @@ def run_scamp():
         # os.remove("mp_columns_out")
         # os.remove("mp_columns_out_index")
 
-        db.execute("""
-        INSERT INTO scamp VALUES (:hostname,:dataset,:threads,:window,:elapsed,:motifs,:max_mem_bytes);
-            """,
-            {
-                "hostname": HOSTNAME,
-                "dataset": dataset,
-                "threads": threads,
-                "window": window,
-                "elapsed": elapsed,
-                "motifs": motifs,
-                "max_mem_bytes": mem_bytes
-            }
-        )
+        if gpu:
+            db.execute("""
+            INSERT INTO scamp_gpu VALUES (:hostname,:dataset,:window,:elapsed,:motifs,:max_mem_bytes);
+                """,
+                {
+                    "hostname": HOSTNAME,
+                    "dataset": dataset,
+                    "window": window,
+                    "elapsed": elapsed,
+                    "motifs": motifs,
+                    "max_mem_bytes": mem_bytes
+                }
+            )
+        else:
+            db.execute("""
+            INSERT INTO scamp VALUES (:hostname,:dataset,:threads,:window,:elapsed,:motifs,:max_mem_bytes);
+                """,
+                {
+                    "hostname": HOSTNAME,
+                    "dataset": dataset,
+                    "threads": threads,
+                    "window": window,
+                    "elapsed": elapsed,
+                    "motifs": motifs,
+                    "max_mem_bytes": mem_bytes
+                }
+            )
 
 
 def scalability_attimo():
@@ -926,8 +1020,9 @@ if __name__ == "__main__":
     run_attimo()
     # run_attimo_recall()
     # run_scamp()
+    # run_scamp(gpu=True)
     # run_projection()
-    run_prescrimp()
+    # run_prescrimp()
     # run_ll()
     # run_mk()
     
