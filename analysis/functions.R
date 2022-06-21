@@ -769,6 +769,7 @@ do_tab_time_comparison <- function(data_comparison, file_out) {
         group_by(dataset) %>%
         mutate(
             is_best = time_s == min(time_s),
+            is_best_mem = max_mem_gb == min(max_mem_gb),
             # time_s = scales::number(time_s, accuracy = 0.1),
             time_s = if_else(time_s > 2*3600,
                 fmt_duration(time_s),
@@ -785,6 +786,10 @@ do_tab_time_comparison <- function(data_comparison, file_out) {
             mem_overhead_gb = scales::number(max_mem_gb - size_gb, accuracy = 0.1),
             mem_overhead_gb = if_else(is_estimate,
                 str_c("{\\small(", mem_overhead_gb, ")}"),
+                mem_overhead_gb
+            ),
+            mem_overhead_gb = if_else(is_best_mem,
+                str_c("\\underline{", mem_overhead_gb, "}"),
                 mem_overhead_gb
             ),
             distances_fraction = scales::scientific(
