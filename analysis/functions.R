@@ -931,6 +931,7 @@ plot_memory_time <- function(data_attimo) {
         # group_by(dataset, window) %>%
         inner_join(dataset_info()) %>%
         mutate(
+            dataset = factor(dataset, levels=c("freezer", "ASTRO", "GAP", "Whales", "ECG", "HumanY"), ordered=T),
             labelpos = time_s + 0.1 * max(time_s),
             tickpos = -0.1 * max(time_s),
             mempos = -0.6 * max(time_s),
