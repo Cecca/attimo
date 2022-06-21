@@ -37,15 +37,13 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
-use std::collections::HashMap;
 use std::ops::Range;
 use std::time::Duration;
 use std::{
-    cell::{RefCell, UnsafeCell},
+    cell::{UnsafeCell},
     sync::Arc,
     time::Instant,
 };
-use thread_local::ThreadLocal;
 
 //// ## Hash values
 //// We consider hash values made of 8-bit words. So we have to make sure, setting the
@@ -512,11 +510,6 @@ impl Hasher {
             drop(probe_collection);
         }
         info!("width estimation"; "time_s" => timer.elapsed().as_secs_f64(), "width" => r, "tag" => "profiling");
-
-        let per_pair_cost = std::cmp::max(
-            pair_probing_time / probed_pairs as u32,
-            Duration::from_nanos(200),
-        );
 
         return r;
     }

@@ -258,13 +258,12 @@ pub fn sort_hash_pairs(
     }
 
     // set write heads
-    let mut tmp = 0;
     let mut sum0 = 0;
     let mut sum1 = 0;
     let mut sum2 = 0;
     let mut sum3 = 0;
     for i in 0..256 {
-        tmp = sum0 + b0[i];
+        let mut tmp = sum0 + b0[i];
         b0[i] = sum0;
         sum0 = tmp;
         

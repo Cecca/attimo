@@ -1,5 +1,3 @@
-use std::cmp::Reverse;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use attimo::distance::{zdot, zeucl};
@@ -9,13 +7,12 @@ use attimo::timeseries::FFTData;
 use attimo::{lsh::*, timeseries::WindowedTimeseries};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use rand::{Rng, SeedableRng};
-use rand_distr::{Distribution, Uniform};
-use rand_xoshiro::{Xoroshiro128Plus, Xoroshiro128PlusPlus};
+use rand_distr::{Uniform};
+use rand_xoshiro::{Xoroshiro128Plus};
 
 pub fn bench_construct_ts(c: &mut Criterion) {
     use rand::prelude::*;
     use rand_distr::StandardNormal;
-    use rand_xoshiro::Xoroshiro128Plus;
 
     let n = 10000;
 

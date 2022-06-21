@@ -8,11 +8,8 @@ use attimo::{
 };
 use rand::prelude::*;
 use rand_xoshiro::Xoshiro256PlusPlus;
-use rayon::prelude::*;
-use std::cell::RefCell;
 /// This is an implementation of [Probabilistic discovery of time series motifs](https://www.cs.ucr.edu/~eamonn/SIGKDD_Motif.pdf).
 use std::{collections::BTreeMap, time::Instant};
-use thread_local::ThreadLocal;
 
 struct SaxTransformer {
     /// lenght of the PAA window

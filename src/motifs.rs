@@ -622,7 +622,7 @@ mod test {
             let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
 
-            let motif = *motifs(&ts, 1,20, 0.001, None, None, 12435)
+            let motif = *motifs(&ts, 1,20, 0.001, None, None, 12435, Instant::now())
                 .first()
                 .unwrap();
             println!(
@@ -647,7 +647,7 @@ mod test {
             let ts = WindowedTimeseries::new(ts, w, true);
             // assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
 
-            let motif = *motifs(&ts, 1, 200, 0.001, None, None, 12435)
+            let motif = *motifs(&ts, 1, 200, 0.001, None, None, 12435, Instant::now())
                 .first()
                 .unwrap();
             println!("Motif distance {}", motif.distance);
@@ -681,7 +681,7 @@ mod test {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", None).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
-        let motifs = motifs(&ts, 10, 200, 0.01, None, None, 12435);
+        let motifs = motifs(&ts, 10, 200, 0.01, None, None, 12435, Instant::now());
         for (a, b, dist) in top10 {
             // look for this in the motifs, allowing up to w displacement
             println!("looking for ({a} {b} {dist})");
@@ -726,7 +726,7 @@ mod test {
         let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", None).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
-        let motifs = motifs(&ts, 10, 800, 0.01, None, None, 12435);
+        let motifs = motifs(&ts, 10, 800, 0.01, None, None, 12435, Instant::now());
         for (a, b, dist) in top10 {
             // look for this in the motifs, allowing up to w displacement
             println!("looking for ({a} {b} {dist})");
