@@ -13,6 +13,7 @@ tar_option_set(packages = c(
     "ggrepel",
     "ggbeeswarm",
     "patchwork",
+    "latex2exp",
     "kableExtra"
 ))
 
@@ -28,6 +29,10 @@ list(
         load_scamp()
     ),
     tar_target(
+        data_scamp_gpu,
+        load_scamp_gpu()
+    ),
+    tar_target(
         data_prescrimp,
         load_prescrimp()
     ),
@@ -41,20 +46,21 @@ list(
     ),
     tar_target(
         data_scalability,
-        bind_rows(
-            data_attimo %>%
-                filter(!is.na(perc_size)) %>%
-                filter(delta == 0.01) %>%
-                select(algorithm, dataset, perc_size, time_s),
-            data_scamp %>%
-                filter(!is.na(perc_size)) %>%
-                select(algorithm, dataset, perc_size, time_s),
-            read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
-                fix_names() %>%
-                add_prefix_info() %>%
-                mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
-                select(algorithm, dataset, perc_size, time_s)
-        )
+        load_scalability()
+        # bind_rows(
+        #     data_attimo %>%
+        #         filter(!is.na(perc_size)) %>%
+        #         filter(delta == 0.01) %>%
+        #         select(algorithm, dataset, perc_size, time_s),
+        #     data_scamp %>%
+        #         filter(!is.na(perc_size)) %>%
+        #         select(algorithm, dataset, perc_size, time_s),
+        #     read_csv("scamp-gpu-scalability.csv", col_names = c("dataset", "window", "time_s")) %>%
+        #         fix_names() %>%
+        #         add_prefix_info() %>%
+        #         mutate(algorithm = "scamp-gpu", hostname = "gpucluster") %>%
+        #         select(algorithm, dataset, perc_size, time_s)
+        # )
     ),
     tar_target(
         # A model for the performance of SCAMP, fitting a quadratic polynomial
@@ -77,6 +83,7 @@ list(
         lm(time_s ~ poly(scaled_n, 2), data_scamp_gpu_scalability)
     ),
     tar_target(
+        # DEPRECATED
         data_gpucluster,
         read_csv("gpucluster.csv") %>%
             group_by(dataset, w) %>%
@@ -107,7 +114,15 @@ list(
     ),
     tar_target(
         data_comparison,
-        get_data_comparison(filter(data_attimo, delta == delta_val), data_scamp, data_ll, data_gpucluster, data_prescrimp, data_rproj)
+        get_data_comparison(
+            filter(data_attimo, delta == delta_val),
+            data_scamp,
+            data_ll,
+            # data_gpucluster,
+            data_scamp_gpu,
+            data_prescrimp,
+            data_rproj
+        )
     ),
 
     # Figure motifs ------------------------------------------------------------
@@ -117,25 +132,25 @@ list(
     # ),
 
     # Figure scalability -------------------------------------------------------
-    # tar_target(
-    #     img_scalability_n,
-    #     ggsave("imgs/scalability_n.png",
-    #         plot = plot_scalability_n_alt(data_scalability),
-    #         width = 5,
-    #         height = 3,
-    #         dpi = 300
-    #     )
-    # ),
+    tar_target(
+        img_scalability_n,
+        ggsave("imgs/scalability_n.png",
+            plot = plot_scalability_n_alt(data_scalability),
+            width = 5,
+            height = 3,
+            dpi = 300
+        )
+    ),
 
     # Time comparison -----------------------------------------------
     tar_target(
         tab_time_comparison,
         do_tab_time_comparison(data_comparison, "imgs/time-comparison.tex")
     ),
-    tar_target(
-        tab_time_comparison_normalized,
-        do_tab_time_comparison_normalized(data_comparison)
-    ),
+    # tar_target(
+    #     tab_time_comparison_normalized,
+    #     do_tab_time_comparison_normalized(data_comparison)
+    # ),
 
     # Figure motifs 10 -----------------------------------------------------
     tar_target(
@@ -144,8 +159,7 @@ list(
             "imgs/10-motifs.png",
             plot = plot_motifs_10_alt3(filter(data_attimo, delta == delta_val), 
                                        data_scamp, 
-                                       data_gpucluster,
-                                       data_measures),
+                                       data_scamp_gpu),
             width = 5,
             height = 5,
             dpi = 300
@@ -178,8 +192,9 @@ list(
         ggsave(
             "imgs/repetitions.png",
             plot = fig_repetitions,
-            width = 10,
-            height = 1.7,
+            # width = 10,
+            width = 4.5,
+            height = 3,
             dpi = 300
         )
     ),

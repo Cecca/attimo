@@ -8,6 +8,22 @@ theme_paper <- function() {
         )
 }
 
+fmt_duration <- function(d_secs) {
+    inner <- function(d_secs) {
+        scaling <- c(
+            "s" = 1,
+            "m" = 60,
+            "h" = 60*60,
+            "days" = 60*60*24,
+            "years" = 60*60*24*365
+        )
+        scaled <- d_secs / scaling
+        lastentry <- tail(scaled[scaled >= 1], 1)
+        str_c(scales::number(lastentry, accuracy = 0.1), names(lastentry), sep=" ")
+    }
+    sapply(d_secs, inner)
+}
+
 dataset_info <- function() {
     tribble(
         ~dataset, ~n, ~avg_dist, ~window,
@@ -53,7 +69,16 @@ fix_names <- function(df) {
 reorder_datasets <- function(df) {
     df %>%
         mutate(
-            dataset = factor(dataset, c("freezer", "ASTRO", "GAP", "Seismic", "Whales", "ECG", "HumanY"), ordered = T)
+            dataset = factor(dataset, c(
+                "ASTRO",
+                "GAP",
+                "freezer",
+                "ECG",
+                "HumanY",
+                "Whales",
+                "Seismic"
+            ),
+            ordered = T)
         )
 }
 
@@ -116,8 +141,8 @@ load_attimo <- function() {
         gather_array() %>%
         spread_values(
             distances_fraction = jnumber("distances_fraction"),
-            total_distances = jnumber("distances_fraction"),
-            cnt_dist = jnumber("distances_fraction"),
+            total_distances = jnumber("total_distances"),
+            cnt_dist = jnumber("cnt_dist"),
             msg = jstring("msg")
         ) %>%
         filter(msg == "motifs completed") %>%
@@ -161,12 +186,59 @@ load_attimo <- function() {
         reorder_datasets()
 }
 
+load_scalability <- function() {
+    conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
+
+    getinfo <- function(data) {
+        data %>%
+            filter(str_detect(dataset, "synth")) %>%
+            mutate(
+                n = as.integer(str_match(dataset, "n(\\d+)")[,2]),
+                rc = as.integer(str_match(dataset, "rc(\\d+)")[,2]),
+                difficulty = str_match(dataset, "easy|middle|difficult")[,1],
+                dataset = 'synth'
+            ) %>%
+            drop_na()
+    }
+
+    attimo <- tbl(conn, "attimo") %>% 
+        filter(repetitions == 400) %>%
+        select(dataset, time_s) %>%
+        mutate(algorithm = 'attimo') %>%
+        collect() %>%
+        getinfo()
+    scamp <- tbl(conn, "scamp_gpu") %>%
+        select(dataset, time_s) %>%
+        mutate(algorithm = 'scamp-gpu') %>%
+        collect() %>%
+        getinfo()
+    model <- lm(time_s ~ poly(n, 2), data=scamp)
+    n_predict <- c(2**25, 2**27)
+    estimates <- tibble(
+        n = n_predict,
+        time_s = predict(model, tibble(n = n_predict)),
+        algorithm = "scamp-gpu",
+        difficulty = "difficult"
+    )
+    scamp <- bind_rows(scamp, estimates)
+
+    DBI::dbDisconnect(conn)
+    bind_rows(attimo, scamp) %>%
+        filter(difficulty != "middle")
+}
+
 
 load_rproj <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
-    tbl <- tbl(conn, "projection") %>%
+    table <- conn %>%
+        tbl(sql("select *, json_extract(motif_pairs, '$[0].dist') as motif_distance from projection")) %>%
+        filter(
+            outcome == "ok",
+            motifs == 1
+        ) %>%
+        group_by(dataset, window) %>%
+        slice_min(motif_distance) %>%
         collect() %>%
-        filter(!str_detect(dataset, "EMG")) %>%
         fix_names() %>%
         add_prefix_info() %>%
         right_join(allowed_combinations) %>%
@@ -174,9 +246,11 @@ load_rproj <- function() {
         mutate(max_mem_gb = max_mem_bytes / (1024^3)) %>%
         reorder_datasets()
     DBI::dbDisconnect(conn)
-    tbl
+    table
 }
 
+# The original prescrimp implementation takes 72 minutes on GAP, 
+# with the same parameterization we use.
 load_prescrimp <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "prescrimp") %>%
@@ -221,6 +295,52 @@ load_prescrimp <- function() {
     bind_rows(tbl_measured, predictions)
 }
 
+load_scamp_gpu <- function() {
+    conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
+    tbl <- tbl(conn, "scamp_gpu") %>%
+        collect() %>%
+        filter(!str_detect(dataset, "EMG")) %>%
+        fix_names() %>%
+        add_prefix_info() %>%
+        # right_join(allowed_combinations) %>%
+        mutate(algorithm = "scamp-gpu") %>%
+        mutate(max_mem_gb = max_mem_bytes / (1024^3)) %>%
+        reorder_datasets()
+
+    tbl_measured <- tbl %>%
+        filter(is_full_dataset) %>%
+        mutate(is_estimate = F)
+
+    smaller <- tbl %>%
+        filter(!is_full_dataset)
+    models <- smaller %>%
+        group_by(dataset, window) %>%
+        do(
+            model_time_s = lm(time_s ~ poly(prefix, 2), data=.),
+            model_max_mem_gb = lm(max_mem_gb ~ poly(prefix, 1), data=.)
+        )
+
+    predictions <- tbl %>%
+        # Select the combinations for which measurements are missing
+        filter(is_full_dataset) %>%
+        right_join(allowed_combinations) %>%
+        filter(is.na(time_s)) %>%
+        select(dataset) %>%
+        inner_join(models) %>%
+        inner_join(dataset_info()) %>%
+        group_by(dataset, window, n) %>%
+        do(tibble(
+            time_s = predict(.$model_time_s[[1]], tibble(prefix=.$n)),
+            max_mem_gb = predict(.$model_max_mem_gb[[1]], tibble(prefix=.$n)),
+        )) %>%
+        mutate(is_estimate = T, is_full_dataset = T, algorithm = 'scamp-gpu')
+
+
+    DBI::dbDisconnect(conn)
+    bind_rows(tbl_measured, predictions)
+}
+
+
 load_scamp <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "scamp") %>%
@@ -243,7 +363,7 @@ load_scamp <- function() {
         group_by(dataset, window, threads) %>%
         do(
             model_time_s = lm(time_s ~ poly(prefix, 2), data=.),
-            model_max_mem_gb = lm(max_mem_gb ~ poly(prefix, 2), data=.)
+            model_max_mem_gb = lm(max_mem_gb ~ poly(prefix, 1), data=.)
         )
 
     predictions <- tbl %>%
@@ -576,7 +696,7 @@ latex_info <- function(data_motif_measures) {
         write_file("imgs/dataset-info.tex")
 }
 
-get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluster, data_prescrimp, data_rproj) {
+get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_scamp_gpu, data_prescrimp, data_rproj) {
     bind_rows(
         data_attimo %>%
             filter((repetitions == 200) | (dataset == "Seismic") | (dataset == "Whales")) %>%
@@ -584,7 +704,8 @@ get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluste
                 algorithm, hostname, dataset, is_full_dataset, threads, window,
                 repetitions, motifs, delta, time_s, max_mem_gb, distances_fraction
             ) %>% 
-            filter(motifs == 1) %>%
+            filter(motifs == 1) %T>%
+            print() %>%
             group_by(algorithm, hostname, dataset, window) %>%
             slice_min(time_s)
             ,
@@ -604,7 +725,7 @@ get_data_comparison <- function(data_attimo, data_scamp, data_ll, data_gpucluste
             data_rproj, algorithm, hostname, dataset, is_full_dataset, window,
             max_mem_gb, time_s
         ),
-        select(data_gpucluster, algorithm, dataset, window = w, time_s) %>% mutate(is_full_dataset = T)
+        select(data_scamp_gpu, algorithm, dataset, window, time_s, max_mem_gb, is_full_dataset, is_estimate)
     ) %>%
         replace_na(list(is_estimate = F)) %>%
         semi_join(allowed_combinations) %>%
@@ -645,10 +766,20 @@ do_tab_time_comparison_normalized <- function(data_comparison) {
 
 do_tab_time_comparison <- function(data_comparison, file_out) {
     data_comparison %>%
+        group_by(dataset) %>%
         mutate(
-            time_s = scales::number(time_s, accuracy = 0.1),
+            is_best = time_s == min(time_s),
+            # time_s = scales::number(time_s, accuracy = 0.1),
+            time_s = if_else(time_s > 2*3600,
+                fmt_duration(time_s),
+                scales::number(time_s, accuracy=0.1)
+            ),
             time_s = if_else(is_estimate,
                 str_c("{\\small(", time_s,")}"),
+                time_s
+            ),
+            time_s = if_else(is_best,
+                str_c("\\underline{", time_s, "}"),
                 time_s
             ),
             mem_overhead_gb = scales::number(max_mem_gb - size_gb, accuracy = 0.1),
@@ -782,13 +913,18 @@ dataset_measures <- function(data_attimo) {
 plot_memory_time <- function(data_attimo) {
     data_attimo %>%
         filter(motifs == 10) %>%
-        filter(time_s < 5000) %>%
+        filter(dataset != 'Seismic') %>%
+        filter((dataset != 'HumanY') | (repetitions < 800)) %>%
+        group_by(dataset, window) %>%
+        slice_min(time_s, n=5) %>%
         group_by(dataset, window, repetitions) %>%
+        filter(time_s < 10000) %>%
         summarise(
             time_s = mean(time_s),
             preprocessing = mean(preprocessing)
         ) %>%
-        group_by(dataset, window) %>%
+        # group_by(dataset, window) %>%
+        inner_join(dataset_info()) %>%
         mutate(
             labelpos = time_s + 0.1 * max(time_s),
             tickpos = -0.1 * max(time_s),
@@ -803,7 +939,7 @@ plot_memory_time <- function(data_attimo) {
             x = "repetitions",
             y = "total time (s)"
         ) +
-        facet_wrap(vars(dataset), ncol = 7, scales = "free") +
+        facet_wrap(vars(dataset), ncol = 3, scales = "free") +
         coord_cartesian(clip = "off") +
         theme_paper() +
         theme(
@@ -920,7 +1056,10 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
         spread_all() %>%
         rename(motif_idx = array.index) %>%
         as_tibble() %>%
-        select(dataset, window, time_s, time_scamp_gpu_s, dist, motif_idx, confirmation_time, preprocessing) %>%
+        select(
+            dataset, window, time_s, time_scamp_gpu_s, dist,
+            motif_idx, confirmation_time, preprocessing
+        ) %>%
         mutate(
             time_scamp_s_hline = if_else(
                 (time_scamp_gpu_s < 1000) & (motif_idx == 1),
@@ -1016,12 +1155,12 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
     bars
 }
 
-plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu, data_measures) {
-    scamp_thresh <- 2200
+plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu) {
+    scamp_thresh <- 2300
     textsize <- 4
 
     pdata <- data_attimo %>%
-        left_join(select(data_scamp_gpu, dataset, window = w, time_scamp_gpu_s = time_s)) %>%
+        left_join(select(data_scamp_gpu, dataset, window, time_scamp_gpu_s = time_s)) %>%
         filter(motifs == 10) %>%
         filter((repetitions == 400) | (dataset == "Seismic") | (dataset == "Whales")) %>%
         group_by(dataset, window) %>%
@@ -1065,11 +1204,23 @@ plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
         )
 
     maxval <- pdata %>% summarise(max(time_s)) %>% pull()
+    maxval <- scamp_thresh
 
     bars <- ggplot(pdata, aes(y = confirmation_time, x = 0)) +
         geom_segment(
+            mapping = aes(yend = time_scamp_gpu_s, y = 0, xend = 0),
+            color = "gray80",
+            size = 0.2,
+            data = function(d) {
+                d %>%
+                    filter(time_scamp_gpu_s < scamp_thresh) %>%
+                    # mutate(time_scamp_gpu_s = min(time_scamp_gpu_s, 2204)) %>%
+                    group_by(dataset) %>% slice(1)
+            },
+        ) +
+        geom_segment(
             mapping = aes(yend = time_s, y = 0, xend = 0),
-            color = "lightgray",
+            color = "gray30",
             size = 1,
             data = function(d) {
                 group_by(d, dataset) %>% slice(1)
@@ -1084,13 +1235,16 @@ plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
                 group_by(d, dataset) %>% slice(1)
             },
         ) +
-        geom_point(shape="|", size = 2) +
+        geom_point(
+            shape="|", 
+            size = 2
+        ) +
         geom_segment(
             aes(y = time_scamp_s_hline, yend = time_scamp_s_hline),
             x = 0,
             xend = -0.9,
             linetype = "solid",
-            color = "gray40",
+            color = "gray80",
             size = 0.3,
         ) +
         geom_segment(
@@ -1098,7 +1252,7 @@ plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
             x = -0.9,
             xend = -0.9,
             linetype = "solid",
-            color = "gray40",
+            color = "gray80",
             size = 0.3,
         ) +
         geom_text(
@@ -1122,12 +1276,13 @@ plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
                 label = scales::number(
                     time_scamp_s_label,
                     accuracy = 1,
-                    prefix = "Scamp-gpu: ",
-                    suffix = " s →"
+                    prefix = "Scamp-gpu: (",
+                    suffix = " s) →"
                 ),
-                x = dist # * 1.2
+                x = -0.8 # * 1.2
             ),
             # y = 500,
+            color = "gray40",
             y = maxval,
             size = textsize,
             hjust = 1,
@@ -1189,68 +1344,45 @@ plot_distributions <- function(data_measures, data_distances) {
 }
 
 plot_scalability_n_alt <- function(data_scalability) {
-    plotdata <- data_scalability %>% filter(dataset == "Seismic")
+    data_scalability <- data_scalability %>% 
+        filter(as.integer(log2(n)) == log2(n))
+    attimo <- data_scalability %>% filter(algorithm == "attimo")
+    baseline <- data_scalability %>% filter(algorithm != "attimo")
+    labels <- baseline %>%
+        filter(n == max(n))
 
-    speedups <- plotdata %>%
-        pivot_wider(names_from = "algorithm", values_from = "time_s") %>%
-        filter(perc_size > 0.4) %>%
-        mutate(
-            speedup = `scamp-gpu` / attimo,
-            y = (`scamp-gpu` + attimo) / 2
-        )
-
-    ggplot(plotdata, aes(perc_size, time_s, color = algorithm)) +
+    ggplot(attimo, aes(n, time_s, linetype=difficulty, color=difficulty)) +
+        geom_point(data=baseline, color='black', linetype='solid', stat='summary') +
+        geom_line(data=baseline, color='black', linetype='solid', stat='summary') +
         geom_point() +
         geom_line() +
         geom_text(
-            aes(x = perc_size + 0.01,
-                y = time_s - 1500,
-                label = scales::number(time_s, accuracy = 1)), 
+            data = labels,
+            label = "scamp-gpu",
             show.legend = F,
-            data = function(d) {filter(d, algorithm == "scamp")},
-            size = 3,
-            hjust = 0
+            color = 'black',
+            nudge_x = -1.1
         ) +
-        geom_text(
-            aes(x = perc_size - 0.01,
-                y = time_s + 2500,
-                label = scales::number(time_s, accuracy = 1)), 
-            show.legend = F,
-            data = function(d) {filter(d, perc_size > 0.4)},
-            size = 3,
-            hjust = 1
-        ) +
-        geom_segment(
-            aes(
-                xend = perc_size,
-                y = attimo,
-                yend = `scamp-gpu`
-            ),
-            color = "black",
-            linetype = "dotted",
-            data = speedups
-        ) +
-        geom_text(
-            aes(
-                y = y,
-                x = perc_size + 0.01,
-                label = scales::number(speedup, prefix = "x", accuracy = 1)
-            ),
-            color = "black",
-            data = speedups,
-            size=3,
-            hjust = 0
-        ) +
-        scale_y_continuous(labels = scales::number_format()) +
-        scale_x_continuous(labels = scales::percent_format()) +
+        scale_y_continuous(
+            labels = scales::number_format(accuracy=1), 
+            trans='log2') +
+        scale_x_continuous(
+            # labels = scales::scientific_format(), 
+            breaks = 2 ** c(19, 21, 23, 25, 27),
+            labels = function(breaks) {
+                TeX(str_c("$2^{", log2(breaks), "}$"))
+            },
+            trans='log2') +
         scale_color_manual(values = c("#5778a4", "#e49444", "#e15759")) +
         labs(
-            x = "Size percentage",
-            y = "Total time (s)"
+            x = "Size",
+            y = "Total time (s)",
+            color = "",
+            linetype = ""
         ) +
         theme_paper() +
         theme(
-            legend.position = c(0.8, 0.8)
+            legend.position = c(0.2, 0.8)
         )
 }
 
