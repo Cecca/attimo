@@ -2,7 +2,6 @@
 /target
 /data
 flamegraph.svg
-/docs
 bench.sqlite
 .trace.*
 *.db

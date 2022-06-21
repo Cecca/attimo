@@ -1,0 +1,8 @@
+# Runs in development mode
+dev:
+    npm run dev
+
+# Builds the paper
+build:
+    npm run build
+

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="600" height="300" viewBox="0 0 2400 1200">
+<defs>
+  <clipPath id="clip550">
+    <rect x="0" y="0" width="2400" height="1200"/>
+  </clipPath>
+</defs>
+<path clip-path="url(#clip550)" d="
+M0 1200 L2400 1200 L2400 0 L0 0  Z
+  " fill="#ffffff" fill-rule="evenodd" fill-opacity="1"/>
+<defs>
+  <clipPath id="clip551">
+    <rect x="480" y="0" width="1681" height="1200"/>
+  </clipPath>
+</defs>
+<path clip-path="url(#clip550)" d="
+M47.2441 1152.76 L2352.76 1152.76 L2352.76 47.2441 L47.2441 47.2441  Z
+  " fill="#ffffff" fill-rule="evenodd" fill-opacity="1"/>
+<defs>
+  <clipPath id="clip552">
+    <rect x="47" y="47" width="2307" height="1107"/>
+  </clipPath>
+</defs>
+<circle clip-path="url(#clip552)" cx="112.494" cy="668.018" r="28" fill="#009af9" fill-rule="evenodd" fill-opacity="1" stroke="#000000" stroke-opacity="1" stroke-width="2.4"/>
+<circle clip-path="url(#clip552)" cx="474.996" cy="441.292" r="28" fill="#009af9" fill-rule="evenodd" fill-opacity="1" stroke="#000000" stroke-opacity="1" stroke-width="2.4"/>
+<circle clip-path="url(#clip552)" cx="1743.75" cy="78.5322" r="28" fill="#e26f46" fill-rule="evenodd" fill-opacity="1" stroke="#000000" stroke-opacity="1" stroke-width="2.4"/>
+<circle clip-path="url(#clip552)" cx="2287.51" cy="1121.47" r="28" fill="#e26f46" fill-rule="evenodd" fill-opacity="1" stroke="#000000" stroke-opacity="1" stroke-width="2.4"/>
+</svg>
