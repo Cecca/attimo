@@ -306,7 +306,7 @@
       In particular, the "points" to which we apply LSH are (z-normalized) subsequences of length $w$ of the input time series, which can be seen as points <d-math>{`\\in\\mathbb{R}^w`}</d-math>.
     </p>
     <p>
-      For a more comprehensive treatment of LSH, we refer the interested reader to the original paper by Datar et al.<d-cite key="DBLP:conf/compgeom/DatarIIM04"></d-cite>, to the paper by Christiani<d-cite key="DBLP:conf/soda/Christiani17"></d-cite> for an overview of techniques to reduce the number of hash computations, and to Wang et al.
+      For a more comprehensive treatment of LSH, we refer the interested reader to the original paper by Datar et al.<d-cite key="DBLP:conf/compgeom/DatarIIM04"></d-cite>, to the paper by Christiani<d-cite key="DBLP:conf/sisap/Christiani19"></d-cite> for an overview of techniques to reduce the number of hash computations, and to Wang et al.
       <d-cite key="DBLP:journals/corr/WangSSJ14"></d-cite> for a survey of LSH function families for many different metric spaces.
     </p>
     
