@@ -916,6 +916,12 @@ dataset_measures <- function(data_attimo) {
 }
 
 plot_memory_time <- function(data_attimo) {
+    labsfun <- function(breaks) {
+        if (breaks[length(breaks)] == 1600) {
+            breaks[length(breaks) - 1] = ""
+        }
+        breaks
+    }
     data_attimo %>%
         filter(motifs == 10) %>%
         filter(dataset != 'Seismic') %>%
@@ -928,7 +934,6 @@ plot_memory_time <- function(data_attimo) {
             time_s = mean(time_s),
             preprocessing = mean(preprocessing)
         ) %>%
-        # group_by(dataset, window) %>%
         inner_join(dataset_info()) %>%
         mutate(
             dataset = factor(dataset, levels=c("freezer", "ASTRO", "GAP", "Whales", "ECG", "HumanY"), ordered=T),
@@ -941,6 +946,7 @@ plot_memory_time <- function(data_attimo) {
         geom_ribbon(aes(ymin = preprocessing, ymax = time_s), fill = "#74caff", alpha = 0.4) +
         geom_line() +
         geom_point() +
+        scale_x_continuous(labels=labsfun) +
         labs(
             x = "repetitions",
             y = "total time (s)"
@@ -949,13 +955,7 @@ plot_memory_time <- function(data_attimo) {
         coord_cartesian(clip = "off") +
         theme_paper() +
         theme(
-            # axis.line.y = element_blank(),
-            # axis.text.y = element_blank(),
-            # axis.ticks.y = element_blank(),
-            # axis.line.x = element_blank(),
-            # axis.text.x = element_blank(),
-            # axis.ticks.x = element_blank(),
-            panel.spacing = unit(5, "mm")
+            panel.spacing = unit(0, "mm")
         )
 }
 
