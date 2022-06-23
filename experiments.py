@@ -236,7 +236,7 @@ def run(cmdline, stdout=None, timeout=None, measure_mem_gpu=False):
         p = psutil.Process(child.pid)
         while child.poll() is None:
             time.sleep(0.5)
-            m = p.memory_info().rss
+            m = p.memory_info().vms
             mem = max(mem, m)
             if measure_mem_gpu:
                 mem_gpu = max(mem_gpu, _get_gpu_memory_bytes())
@@ -274,11 +274,11 @@ def get_datasets():
         ]
     ]
     return [
-        # ("data/ASTRO.csv.gz", 100),
-        # ("data/GAP.csv.gz", 600),
-        # ("data/freezer.txt.gz", 5000),
+        ("data/ASTRO.csv.gz", 100),
+        ("data/GAP.csv.gz", 600),
+        ("data/freezer.txt.gz", 5000),
         # ("data/ECG.csv.gz", 1000),
-        ("data/HumanY.txt.gz", 18000),
+        # ("data/HumanY.txt.gz", 18000),
         # ("data/Whales-amplitude-noised.txt.gz", 140)
         # ("data/VCAB_noised.txt.gz", 100)
         #### Prefix datasets for runtime estimation
@@ -424,8 +424,8 @@ def run_attimo():
     delta = 0.01
     for seed in [14514]:#, 1346, 2524]:
         # for repetitions in [r*r for r in [9, 8]]:#, 200, 400, 800, 1600]:
-        for repetitions in [200]:
-            for motifs in [10]:
+        for repetitions in [9]:
+            for motifs in [1]:
                 for dataset, window in datasets:
                     print("==== Looking for", motifs, "in", dataset,
                           "window",window, "with repetitions", repetitions)
@@ -712,13 +712,21 @@ def run_projection():
     sp.run(["cargo", "build", "--release", "--example", "ChiuKL"])
     db = get_db()
     datasets = get_datasets()
-    stepsize = 0.25
+    # stepsize = 0.25
+    best_params = {
+        'data/ASTRO.csv.gz': {'alphabet': 3, 'k': 6},
+        'data/GAP.csv.gz': {'alphabet': 4, 'k': 4},
+        'data/freezer.txt.gz': {'alphabet': 4, 'k': 3}
+    }
     motifs = 1
     alphabet = 3 # 6
     repetitions = 10
     seed = 1234
-    for k in [6,5,4,3]:
+    for k in [6]:
         for dataset, window in datasets:
+            bestconf = best_params[dataset]
+            k = bestconf['k']
+            alphabet = bestconf['alphabet']
             paa = window // 10
             execid = db.execute("""
                 SELECT rowid from projection
@@ -748,7 +756,7 @@ def run_projection():
                 print("Experiment already executed (projection id={})".format(execid[0]))
                 continue
 
-            print(f"running Projection on {dataset} with w={window} and stepsize={stepsize}... ")
+            print(f"running Projection on {dataset} with w={window}... ")
             start = time.time()
             mem_bytes, outcome = run([
                 "cargo", 
@@ -844,7 +852,7 @@ def run_scamp(gpu=False):
             print("Experiment already executed (scamp id={})".format(execid[0]))
             continue
 
-        print(f"running on {dataset} with w={window} and {threads} threads... ")
+        print(f"running on {dataset} with w={window} and {threads} threads, GPU={gpu}... ")
         start = time.time()
         if gpu:
             mem_bytes, outcome = run([
@@ -1017,11 +1025,11 @@ def scalability_attimo():
 
 if __name__ == "__main__":
     # scalability_attimo()
-    run_attimo()
+    # run_attimo()
     # run_attimo_recall()
     # run_scamp()
     # run_scamp(gpu=True)
-    # run_projection()
+    run_projection()
     # run_prescrimp()
     # run_ll()
     # run_mk()
