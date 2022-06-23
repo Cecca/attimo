@@ -109,6 +109,7 @@ load_attimo <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     table <- tbl(conn, "attimo") %>%
         filter(version == max(version, na.rm = T)) %>%
+        filter(hostname == "gpu02") %>%
         collect() %>%
         fix_names() %>%
         filter(!str_detect(dataset, "EMG")) %>%
@@ -233,6 +234,7 @@ load_rproj <- function() {
     table <- conn %>%
         tbl(sql("select *, json_extract(motif_pairs, '$[0].dist') as motif_distance from projection")) %>%
         filter(
+            hostname == "gpu03",
             outcome == "ok",
             motifs == 1
         ) %>%
@@ -256,6 +258,7 @@ load_prescrimp <- function() {
     tbl <- tbl(conn, "prescrimp") %>%
         collect() %>%
         filter(!str_detect(dataset, "EMG")) %>%
+        filter(hostname == "gpu03") %>%
         fix_names() %>%
         add_prefix_info() %>%
         # right_join(allowed_combinations) %T>%
@@ -298,6 +301,7 @@ load_prescrimp <- function() {
 load_scamp_gpu <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "scamp_gpu") %>%
+        filter(hostname == "gpu03") %>%
         collect() %>%
         filter(!str_detect(dataset, "EMG")) %>%
         fix_names() %>%
@@ -344,6 +348,7 @@ load_scamp_gpu <- function() {
 load_scamp <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "scamp") %>%
+        filter(hostname == "gpu03") %>%
         collect() %>%
         filter(!str_detect(dataset, "EMG")) %>%
         fix_names() %>%
@@ -783,7 +788,7 @@ do_tab_time_comparison <- function(data_comparison, file_out) {
                 str_c("\\underline{", time_s, "}"),
                 time_s
             ),
-            mem_overhead_gb = scales::number(max_mem_gb - size_gb, accuracy = 0.1),
+            mem_overhead_gb = scales::number(max_mem_gb, accuracy = 0.1),
             mem_overhead_gb = if_else(is_estimate,
                 str_c("{\\small(", mem_overhead_gb, ")}"),
                 mem_overhead_gb
