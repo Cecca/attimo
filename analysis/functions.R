@@ -812,14 +812,14 @@ do_tab_time_comparison <- function(data_comparison, file_out) {
         select(dataset,
             # time
             `\\attimo` = time_s_attimo,
-            `\\scamp-gpu` = `time_s_scamp-gpu`,
+            `\\scampgpu` = `time_s_scamp-gpu`,
             `\\scamp`=time_s_scamp,
             `\\prescrimp`=time_s_prescrimp,
             `\\LL`=time_s_ll,
             `\\rproj`=time_s_rproj,
             # memory
             `\\attimo ` = mem_overhead_gb_attimo,
-            `\\scamp-gpu ` = `mem_overhead_gb_scamp-gpu`,
+            `\\scampgpu ` = `mem_overhead_gb_scamp-gpu`,
             `\\scamp `=mem_overhead_gb_scamp,
             `\\prescrimp `=mem_overhead_gb_prescrimp,
             `\\LL `=mem_overhead_gb_ll,
@@ -953,8 +953,8 @@ plot_memory_time <- function(data_attimo) {
         geom_point() +
         scale_x_continuous(labels=labsfun) +
         labs(
-            x = "repetitions",
-            y = "total time (s)"
+            x = "Repetitions",
+            y = "Total time (s)"
         ) +
         facet_wrap(vars(dataset), ncol = 3, scales = "free") +
         coord_cartesian(clip = "off") +
@@ -1271,7 +1271,7 @@ plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu) {
                 label = scales::number(
                     time_scamp_s_hline,
                     accuracy = 1,
-                    prefix = "Scamp-gpu: ",
+                    prefix = "Sᴄᴀᴍᴘ-ɢᴘᴜ: ",
                     suffix = " s",
                 ),
                 hjust = label_just,
@@ -1287,7 +1287,7 @@ plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu) {
                 label = scales::number(
                     time_scamp_s_label,
                     accuracy = 1,
-                    prefix = "Scamp-gpu: (",
+                    prefix = "Sᴄᴀᴍᴘ-ɢᴘᴜ: (",
                     suffix = " s) →"
                 ),
                 x = -0.8 # * 1.2
@@ -1369,7 +1369,7 @@ plot_scalability_n_alt <- function(data_scalability) {
         geom_line() +
         geom_text(
             data = labels,
-            label = "scamp-gpu",
+            label = "Sᴄᴀᴍᴘ-ɢᴘᴜ",
             show.legend = F,
             color = 'black',
             nudge_x = -1.1
