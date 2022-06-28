@@ -497,7 +497,7 @@ mod test {
             (100, 616, 2780, 0.1761538477),
             (200, 416, 2580, 0.3602377446),
         ] {
-            let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
+            let ts: Vec<f64> = loadts("../data/ECG.csv.gz", Some(10000)).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
 
             let motif = *motifs(&ts, 1,20, 0.001, 12435)
@@ -521,7 +521,7 @@ mod test {
         // The distances are slightly different, due to numerical approximation
         // and a different normalization in their computation of the standard deviation
         for (w, a, b, d) in [(1000, 7137168, 7414108, 0.3013925657)] {
-            let ts: Vec<f64> = loadts("data/ECG.csv.gz", None).unwrap();
+            let ts: Vec<f64> = loadts("../data/ECG.csv.gz", None).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
             // assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
 
@@ -556,7 +556,7 @@ mod test {
         ];
 
         let w = 1000;
-        let ts: Vec<f64> = loadts("data/ECG.csv.gz", None).unwrap();
+        let ts: Vec<f64> = loadts("../data/ECG.csv.gz", None).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
         let motifs = motifs(&ts, 10, 200, 0.01, 12435);
@@ -601,7 +601,7 @@ mod test {
         ];
 
         let w = 100;
-        let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", None).unwrap();
+        let ts: Vec<f64> = loadts("../data/ASTRO.csv.gz", None).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
         let motifs = motifs(&ts, 10, 800, 0.01, 12435);
@@ -628,52 +628,4 @@ mod test {
         }
     }
 
-    // #[test]
-    // #[ignore]
-    // fn test_motif_freezer_top10() {
-    //     // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
-    //     // In this example, however, we find a set of motifs which are at shorter distance than
-    //     // the ones returned by SCAMP, because SCAMP allows to search only among the nearest neighbor pairs.
-    //     // In this dataset, however, the 8-th and 9-th motifs are formed between subsequences
-    //     // which are nearest neighbor of the other.
-    //     let top10 = [
-    //         (1834102, 3705031, 4.1952486568),
-    //         (3698075, 4733298, 5.7657310309),
-    //         (2352368, 4186992, 7.0770274972),
-    //         (3993450, 4002563, 7.3183233206),
-    //         (4618976, 4812738, 9.2072505046),
-    //         (1825961, 1993851, 9.4638512551),
-    //         (1408089, 1697587, 10.5653425966),
-    //         (3815625, 5170040, 11.3377882631),
-    //         (6429366, 6641900, 11.7777055301),
-    //         (191377, 6339277, 12.50718219),
-    //     ];
-
-    //     let w = 5000;
-    //     let ts: Vec<f64> = loadts("data/freezer.txt.gz", None).unwrap();
-    //     let ts = WindowedTimeseries::new(ts, w, false);
-
-    //     let motifs = motifs(&ts, 10, Repetitions::Exact(400), 0.01, None, None, 12435);
-    //     for (a, b, dist) in top10 {
-    //         // look for this in the motifs, allowing up to w displacement
-    //         println!("looking for ({a} {b} {dist})");
-    //         let mut found = false;
-    //         for motif in &motifs {
-    //             found |= (motif.idx_a as isize - a as isize).abs() <= w as isize;
-    //             found |= (motif.idx_b as isize - b as isize).abs() <= w as isize;
-    //             if found {
-    //                 println!(
-    //                     "   found at ({} {} {})",
-    //                     motif.idx_a, motif.idx_b, motif.distance
-    //                 );
-    //                 break;
-    //             }
-    //         }
-    //         assert!(
-    //             found,
-    //             "Could not find ({}, {}, {}) in {:?}",
-    //             a, b, dist, motifs
-    //         );
-    //     }
-    // }
 }

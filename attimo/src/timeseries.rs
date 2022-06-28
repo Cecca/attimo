@@ -661,7 +661,7 @@ mod test {
     fn test_distance_profile() {
         let w = 1000;
         let ts =
-            crate::load::loadts("data/ECG.csv.gz", Some(100000)).expect("problem loading data");
+            crate::load::loadts("../data/ECG.csv.gz", Some(100000)).expect("problem loading data");
         let ts = WindowedTimeseries::new(ts, w, true);
         let fft_data = FFTData::new(&ts);
 

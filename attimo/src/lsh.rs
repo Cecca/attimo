@@ -551,7 +551,7 @@ mod test {
     #[test]
     fn test_first_collision() {
         let w = 300;
-        let ts = crate::load::loadts("data/ECG.csv.gz", Some(500)).expect("problem loading data");
+        let ts = crate::load::loadts("../data/ECG.csv.gz", Some(500)).expect("problem loading data");
         let ts = crate::timeseries::WindowedTimeseries::new(ts, w, true);
         let fft_data = FFTData::new(&ts);
 
