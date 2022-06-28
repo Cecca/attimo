@@ -1,0 +1,12 @@
+[package]
+name = "pyattimo"
+version = "0.1.0"
+edition = "2018"
+
+[lib]
+name = "pyattimo"
+crate-type = ["cdylib"]
+
+[dependencies]
+attimo = { path = "../attimo" }
+pyo3 = { version = "0.16.5", features = ["extension-module"] }

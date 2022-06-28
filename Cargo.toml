@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "attimo"
+    "attimo",
+    "pyattimo"
 ]
 
 [profile.release]

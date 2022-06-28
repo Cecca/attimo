@@ -99,7 +99,7 @@ fn main() -> Result<()> {
     println!("Loaded raw data in {:?}", timer.elapsed());
     let timer = Instant::now();
     let mem_before = allocated();
-    let ts = WindowedTimeseries::new(ts, w, config.precise);
+    let ts = Arc::new(WindowedTimeseries::new(ts, w, config.precise));
     let ts_bytes = allocated() - mem_before;
     let input_elapsed = timer.elapsed();
     println!(
@@ -113,7 +113,7 @@ fn main() -> Result<()> {
     );
 
     let motifs = motifs(
-        &ts,
+        ts,
         config.motifs,
         config.repetitions,
         config.delta,

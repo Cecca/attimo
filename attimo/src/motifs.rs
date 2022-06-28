@@ -263,8 +263,8 @@ impl TopK {
 /// assert_eq!(m.idx_b, 2780);
 /// assert_eq!(m.distance, 0.17614364917722336);
 /// ```
-pub struct MotifIterator<'a> {
-    ts: &'a WindowedTimeseries,
+pub struct MotifIterator {
+    ts: Arc<WindowedTimeseries>,
     max_topk: usize,
     repetitions: usize,
     delta: f64,
@@ -283,8 +283,8 @@ pub struct MotifIterator<'a> {
     top: TopK,
 }
 
-impl<'a> MotifIterator<'a> {
-    pub fn new(ts: &'a WindowedTimeseries, max_topk: usize, repetitions: usize, delta: f64, seed: u64) -> Self {
+impl MotifIterator {
+    pub fn new(ts: Arc<WindowedTimeseries>, max_topk: usize, repetitions: usize, delta: f64, seed: u64) -> Self {
         let start = Instant::now();
         let exclusion_zone = ts.w;
 
@@ -298,7 +298,7 @@ impl<'a> MotifIterator<'a> {
             seed,
         );
         let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
-        let pools = HashCollection::from_ts(ts, &fft_data, Arc::clone(&hasher));
+        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
         let pools = Arc::new(pools);
         drop(fft_data);
 
@@ -363,7 +363,7 @@ impl<'a> MotifIterator<'a> {
 
 }
 
-impl<'a> Iterator for MotifIterator<'a> {
+impl Iterator for MotifIterator {
     type Item = Motif;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -441,7 +441,7 @@ impl<'a> Iterator for MotifIterator<'a> {
                                         {
                                             //// After computing the distance between the two subsequences,
                                             //// we try to insert the pair in the top data structure
-                                            let d = zeucl(self.ts, a_idx, b_idx);
+                                            let d = zeucl(&self.ts, a_idx, b_idx);
                                             if d.is_finite() {
                                                 let m = Motif {
                                                     idx_a: a_idx as usize,
@@ -471,7 +471,7 @@ impl<'a> Iterator for MotifIterator<'a> {
 }
 
 pub fn motifs(
-    ts: &WindowedTimeseries,
+    ts: Arc<WindowedTimeseries>,
     topk: usize,
     repetitions: usize,
     delta: f64,
@@ -498,9 +498,9 @@ mod test {
             (200, 416, 2580, 0.3602377446),
         ] {
             let ts: Vec<f64> = loadts("../data/ECG.csv.gz", Some(10000)).unwrap();
-            let ts = WindowedTimeseries::new(ts, w, true);
+            let ts = Arc::new(WindowedTimeseries::new(ts, w, true));
 
-            let motif = *motifs(&ts, 1,20, 0.001, 12435)
+            let motif = *motifs(ts, 1,20, 0.001, 12435)
                 .first()
                 .unwrap();
             println!(
@@ -522,10 +522,10 @@ mod test {
         // and a different normalization in their computation of the standard deviation
         for (w, a, b, d) in [(1000, 7137168, 7414108, 0.3013925657)] {
             let ts: Vec<f64> = loadts("../data/ECG.csv.gz", None).unwrap();
-            let ts = WindowedTimeseries::new(ts, w, true);
+            let ts = Arc::new(WindowedTimeseries::new(ts, w, true));
             // assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
 
-            let motif = *motifs(&ts, 1, 200, 0.001, 12435)
+            let motif = *motifs(ts, 1, 200, 0.001, 12435)
                 .first()
                 .unwrap();
             println!("Motif distance {}", motif.distance);
@@ -557,9 +557,9 @@ mod test {
 
         let w = 1000;
         let ts: Vec<f64> = loadts("../data/ECG.csv.gz", None).unwrap();
-        let ts = WindowedTimeseries::new(ts, w, false);
+        let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
 
-        let motifs = motifs(&ts, 10, 200, 0.01, 12435);
+        let motifs = motifs(ts, 10, 200, 0.01, 12435);
         for (a, b, dist) in top10 {
             // look for this in the motifs, allowing up to w displacement
             println!("looking for ({a} {b} {dist})");
@@ -602,9 +602,9 @@ mod test {
 
         let w = 100;
         let ts: Vec<f64> = loadts("../data/ASTRO.csv.gz", None).unwrap();
-        let ts = WindowedTimeseries::new(ts, w, false);
+        let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
 
-        let motifs = motifs(&ts, 10, 800, 0.01, 12435);
+        let motifs = motifs(ts, 10, 800, 0.01, 12435);
         for (a, b, dist) in top10 {
             // look for this in the motifs, allowing up to w displacement
             println!("looking for ({a} {b} {dist})");

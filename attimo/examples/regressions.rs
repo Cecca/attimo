@@ -10,6 +10,7 @@ use std::{
     str::FromStr,
     time::{Instant},
 };
+use std::sync::Arc;
 
 fn get_git_sha() -> Result<String> {
     std::process::Command::new("git")
@@ -34,10 +35,10 @@ fn run(path: &str, w: usize, topk: usize, reps: usize, runs: usize, csv: &str) -
         .create(true)
         .open(csv)?;
     let threads = rayon::current_num_threads();
-    let ts = WindowedTimeseries::new(loadts("data/ECG.csv.gz", None)?, 1000, false);
+    let ts = Arc::new(WindowedTimeseries::new(loadts("data/ECG.csv.gz", None)?, 1000, false));
     for _ in 0..runs {
         let timer = Instant::now();
-        motifs(&ts, 10, 200, 0.01, 1234);
+        motifs(Arc::clone(&ts), 10, 200, 0.01, 1234);
         writeln!(
             f,
             "{},{},{},{},{},{},{},{}",
