@@ -117,10 +117,7 @@ fn main() -> Result<()> {
         config.motifs,
         config.repetitions,
         config.delta,
-        config.max_correlation,
-        config.min_correlation,
         config.seed,
-        total_timer
     );
 
     monitor_flag.store(false, std::sync::atomic::Ordering::SeqCst);
