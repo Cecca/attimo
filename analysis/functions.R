@@ -394,6 +394,7 @@ load_scamp <- function() {
 load_ll <- function() {
     conn <- DBI::dbConnect(RSQLite::SQLite(), "attimo-results.db")
     tbl <- tbl(conn, "ll") %>%
+        filter(hostname == "gpu03") %>%
         collect() %>%
         filter(!str_detect(dataset, "EMG")) %>%
         fix_names() %>%
