@@ -12,7 +12,7 @@ bitvec = "1.0"
 rand = "0.8"
 rand_xoshiro = "0.6"
 rand_distr = "0.4"
-packed_simd = { version = "0.3.7", package = "packed_simd_2" }
+packed_simd = { version = "0.3.8", package = "packed_simd_2" }
 rayon = "1.5"
 crossbeam-channel = "0.5"
 fast-float = "0.2"
