@@ -41,3 +41,9 @@ chrono = "0.4"
 name = "benchmarks"
 harness = false
 
+[profile.test]
+# Optimize tests, otherwise they take very long to run.
+# This is different than running tests in relase mode,
+# which also disables debug assertions.
+opt-level = 2
+

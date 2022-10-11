@@ -15,6 +15,7 @@ use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
 use std::cell::RefCell;
+use std::collections::BinaryHeap;
 use std::ops::Range;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -265,7 +266,6 @@ pub fn motifs(
     seed: u64,
     start: Instant, // when the program started, to compute elapsed confirmation times
 ) -> Vec<Motif> {
-
     //// We set the exclusion zone to the motif length, so that motifs cannot overlap at all.
     let exclusion_zone = ts.w;
     let fft_data = FFTData::new(&ts);
@@ -277,13 +277,7 @@ pub fn motifs(
         min_dist, max_dist
     );
 
-    let hasher_width = Hasher::estimate_width(
-        &ts,
-        &fft_data,
-        topk,
-        min_dist,
-        seed,
-    );
+    let hasher_width = Hasher::estimate_width(&ts, &fft_data, topk, min_dist, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
 
     info!("hash computation"; "tag" => "phase");
@@ -601,6 +595,289 @@ fn explore_tries(
     }
 }
 
+pub struct MotifsEnumerator<'ts> {
+    start: Instant,
+    ts: &'ts WindowedTimeseries,
+    max_k: usize,
+    topk: TopK,
+    to_return: BinaryHeap<Motif>,
+    repetitions: usize,
+    delta: f64,
+    exclusion_zone: usize,
+    hasher: Arc<Hasher>,
+    pools: Arc<HashCollection>,
+    column_buffer: Vec<(HashValue, u32)>,
+    buckets: Vec<Range<usize>>,
+    tl_top: ThreadLocal<RefCell<TopK>>,
+    /// the current repetition
+    rep: usize,
+    /// the current depth
+    depth: usize,
+    /// the previous depth
+    previous_depth: Option<usize>,
+}
+
+impl<'ts> MotifsEnumerator<'ts> {
+    pub fn new(ts: &'ts WindowedTimeseries, max_k: usize, repetitions: usize, delta: f64, seed: u64) -> Self {
+        let start = Instant::now();
+        let exclusion_zone = ts.w;
+        let fft_data = FFTData::new(&ts);
+
+        let hasher_width = Hasher::estimate_width(&ts, &fft_data, max_k, None, seed);
+        info!("Computed hasher width"; "hasher_width" => hasher_width);
+
+        info!("hash computation"; "tag" => "phase");
+        let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
+        let mem_before = allocated();
+        let pools = HashCollection::from_ts(ts, &fft_data, Arc::clone(&hasher));
+        let pools = Arc::new(pools);
+        let pools_size = allocated() - mem_before;
+        drop(fft_data);
+
+        let cnt_dist = AtomicUsize::new(0);
+
+        let mut topk = TopK::new(max_k, exclusion_zone);
+
+        info!("tries exploration"; "tag" => "phase");
+        // This vector holds the (sorted) hashed subsequences, and their index
+        let column_buffer = Vec::new();
+        // This vector holds the boundaries between buckets. We reuse the allocations
+        let buckets = Vec::new();
+        let tl_top = ThreadLocal::new();
+
+        Self {
+            start,
+            ts,
+            max_k,
+            topk,
+            to_return: BinaryHeap::new(),
+            repetitions,
+            delta,
+            exclusion_zone,
+            hasher,
+            pools,
+            column_buffer,
+            buckets,
+            tl_top,
+            rep: 0,
+            depth: K,
+            previous_depth: None,
+        }
+    }
+
+    pub fn stopping_condition(
+        p: f64,
+        prefix: usize,
+        previous: Option<usize>,
+        repetition: usize,
+        repetitions: usize,
+        delta: f64,
+    ) -> bool {
+        let i_half = prefix as f64 / 2.0;
+        let sqrt = (repetitions as f64).sqrt().ceil() as i32;
+        let j_left = repetition as i32 / sqrt;
+        let j_right = repetition as i32 % sqrt;
+        let failure_p = if let Some(previous) = previous {
+            let prev_half = previous as f64 / 2.0;
+            let lu_i = 1.0 - (1.0 - p.powf(i_half)).powi(j_left);
+            let ru_i = 1.0 - (1.0 - p.powf(i_half)).powi(j_right);
+            let lu_ip = 1.0 - (1.0 - p.powf(prev_half)).powi(j_left);
+            let ru_ip = 1.0 - (1.0 - p.powf(prev_half)).powi(j_right);
+            let ll_ip = 1.0 - (1.0 - p.powf(prev_half)).powi(sqrt - j_left);
+            let rl_ip = 1.0 - (1.0 - p.powf(prev_half)).powi(sqrt - j_right);
+            (1.0 - lu_i * ru_i)
+                * (1.0 - lu_ip * rl_ip)
+                * (1.0 - ll_ip * ru_ip)
+                * (1.0 - ll_ip * rl_ip)
+        } else {
+            let lu_i = 1.0 - (1.0 - p.powf(i_half)).powi(j_left);
+            let ru_i = 1.0 - (1.0 - p.powf(i_half)).powi(j_right);
+            1.0 - lu_i * ru_i
+        };
+        failure_p <= delta
+    }
+
+    //// Find the level for which the given distance has a good probability of being
+    //// found withing the allowed number of repetitions
+    fn level_for_distance(&self, d: f64, mut prefix: usize, delta: f64) -> usize {
+        let p = self.hasher.collision_probability_at(d);
+        let initial = prefix as usize;
+        while prefix > 0 {
+            for rep in 0..self.repetitions {
+                if Self::stopping_condition(p, prefix, Some(initial), rep, self.repetitions, delta)
+                {
+                    return prefix;
+                }
+            }
+            prefix -= 1;
+        }
+        panic!("Got to prefix of length 0!");
+    }
+
+    /// Return the next motif, or `None` if we already returned `max_k` motifs
+    pub fn next_motif(&mut self) -> Option<Motif> {
+        // First, try to empty the buffer of motifs to return, if any
+        if let Some(motif) = self.to_return.pop() {
+            return Some(motif);
+        }
+
+        // check we already returned all we could
+        if self.topk.num_confirmed() == self.max_k {
+            return None;
+        }
+
+        // repeat until we are able to buffer some motifs
+        while self.to_return.is_empty() {
+            assert!(self.depth > 0);
+            assert!(self.rep < self.repetitions);
+            eprintln!("Repetition {} at prefix {}", self.rep, self.depth);
+
+            // Set up buckets for the current repetition
+            self.pools.group_subsequences(
+                self.depth,
+                self.rep,
+                self.exclusion_zone,
+                &mut self.column_buffer,
+                &mut self.buckets,
+            );
+            let n_buckets = self.buckets.len();
+            let chunk_size = std::cmp::max(1, n_buckets / (4 * rayon::current_num_threads()));
+
+            // counters for profiling
+            let rep_cnt_dists = AtomicUsize::new(0);
+            let spurious_collisions_cnt = AtomicUsize::new(0);
+            let rep_candidate_pairs = AtomicUsize::new(0);
+
+            (0..n_buckets / chunk_size)
+                .into_par_iter()
+                .for_each(|chunk_i| {
+                    // let tl_top = tl_top.get_or(|| RefCell::new(TopK::new(topk, exclusion_zone)));
+                    let tl_top = self.tl_top.get_or(|| RefCell::new(self.topk.clone()));
+
+                    // counters
+                    let mut cands = 0;
+                    let mut dists = 0;
+                    let mut spurious = 0;
+
+                    for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
+                        let bucket = &self.column_buffer[self.buckets[i].clone()];
+
+                        for (_, a_idx) in bucket.iter() {
+                            let a_idx = *a_idx as usize;
+                            // let a_already_checked = rep_bounds[a_idx].clone();
+                            // let a_hash_idx = hash_range.start + a_offset;
+                            for (_, b_idx) in bucket.iter() {
+                                let b_idx = *b_idx as usize;
+                                //// Here we handle trivial matches: we don't consider a pair if the difference between
+                                //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
+                                if a_idx + self.exclusion_zone < b_idx {
+                                    cands += 1;
+
+                                    //// We only process the pair if this is the first repetition in which
+                                    //// they collide. We get this information from the pool of bits
+                                    //// from which hash values for all repetitions are extracted.
+                                    if let Some(first_colliding_repetition) =
+                                        self.pools.first_collision(a_idx, b_idx, self.depth)
+                                    {
+                                        //// This is the first collision in this iteration, _and_ the pair didn't collide
+                                        //// at a deeper level.
+                                        if first_colliding_repetition == self.rep
+                                            && self
+                                                .previous_depth
+                                                .map(|d| {
+                                                    self.pools
+                                                        .first_collision(a_idx, b_idx, d)
+                                                        .is_none()
+                                                })
+                                                .unwrap_or(true)
+                                        {
+                                            //// After computing the distance between the two subsequences,
+                                            //// we try to insert the pair in the top data structure
+                                            let d = zeucl(&self.ts, a_idx, b_idx);
+                                            if d.is_finite() {
+                                                dists += 1;
+
+                                                let m = Motif {
+                                                    idx_a: a_idx as usize,
+                                                    idx_b: b_idx as usize,
+                                                    distance: d,
+                                                    elapsed: None,
+                                                };
+                                                tl_top.borrow_mut().insert(m);
+                                            }
+                                        }
+                                    } else {
+                                        spurious += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    rep_candidate_pairs.fetch_add(cands, Ordering::SeqCst);
+                    rep_cnt_dists.fetch_add(dists, Ordering::SeqCst);
+                    spurious_collisions_cnt.fetch_add(spurious, Ordering::SeqCst);
+                });
+
+            // Add to the output all the new top pairs that have been found
+            let mut tmp_top =TopK::new(self.max_k, self.exclusion_zone);
+            self.tl_top
+                .iter_mut()
+                .for_each(|top| tmp_top.add_all(&mut top.borrow_mut()));
+            self.topk.add_all(&mut tmp_top);
+
+            // Confirm the pairs that can be confirmed in this iteration
+            let elapsed = self.start.elapsed();
+            let depth = self.depth;
+            let previous_depth = self.previous_depth;
+            let rep = self.rep;
+            let repetitions = self.repetitions;
+            let delta = self.delta;
+            let hasher = Arc::clone(&self.hasher);
+            let mut buf = Vec::new();
+            self.topk.for_each(|m| {
+                if m.elapsed.is_none() {
+                    let p = hasher.collision_probability_at(m.distance);
+                    if Self::stopping_condition(p, depth, previous_depth, rep, repetitions, delta) {
+                        m.elapsed.replace(elapsed);
+                        buf.push(m.clone());
+                    }
+                }
+            });
+            self.to_return.extend(buf.drain(..));
+
+            // set up next repetition
+            self.rep += 1;
+            if self.rep >= self.repetitions {
+                self.rep = 0;
+                self.previous_depth.replace(self.depth);
+                if let Some(first_not_confirmed) = self.topk.first_not_confirmed() {
+                    let new_depth =
+                        self.level_for_distance(first_not_confirmed.distance, self.depth, delta);
+                    if new_depth == depth {
+                        self.depth -= 1;
+                    } else {
+                        self.depth = new_depth;
+                    }
+                } else {
+                    self.depth -= 1;
+                }
+                assert!(self.previous_depth.map(|prev| self.depth < prev).unwrap_or(true));
+            }
+        }
+
+        // return the found motif with the smallest distance
+        self.to_return.pop()
+    }
+}
+
+impl<'ts> Iterator for MotifsEnumerator<'ts> {
+    type Item = Motif;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_motif()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::{load::loadts, timeseries::WindowedTimeseries};
@@ -622,7 +899,7 @@ mod test {
             let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
 
-            let motif = *motifs(&ts, 1,20, 0.001, None, None, 12435, Instant::now())
+            let motif = *motifs(&ts, 1, 20, 0.001, None, None, 12435, Instant::now())
                 .first()
                 .unwrap();
             println!(
@@ -707,6 +984,52 @@ mod test {
 
     #[test]
     #[ignore]
+    fn test_motif_astro_top10_enumerate() {
+        // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
+        let top10 = [
+            (609810, 888455, 1.264327903),
+            (502518, 656063, 1.312459673),
+            (321598, 423427, 1.368041725),
+            (342595, 625081, 1.403194924),
+            (218448, 1006871, 1.442935122),
+            (192254, 466432, 1.523167513),
+            (527024, 533903, 1.526611152),
+            (520191, 743708, 1.558780057),
+            (192097, 193569, 1.583277835),
+            (267982, 512333, 1.617081054),
+        ];
+
+        let w = 100;
+        let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", None).unwrap();
+        let ts = WindowedTimeseries::new(ts, w, false);
+
+        let motifs: Vec<Motif> = MotifsEnumerator::new(&ts, 10, 800, 0.01, 12435).collect();
+        
+        for (a, b, dist) in top10 {
+            // look for this in the motifs, allowing up to w displacement
+            println!("looking for ({a} {b} {dist})");
+            let mut found = false;
+            for motif in &motifs {
+                found |= (motif.idx_a as isize - a as isize).abs() <= w as isize;
+                found |= (motif.idx_b as isize - b as isize).abs() <= w as isize;
+                if found {
+                    println!(
+                        "   found at ({} {} {})",
+                        motif.idx_a, motif.idx_b, motif.distance
+                    );
+                    break;
+                }
+            }
+            assert!(
+                found,
+                "Could not find ({}, {}, {}) in {:?}",
+                a, b, dist, motifs
+            );
+        }
+    }
+
+    #[test]
+    #[ignore]
     fn test_motif_astro_top10() {
         // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
         let top10 = [
@@ -749,53 +1072,4 @@ mod test {
             );
         }
     }
-
-    // #[test]
-    // #[ignore]
-    // fn test_motif_freezer_top10() {
-    //     // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
-    //     // In this example, however, we find a set of motifs which are at shorter distance than
-    //     // the ones returned by SCAMP, because SCAMP allows to search only among the nearest neighbor pairs.
-    //     // In this dataset, however, the 8-th and 9-th motifs are formed between subsequences
-    //     // which are nearest neighbor of the other.
-    //     let top10 = [
-    //         (1834102, 3705031, 4.1952486568),
-    //         (3698075, 4733298, 5.7657310309),
-    //         (2352368, 4186992, 7.0770274972),
-    //         (3993450, 4002563, 7.3183233206),
-    //         (4618976, 4812738, 9.2072505046),
-    //         (1825961, 1993851, 9.4638512551),
-    //         (1408089, 1697587, 10.5653425966),
-    //         (3815625, 5170040, 11.3377882631),
-    //         (6429366, 6641900, 11.7777055301),
-    //         (191377, 6339277, 12.50718219),
-    //     ];
-
-    //     let w = 5000;
-    //     let ts: Vec<f64> = loadts("data/freezer.txt.gz", None).unwrap();
-    //     let ts = WindowedTimeseries::new(ts, w, false);
-
-    //     let motifs = motifs(&ts, 10, Repetitions::Exact(400), 0.01, None, None, 12435);
-    //     for (a, b, dist) in top10 {
-    //         // look for this in the motifs, allowing up to w displacement
-    //         println!("looking for ({a} {b} {dist})");
-    //         let mut found = false;
-    //         for motif in &motifs {
-    //             found |= (motif.idx_a as isize - a as isize).abs() <= w as isize;
-    //             found |= (motif.idx_b as isize - b as isize).abs() <= w as isize;
-    //             if found {
-    //                 println!(
-    //                     "   found at ({} {} {})",
-    //                     motif.idx_a, motif.idx_b, motif.distance
-    //                 );
-    //                 break;
-    //             }
-    //         }
-    //         assert!(
-    //             found,
-    //             "Could not find ({}, {}, {}) in {:?}",
-    //             a, b, dist, motifs
-    //         );
-    //     }
-    // }
 }
