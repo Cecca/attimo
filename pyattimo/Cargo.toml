@@ -9,5 +9,7 @@ name = "pyattimo"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.17.1", features = ["extension-module"] }
+anyhow = "1.0"
+pyo3 = { version = "0.17.1", features = ["extension-module", "anyhow"] }
 attimo = { path = ".." }
+ureq = "2.5"

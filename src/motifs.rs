@@ -595,9 +595,9 @@ fn explore_tries(
     }
 }
 
-pub struct MotifsEnumerator<'ts> {
+pub struct MotifsEnumerator {
     start: Instant,
-    ts: &'ts WindowedTimeseries,
+    ts: Arc<WindowedTimeseries>,
     max_k: usize,
     topk: TopK,
     to_return: BinaryHeap<Motif>,
@@ -617,8 +617,14 @@ pub struct MotifsEnumerator<'ts> {
     previous_depth: Option<usize>,
 }
 
-impl<'ts> MotifsEnumerator<'ts> {
-    pub fn new(ts: &'ts WindowedTimeseries, max_k: usize, repetitions: usize, delta: f64, seed: u64) -> Self {
+impl MotifsEnumerator {
+    pub fn new(
+        ts: Arc<WindowedTimeseries>,
+        max_k: usize,
+        repetitions: usize,
+        delta: f64,
+        seed: u64,
+    ) -> Self {
         let start = Instant::now();
         let exclusion_zone = ts.w;
         let fft_data = FFTData::new(&ts);
@@ -629,7 +635,7 @@ impl<'ts> MotifsEnumerator<'ts> {
         info!("hash computation"; "tag" => "phase");
         let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
         let mem_before = allocated();
-        let pools = HashCollection::from_ts(ts, &fft_data, Arc::clone(&hasher));
+        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
         let pools = Arc::new(pools);
         let pools_size = allocated() - mem_before;
         drop(fft_data);
@@ -819,7 +825,7 @@ impl<'ts> MotifsEnumerator<'ts> {
                 });
 
             // Add to the output all the new top pairs that have been found
-            let mut tmp_top =TopK::new(self.max_k, self.exclusion_zone);
+            let mut tmp_top = TopK::new(self.max_k, self.exclusion_zone);
             self.tl_top
                 .iter_mut()
                 .for_each(|top| tmp_top.add_all(&mut top.borrow_mut()));
@@ -861,7 +867,10 @@ impl<'ts> MotifsEnumerator<'ts> {
                 } else {
                     self.depth -= 1;
                 }
-                assert!(self.previous_depth.map(|prev| self.depth < prev).unwrap_or(true));
+                assert!(self
+                    .previous_depth
+                    .map(|prev| self.depth < prev)
+                    .unwrap_or(true));
             }
         }
 
@@ -870,7 +879,7 @@ impl<'ts> MotifsEnumerator<'ts> {
     }
 }
 
-impl<'ts> Iterator for MotifsEnumerator<'ts> {
+impl Iterator for MotifsEnumerator {
     type Item = Motif;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1001,10 +1010,10 @@ mod test {
 
         let w = 100;
         let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", None).unwrap();
-        let ts = WindowedTimeseries::new(ts, w, false);
+        let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
 
-        let motifs: Vec<Motif> = MotifsEnumerator::new(&ts, 10, 800, 0.01, 12435).collect();
-        
+        let motifs: Vec<Motif> = MotifsEnumerator::new(ts, 10, 800, 0.01, 12435).collect();
+
         for (a, b, dist) in top10 {
             // look for this in the motifs, allowing up to w displacement
             println!("looking for ({a} {b} {dist})");
