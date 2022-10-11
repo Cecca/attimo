@@ -671,6 +671,10 @@ impl MotifsEnumerator {
         }
     }
 
+    pub fn get_ts(&self) -> Arc<WindowedTimeseries> {
+        Arc::clone(&self.ts)
+    }
+
     pub fn stopping_condition(
         p: f64,
         prefix: usize,
