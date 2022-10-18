@@ -161,10 +161,10 @@ impl HashCollection {
     //// and a `Hasher`.
     pub fn from_ts(ts: &WindowedTimeseries, fft_data: &FFTData, hasher: Arc<Hasher>) -> Self {
         assert!(ts.num_subsequences() < u32::MAX as usize, "We use 32 bit integers as pointers into subsequences, this timeseries has too many subsequences.");
-        println!(
-            "Number of tensor repetitions: {}",
-            hasher.tensor_repetitions
-        );
+        // println!(
+        //     "Number of tensor repetitions: {}",
+        //     hasher.tensor_repetitions
+        // );
         let ns = ts.num_subsequences();
 
         let mut pools = alloc_cnt!("pools"; {vec![0u8; hasher.tensor_repetitions * K * ns]});
@@ -445,7 +445,7 @@ impl Hasher {
         let mut kth_upper_bound = None;
         let mut r = 1.0;
         loop {
-            println!("Build probe buckets with r={}", r);
+            // println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
             let probe_collection = HashCollection::from_ts(&ts, fft_data, probe_hasher);
             let fraction_oob = probe_collection.fraction_oob();
@@ -460,7 +460,7 @@ impl Hasher {
             let mut has_collision = || {
                 let mut topk = crate::motifs::TopK::new(k, ts.w);
                 let timer = Instant::now();
-                let mut cnt_dists = 0;
+                // let mut cnt_dists = 0;
                 for bucket in probe_buckets.iter() {
                     let bucket = &probe_column[bucket.clone()];
                     for (_, a_idx) in bucket.iter() {
@@ -471,7 +471,7 @@ impl Hasher {
                                 probed_pairs += 1;
                                 if probe_collection.first_collision(a_idx, b_idx, K).is_some() {
                                     let d = crate::distance::zeucl(&ts, a_idx, b_idx);
-                                    cnt_dists += 1;
+                                    // cnt_dists += 1;
                                     if d > min_dist.unwrap_or(-1.0) {
                                         topk.insert(Motif {
                                             distance: d,
@@ -489,11 +489,11 @@ impl Hasher {
                     }
                 }
                 pair_probing_time += timer.elapsed();
-                println!(
-                    "Found {} motifs with {} distance computations",
-                    topk.to_vec().len(),
-                    cnt_dists,
-                );
+                // println!(
+                //     "Found {} motifs with {} distance computations",
+                //     topk.to_vec().len(),
+                //     cnt_dists,
+                // );
                 return None;
             };
 
