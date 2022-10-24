@@ -1,0 +1,4 @@
+.jupyter_cache
+/.quarto/
+.discover.parquet
+ecg.csv.gz

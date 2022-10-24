@@ -1,0 +1,10 @@
+---
+title: "Attimo: fast time series motif mining"
+---
+
+`Attimo` stands for AdapTive Timeseries Motifs, and is a software package to find motifs in time series.
+
+Intuitively, a _motif_ is a subsequence in a time series that has at least one similar occurrence in another location of the same time series.
+More formally, for a fixed subsequence length $w$ and for a given distance function between subsequences of length $m$ of a time series, we can define the top motif as being the pair of subsequences at minimum distance.
+Since subsequences can overlap, usually overlapping subsequences are ignored^[This definition of subsequences to be ignored is somewhat flexible. For instance, we can allow for overlaps of at most $w/4$, or $w/2$].
+

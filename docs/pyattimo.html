@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.0.37">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Matteo Ceccarello">
+
+<title>Attimo: fast time series motif mining - PyAttimo: scalable time series motifs mining with Python</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+span.underline{text-decoration: underline;}
+div.column{display: inline-block; vertical-align: top; width: 50%;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+    color: #aaaaaa;
+  }
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+code span.at { color: #7d9029; } /* Attribute */
+code span.bn { color: #40a070; } /* BaseN */
+code span.bu { } /* BuiltIn */
+code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+code span.ch { color: #4070a0; } /* Char */
+code span.cn { color: #880000; } /* Constant */
+code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+code span.dt { color: #902000; } /* DataType */
+code span.dv { color: #40a070; } /* DecVal */
+code span.er { color: #ff0000; font-weight: bold; } /* Error */
+code span.ex { } /* Extension */
+code span.fl { color: #40a070; } /* Float */
+code span.fu { color: #06287e; } /* Function */
+code span.im { } /* Import */
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+code span.op { color: #666666; } /* Operator */
+code span.ot { color: #007020; } /* Other */
+code span.pp { color: #bc7a00; } /* Preprocessor */
+code span.sc { color: #4070a0; } /* SpecialChar */
+code span.ss { color: #bb6688; } /* SpecialString */
+code span.st { color: #4070a0; } /* String */
+code span.va { color: #19177c; } /* Variable */
+code span.vs { color: #4070a0; } /* VerbatimString */
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+div.csl-bib-body { }
+div.csl-entry {
+  clear: both;
+}
+.hanging div.csl-entry {
+  margin-left:2em;
+  text-indent:-2em;
+}
+div.csl-left-margin {
+  min-width:2em;
+  float:left;
+}
+div.csl-right-inline {
+  margin-left:2em;
+  padding-left:1em;
+}
+div.csl-indent {
+  margin-left: 2em;
+}
+</style>
+
+
+<script src="site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="site_libs/quarto-nav/headroom.min.js"></script>
+<script src="site_libs/clipboard/clipboard.min.js"></script>
+<script src="site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="site_libs/quarto-search/fuse.min.js"></script>
+<script src="site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="./">
+<script src="site_libs/quarto-html/quarto.js"></script>
+<script src="site_libs/quarto-html/popper.min.js"></script>
+<script src="site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="site_libs/quarto-html/anchor.min.js"></script>
+<link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="site_libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 20,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit"
+  }
+}</script>
+
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+
+<link rel="stylesheet" href="styles.css">
+</head>
+
+<body class="nav-fixed">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg navbar-dark ">
+      <div class="navbar-container container-fluid">
+      <a class="navbar-brand" href="./index.html">
+    <span class="navbar-title">Attimo: fast time series motif mining</span>
+  </a>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="./index.html">Home</a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./about.html">About</a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link active" href="./pyattimo.html" aria-current="page">PyAttimo</a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="https://cecca.github.io/attimo/VLDB-supplemental/">VLDB supplement</a>
+  </li>  
+</ul>
+              <div id="quarto-search" class="" title="Search"></div>
+          </div> <!-- /navcollapse -->
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#setting-things-up" id="toc-setting-things-up" class="nav-link active" data-scroll-target="#setting-things-up">Setting things up</a></li>
+  <li><a href="#looking-for-motifs-interactively" id="toc-looking-for-motifs-interactively" class="nav-link" data-scroll-target="#looking-for-motifs-interactively">Looking for motifs, interactively</a></li>
+  <li><a href="#comparison-with-stumpy-and-pyscamp" id="toc-comparison-with-stumpy-and-pyscamp" class="nav-link" data-scroll-target="#comparison-with-stumpy-and-pyscamp">Comparison with <code>stumpy</code> and <code>pyscamp</code></a></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content page-columns page-full" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">PyAttimo: scalable time series motifs mining with Python</h1>
+</div>
+
+
+<div class="quarto-title-meta-author">
+  <div class="quarto-title-meta-heading">Author</div>
+  <div class="quarto-title-meta-heading">Affiliation</div>
+  
+    <div class="quarto-title-meta-contents">
+    <a href="https://www.inf.unibz.it/~ceccarello/">Matteo Ceccarello</a> 
+  </div>
+    <div class="quarto-title-meta-contents">
+        <p class="affiliation">
+            Free University of Bozen/Bolzano
+          </p>
+      </div>
+    </div>
+
+<div class="quarto-title-meta">
+
+      
+    
+  </div>
+  
+
+</header>
+
+<p>This document showcases the usage of the <code>pyattimo</code> Python package for time series motif discovery, on a rather standard laptop. Most notably, the <code>pyattimo</code> allows to enumerate the motifs one at a time, investing only the computation needed to return the next motif.</p>
+<hr>
+<section id="setting-things-up" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="setting-things-up">Setting things up</h2>
+<p>First and foremost, let’s import the <code>pyattimo</code> package.</p>
+<div class="cell" data-execution_count="2">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyattimo</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Then, let’s load a dataset from the ones shipped with the python package. On the first run it will be downloaded on your machine from <a href="https://figshare.com/articles/dataset/Datasets/20747617">this Figshare</a>. In this example, we are just loading the first million points from the dataset</p>
+<div class="cell" data-execution_count="4">
+<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>ts <span class="op">=</span> pyattimo.load_dataset(<span class="st">"ecg"</span>, prefix<span class="op">=</span><span class="dv">1000000</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>The time series looks like the following.</p>
+<div class="cell page-columns page-full" data-execution_count="5">
+<div class="cell-output cell-output-display column-body">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="pyattimo_files/figure-html/cell-5-output-1.png" width="718" height="206" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+<p>The above display looks a bit crowded, but if we focus on the first 10000 points, we can more clearly see the structure.</p>
+<div class="cell page-columns page-full" data-execution_count="6">
+<div class="cell-output cell-output-display column-body">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="pyattimo_files/figure-html/cell-6-output-1.png" width="731" height="189" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+</section>
+<section id="looking-for-motifs-interactively" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="looking-for-motifs-interactively">Looking for motifs, interactively</h2>
+<p>The <code>pyattimo</code> package provides a rather simple iterator interface:</p>
+<ul>
+<li>you first construct an instance of the <code>MotifsIterator</code> object, specifying the time series, the motif length, and other parameters;</li>
+<li>then you repeatedly call <code>next</code> on this object to iterat through it</li>
+</ul>
+<p>Constructing the iterator requires a time proportional to the time series length. On my dual core machine, this is about 7.8 seconds for our example time series of length 1000000.</p>
+<div class="cell" data-execution_count="7">
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="op">%</span>time motifs <span class="op">=</span> pyattimo.MotifsIterator(ts, w<span class="op">=</span><span class="dv">1000</span>, max_k<span class="op">=</span><span class="dv">100</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>CPU times: user 20.6 s, sys: 519 ms, total: 21.1 s
+Wall time: 10.4 s</code></pre>
+</div>
+</div>
+<p>Once the index is built, we can ask for the first motif. The time required for this operation depends on how distances between subsequences are distributed, rather than by how long the time series is.</p>
+<div class="cell" data-execution_count="8">
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="op">%</span>time m <span class="op">=</span> <span class="bu">next</span>(motifs)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>CPU times: user 27.8 s, sys: 512 ms, total: 28.3 s
+Wall time: 12.7 s</code></pre>
+</div>
+</div>
+<p>The returned <code>pyattimo.Motif</code> object allows to retrieve the starting indices of the subsequences composing the motif, along with the z-normalized Euclidean distance between the two subsequences.</p>
+<div class="cell" data-execution_count="9">
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"Index of first subsequence"</span>, m.a)</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"Index of second subsequence"</span>, m.b)</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"z-normalized Euclidean distance"</span>, m.distance)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Index of first subsequence 439120
+Index of second subsequence 785692
+z-normalized Euclidean distance 0.4495888874706488</code></pre>
+</div>
+</div>
+<p>Furthermore, you can access the data of the subsequences themselves:</p>
+<div class="cell" data-execution_count="10">
+<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(m.values_a())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[0.006, 0.006, 0.006, 0.006, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.007, 0.007, 0.007, 0.007, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.01, 0.01, 0.01, 0.01, 0.011, 0.011, 0.011, 0.011, 0.012, 0.012, 0.012, 0.012, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.012, 0.012, 0.012, 0.012, 0.01, 0.01, 0.01, 0.01, 0.007, 0.007, 0.007, 0.007, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.007, 0.007, 0.007, 0.007, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.01, 0.01, 0.01, 0.01, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.011, 0.011, 0.011, 0.011, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.012, 0.012, 0.012, 0.012, 0.011, 0.011, 0.011, 0.011, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.006, 0.006, 0.006, 0.006, 0.007, 0.007, 0.007, 0.007, 0.009, 0.009, 0.009, 0.009, 0.01, 0.01, 0.01, 0.01, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.01, 0.01, 0.01, 0.01, 0.009, 0.009, 0.009, 0.009, 0.006, 0.006, 0.006, 0.006, 0.007, 0.007, 0.007, 0.007, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.007, 0.007, 0.007, 0.007, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.004, 0.004, 0.004, 0.004, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.005, 0.006, 0.006, 0.006, 0.006, 0.005, 0.005, 0.005, 0.005, 0.006, 0.006, 0.006, 0.006, 0.005, 0.005, 0.005, 0.005, 0.004, 0.004, 0.004, 0.004, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.004, 0.004, 0.004, 0.004, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.004, 0.004, 0.004, 0.004, 0.005, 0.005, 0.005, 0.005, 0.004, 0.004, 0.004, 0.004, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.004, 0.004, 0.004, 0.004, 0.007, 0.007, 0.007, 0.007, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.004, 0.004, 0.004, 0.004, 0.006, 0.006, 0.006, 0.006, 0.005, 0.005, 0.005, 0.005, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, -0.005, -0.005, -0.005, -0.005, -0.011, -0.011, -0.011, -0.011, -0.016, -0.016, -0.016, -0.016, -0.02, -0.02, -0.02, -0.02, -0.018, -0.018, -0.018, -0.018, -0.021, -0.021, -0.021, -0.021, -0.026, -0.026, -0.026, -0.026, -0.024, -0.024, -0.024, -0.024, -0.024, -0.024, -0.024, -0.024, -0.024, -0.024, -0.024, -0.024, -0.024, -0.024, -0.024, -0.024, -0.022, -0.022, -0.022, -0.022, -0.023, -0.023, -0.023, -0.023, -0.024, -0.024, -0.024, -0.024, -0.023, -0.023, -0.023, -0.023, -0.022, -0.022, -0.022, -0.022, -0.021, -0.021, -0.021, -0.021, -0.02, -0.02, -0.02, -0.02, -0.02, -0.02, -0.02, -0.02, -0.016, -0.016, -0.016, -0.016, -0.01, -0.01, -0.01, -0.01, -0.006, -0.006, -0.006, -0.006, -0.005, -0.005, -0.005, -0.005, -0.006, -0.006, -0.006, -0.006, -0.005, -0.005, -0.005, -0.005, -0.006, -0.006, -0.006, -0.006, -0.007, -0.007, -0.007, -0.007, -0.006, -0.006, -0.006, -0.006, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.005, -0.005, -0.005, -0.005, -0.005, -0.005, -0.005, -0.005, -0.005, -0.005, -0.005, -0.005, -0.006, -0.006, -0.006, -0.006, -0.004, -0.004, -0.004, -0.004, -0.005, -0.005, -0.005, -0.005, -0.004, -0.004, -0.004, -0.004, -0.005, -0.005, -0.005, -0.005, -0.006, -0.006, -0.006, -0.006, -0.006, -0.006, -0.006, -0.006, -0.005, -0.005, -0.005, -0.005, -0.005, -0.005, -0.005, -0.005, -0.004, -0.004, -0.004, -0.004, -0.006, -0.006, -0.006, -0.006, -0.006, -0.006, -0.006, -0.006, -0.005, -0.005, -0.005, -0.005, -0.005, -0.005, -0.005, -0.005, -0.004, -0.004, -0.004, -0.004, -0.002, -0.002, -0.002, -0.002, -0.001, -0.001, -0.001, -0.001, 0.004, 0.004, 0.004, 0.004, 0.012, 0.012, 0.012, 0.012, 0.028, 0.028, 0.028, 0.028, 0.05, 0.05, 0.05, 0.05, 0.073, 0.073, 0.073, 0.073, 0.106, 0.106, 0.106, 0.106, 0.123, 0.123, 0.123, 0.123, 0.134, 0.134, 0.134, 0.134, 0.142, 0.142, 0.142, 0.142, 0.138, 0.138, 0.138, 0.138, 0.094, 0.094, 0.094, 0.094, 0.015, 0.015, 0.015, 0.015, -0.148, -0.148, -0.148, -0.148, -0.339, -0.339, -0.339, -0.339, -0.595, -0.595, -0.595, -0.595, -0.895, -0.895, -0.895, -0.895, -1.135, -1.135, -1.135, -1.135, -1.327, -1.327, -1.327, -1.327, -1.478, -1.478, -1.478, -1.478, -1.547, -1.547, -1.547, -1.547, -1.488, -1.488, -1.488, -1.488, -1.343, -1.343, -1.343, -1.343, -1.211, -1.211, -1.211, -1.211, -1.026, -1.026, -1.026, -1.026, -0.823, -0.823, -0.823, -0.823, -0.548, -0.548, -0.548, -0.548, -0.293, -0.293, -0.293, -0.293, -0.155, -0.155, -0.155, -0.155, -0.096, -0.096, -0.096, -0.096, -0.071, -0.071, -0.071, -0.071, -0.052, -0.052, -0.052, -0.052, -0.035, -0.035, -0.035, -0.035, -0.018, -0.018, -0.018, -0.018, -0.012, -0.012, -0.012, -0.012, -0.002, -0.002, -0.002, -0.002, 0.004, 0.004, 0.004, 0.004, 0.01, 0.01, 0.01, 0.01, 0.018, 0.018, 0.018, 0.018, 0.023, 0.023, 0.023, 0.023, 0.027, 0.027, 0.027, 0.027, 0.033, 0.033, 0.033, 0.033, 0.037, 0.037, 0.037, 0.037, 0.04, 0.04, 0.04, 0.04, 0.043, 0.043, 0.043, 0.043, 0.045, 0.045, 0.045, 0.045, 0.048, 0.048, 0.048, 0.048, 0.05, 0.05, 0.05, 0.05, 0.051, 0.051, 0.051, 0.051, 0.055, 0.055, 0.055, 0.055, 0.054, 0.054, 0.054, 0.054, 0.055, 0.055, 0.055, 0.055, 0.055, 0.055, 0.055, 0.055, 0.056, 0.056, 0.056, 0.056, 0.055, 0.055, 0.055, 0.055, 0.056, 0.056, 0.056, 0.056, 0.057, 0.057, 0.057, 0.057, 0.057, 0.057, 0.057, 0.057, 0.055, 0.055, 0.055, 0.055, 0.056, 0.056, 0.056, 0.056, 0.056, 0.056, 0.056, 0.056, 0.057, 0.057, 0.057, 0.057, 0.056, 0.056, 0.056, 0.056, 0.055, 0.055, 0.055, 0.055, 0.056, 0.056, 0.056, 0.056, 0.056, 0.056, 0.056, 0.056, 0.059, 0.059, 0.059, 0.059, 0.059, 0.059, 0.059, 0.059, 0.059, 0.059, 0.059, 0.059, 0.059, 0.059, 0.059, 0.059]</code></pre>
+</div>
+</div>
+<div class="cell" data-execution_count="11">
+<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(m.values_b())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[0.037, 0.037, 0.037, 0.037, 0.04, 0.04, 0.04, 0.04, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.038, 0.038, 0.038, 0.038, 0.035, 0.035, 0.035, 0.035, 0.037, 0.037, 0.037, 0.037, 0.038, 0.038, 0.038, 0.038, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.04, 0.04, 0.04, 0.04, 0.039, 0.039, 0.039, 0.039, 0.037, 0.037, 0.037, 0.037, 0.038, 0.038, 0.038, 0.038, 0.037, 0.037, 0.037, 0.037, 0.038, 0.038, 0.038, 0.038, 0.037, 0.037, 0.037, 0.037, 0.038, 0.038, 0.038, 0.038, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.042, 0.042, 0.042, 0.042, 0.039, 0.039, 0.039, 0.039, 0.04, 0.04, 0.04, 0.04, 0.043, 0.043, 0.043, 0.043, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.042, 0.042, 0.042, 0.042, 0.039, 0.039, 0.039, 0.039, 0.04, 0.04, 0.04, 0.04, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.039, 0.039, 0.039, 0.039, 0.04, 0.04, 0.04, 0.04, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.039, 0.039, 0.039, 0.039, 0.038, 0.038, 0.038, 0.038, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.039, 0.037, 0.037, 0.037, 0.037, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.035, 0.035, 0.035, 0.035, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.038, 0.038, 0.038, 0.038, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.038, 0.037, 0.037, 0.037, 0.037, 0.038, 0.038, 0.038, 0.038, 0.039, 0.039, 0.039, 0.039, 0.037, 0.037, 0.037, 0.037, 0.034, 0.034, 0.034, 0.034, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.033, 0.033, 0.033, 0.033, 0.035, 0.035, 0.035, 0.035, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.037, 0.035, 0.035, 0.035, 0.035, 0.037, 0.037, 0.037, 0.037, 0.035, 0.035, 0.035, 0.035, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.034, 0.034, 0.034, 0.034, 0.033, 0.033, 0.033, 0.033, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.032, 0.034, 0.034, 0.034, 0.034, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.028, 0.028, 0.028, 0.028, 0.029, 0.029, 0.029, 0.029, 0.031, 0.031, 0.031, 0.031, 0.029, 0.029, 0.029, 0.029, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.032, 0.032, 0.032, 0.032, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.031, 0.032, 0.032, 0.032, 0.032, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.033, 0.032, 0.032, 0.032, 0.032, 0.033, 0.033, 0.033, 0.033, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.034, 0.035, 0.035, 0.035, 0.035, 0.037, 0.037, 0.037, 0.037, 0.035, 0.035, 0.035, 0.035, 0.034, 0.034, 0.034, 0.034, 0.035, 0.035, 0.035, 0.035, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.039, 0.039, 0.039, 0.039, 0.04, 0.04, 0.04, 0.04, 0.043, 0.043, 0.043, 0.043, 0.043, 0.043, 0.043, 0.043, 0.043, 0.043, 0.043, 0.043, 0.042, 0.042, 0.042, 0.042, 0.039, 0.039, 0.039, 0.039, 0.035, 0.035, 0.035, 0.035, 0.031, 0.031, 0.031, 0.031, 0.024, 0.024, 0.024, 0.024, 0.022, 0.022, 0.022, 0.022, 0.02, 0.02, 0.02, 0.02, 0.017, 0.017, 0.017, 0.017, 0.011, 0.011, 0.011, 0.011, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.011, 0.011, 0.011, 0.011, 0.012, 0.012, 0.012, 0.012, 0.009, 0.009, 0.009, 0.009, 0.011, 0.011, 0.011, 0.011, 0.013, 0.013, 0.013, 0.013, 0.012, 0.012, 0.012, 0.012, 0.016, 0.016, 0.016, 0.016, 0.018, 0.018, 0.018, 0.018, 0.018, 0.018, 0.018, 0.018, 0.022, 0.022, 0.022, 0.022, 0.028, 0.028, 0.028, 0.028, 0.031, 0.031, 0.031, 0.031, 0.028, 0.028, 0.028, 0.028, 0.027, 0.027, 0.027, 0.027, 0.027, 0.027, 0.027, 0.027, 0.028, 0.028, 0.028, 0.028, 0.027, 0.027, 0.027, 0.027, 0.028, 0.028, 0.028, 0.028, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.027, 0.027, 0.027, 0.027, 0.024, 0.024, 0.024, 0.024, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.021, 0.021, 0.021, 0.021, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.023, 0.023, 0.023, 0.023, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.021, 0.021, 0.021, 0.021, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.026, 0.026, 0.026, 0.026, 0.028, 0.028, 0.028, 0.028, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.027, 0.027, 0.027, 0.027, 0.033, 0.033, 0.033, 0.033, 0.043, 0.043, 0.043, 0.043, 0.057, 0.057, 0.057, 0.057, 0.076, 0.076, 0.076, 0.076, 0.099, 0.099, 0.099, 0.099, 0.131, 0.131, 0.131, 0.131, 0.145, 0.145, 0.145, 0.145, 0.155, 0.155, 0.155, 0.155, 0.162, 0.162, 0.162, 0.162, 0.157, 0.157, 0.157, 0.157, 0.115, 0.115, 0.115, 0.115, 0.033, 0.033, 0.033, 0.033, -0.122, -0.122, -0.122, -0.122, -0.303, -0.303, -0.303, -0.303, -0.553, -0.553, -0.553, -0.553, -0.85, -0.85, -0.85, -0.85, -1.095, -1.095, -1.095, -1.095, -1.286, -1.286, -1.286, -1.286, -1.428, -1.428, -1.428, -1.428, -1.496, -1.496, -1.496, -1.496, -1.433, -1.433, -1.433, -1.433, -1.287, -1.287, -1.287, -1.287, -1.155, -1.155, -1.155, -1.155, -0.973, -0.973, -0.973, -0.973, -0.774, -0.774, -0.774, -0.774, -0.51, -0.51, -0.51, -0.51, -0.261, -0.261, -0.261, -0.261, -0.125, -0.125, -0.125, -0.125, -0.066, -0.066, -0.066, -0.066, -0.038, -0.038, -0.038, -0.038, -0.02, -0.02, -0.02, -0.02, -0.004, -0.004, -0.004, -0.004, 0.01, 0.01, 0.01, 0.01, 0.017, 0.017, 0.017, 0.017, 0.026, 0.026, 0.026, 0.026, 0.033, 0.033, 0.033, 0.033, 0.039, 0.039, 0.039, 0.039, 0.048, 0.048, 0.048, 0.048, 0.054, 0.054, 0.054, 0.054, 0.06, 0.06, 0.06, 0.06, 0.065, 0.065, 0.065, 0.065, 0.068, 0.068, 0.068, 0.068, 0.072, 0.072, 0.072, 0.072, 0.074, 0.074, 0.074, 0.074, 0.076, 0.076, 0.076, 0.076, 0.077, 0.077, 0.077, 0.077, 0.079, 0.079, 0.079, 0.079, 0.082, 0.082, 0.082, 0.082, 0.083, 0.083, 0.083, 0.083, 0.084, 0.084, 0.084, 0.084, 0.084, 0.084, 0.084, 0.084, 0.087, 0.087, 0.087, 0.087, 0.088, 0.088, 0.088, 0.088, 0.087, 0.087, 0.087, 0.087, 0.085, 0.085, 0.085, 0.085, 0.087, 0.087, 0.087, 0.087, 0.088, 0.088, 0.088, 0.088, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.092, 0.092, 0.092, 0.092, 0.089, 0.089, 0.089, 0.089, 0.088, 0.088, 0.088, 0.088, 0.087, 0.087, 0.087, 0.087, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.089, 0.09, 0.09, 0.09, 0.09]</code></pre>
+</div>
+</div>
+<p>The returned <code>pyattimo.Motif</code> has a <code>plot</code> method that shows the motif subsequences, their z-normalized versions, and the positions of the motif in the original time series.</p>
+<p>Finally, and perhaps most importantly for the interactive exploration of time series, the <code>Motif</code> object allows you to plot it.</p>
+<div class="cell page-columns page-full" data-execution_count="12">
+<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>m.plot()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-display page-columns page-full">
+<div class="quarto-figure quarto-figure-center page-columns page-full">
+<figure class="figure page-columns page-full">
+<p><img src="pyattimo_files/figure-html/cell-12-output-1.png" class="figure-img" width="662" height="474"></p>
+<p></p><figcaption class="figure-caption margin-caption">Plot of the top motif in the dataset, with the positions in the original series highlighted (top plot), the plot of the original subsequences overlaid on top of each other (middle), and the plot of the overlay of their z-normalized version.</figcaption><p></p>
+</figure>
+</div>
+</div>
+</div>
+<p>Given that the <code>MotifsIterator</code> object is, well, an iterator, you can easily ask for the next motif:</p>
+<div class="cell page-columns page-full" data-execution_count="13">
+<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="op">%</span>time m <span class="op">=</span> <span class="bu">next</span>(motifs)</span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>m.plot()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>CPU times: user 7 µs, sys: 1 µs, total: 8 µs
+Wall time: 11.9 µs</code></pre>
+</div>
+<div class="cell-output cell-output-display page-columns page-full">
+<div class="quarto-figure quarto-figure-center page-columns page-full">
+<figure class="figure page-columns page-full">
+<p><img src="pyattimo_files/figure-html/cell-13-output-2.png" class="figure-img" width="662" height="474"></p>
+<p></p><figcaption class="figure-caption margin-caption">The second motif in the dataset.</figcaption><p></p>
+</figure>
+</div>
+</div>
+</div>
+<p>Notice that the time to discover this second motif is much shorter than the time that was required to discover the first one: microseconds instead of seconds. This is a property of the underlying algorithm: for further details we invite you to read the full paper.</p>
+<p>This explorative process of looking at can be iterated as long as needed, interactively. The motifs are returned by increasing values of distance of their subsequences: as soon as we find a motif whose subsequences are so far away as to no longer be interesting, we can stop the process.</p>
+</section>
+<section id="comparison-with-stumpy-and-pyscamp" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="comparison-with-stumpy-and-pyscamp">Comparison with <code>stumpy</code> and <code>pyscamp</code></h2>
+<p>So far, we have seen how <code>pyattimo</code> allows to <em>interactively</em> explore motifs. But how does it compare with the state of the art in motif discovery? There is a rich line of work investigating the efficient use of the <a href="https://www.cs.ucr.edu/~eamonn/MatrixProfile.html"><em>matrix profile</em></a>, a data structure that for each subsequence of the input time series holds information about its most similar subsequence.</p>
+<p>In particular, the <a href="https://stumpy.readthedocs.io/en/latest/index.html"><code>stumpy</code></a> Python package implements a Numba JIT-compiled version of the algorithm presented by <span class="citation" data-cites="DBLP:conf/icdm/ZhuZSYFMBK16">Zhu et al. (<a href="#ref-DBLP:conf/icdm/ZhuZSYFMBK16" role="doc-biblioref">2016</a>)</span>, with a very convenient user interface.</p>
+<p>A very efficient C++ Matrix Profile implementation (with GPU support) is provided by <a href="https://github.com/zpzim/SCAMP"><code>scamp</code></a>, implementing ideas presented in the paper by <span class="citation" data-cites="DBLP:conf/cloud/ZimmermanKSCFBK19">Zimmerman et al. (<a href="#ref-DBLP:conf/cloud/ZimmermanKSCFBK19" role="doc-biblioref">2019</a>)</span>. <code>scamp</code> comes with a Python interface, namely <a href="https://scamp-docs.readthedocs.io/en/latest/pyscamp/intro.html"><code>pyscamp</code></a>.</p>
+<div class="page-columns page-full"><p>Both <code>stumpy</code> and <code>pyscamp</code> support GPU execution, but this notebook has been rendered on a system somewhat computationally limited<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a>. In particular, this system does not support CUDA. Therefore, we will focus on the CPU functionality provided by both packages, and compare <code>attimo</code> with both.</p><div class="no-row-height column-margin column-container"><li id="fn1" role="doc-endnote"><p><sup>1</sup>&nbsp;A 2017 MacBook Pro with a 2.3 GHz Intel Core i5 dual core processor, with 8GB of RAM memory.</p></li></div></div>
+<p>We consider the <code>ECG</code> dataset we already introduced above, with 1,000,000 data points. As a benchmark, we will measure the running time of both <code>stumpy</code>, <code>pyscamp</code>, and <code>attimo</code> on prefixes of increasing size of the time series. For <code>attimo</code>, we extract from the iterator only the first motif.</p>
+<div class="page-columns page-full"><p>Beware that <code>stumpy</code> and <code>pyscamp</code> compute the full matrix profile, which contains a lot more information than just the top motif. The point of this (rather unscientific) benchmark is to get a sense of the gains we can make if we focus on just finding the top motif.</p><div class="no-row-height column-margin column-container"><span class="aside">Later we shall see how many motifs we can find before the fastest of the baselines completes.</span></div></div>
+<p>The plot below reports the results of this experiment (you can expand the code to see how the experiments have been run).</p>
+<div class="cell page-columns page-full" data-execution_count="14">
+<details>
+<summary>Code</summary>
+<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> sqlite3</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> time </span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> stumpy</span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyscamp</span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> seaborn <span class="im">as</span> sns</span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np</span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>w <span class="op">=</span> <span class="dv">1000</span></span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a><span class="co"># force numba precompilation</span></span>
+<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a>stumpy.stump(ts[:<span class="dv">2</span><span class="op">*</span>w], m<span class="op">=</span>w)</span>
+<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a><span class="co"># We persist results in a sqlite database, so to avoid rerunning experiments unnecessarily</span></span>
+<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> already_run(db, algorithm, prefix):</span>
+<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> db.execute(</span>
+<span id="cb16-17"><a href="#cb16-17" aria-hidden="true" tabindex="-1"></a>        <span class="st">"SELECT * FROM experiments WHERE algorithm = ? AND prefix = ?"</span>, </span>
+<span id="cb16-18"><a href="#cb16-18" aria-hidden="true" tabindex="-1"></a>        [algorithm, prefix]).fetchone() <span class="kw">is</span> <span class="kw">not</span> <span class="va">None</span></span>
+<span id="cb16-19"><a href="#cb16-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-20"><a href="#cb16-20" aria-hidden="true" tabindex="-1"></a><span class="cf">with</span> sqlite3.<span class="ex">connect</span>(<span class="st">".quarto/experiments.db"</span>) <span class="im">as</span> db:</span>
+<span id="cb16-21"><a href="#cb16-21" aria-hidden="true" tabindex="-1"></a>    db.execute(<span class="st">"CREATE TABLE IF NOT EXISTS experiments (algorithm TEXT, prefix INT, time_s REAL)"</span>)</span>
+<span id="cb16-22"><a href="#cb16-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-23"><a href="#cb16-23" aria-hidden="true" tabindex="-1"></a>    prefixes <span class="op">=</span> [<span class="dv">10000</span>, <span class="dv">25000</span>, <span class="dv">30000</span>, <span class="dv">50000</span>, <span class="dv">75000</span>, <span class="dv">100000</span>, <span class="dv">250000</span>, <span class="dv">500000</span>, <span class="dv">1000000</span>]</span>
+<span id="cb16-24"><a href="#cb16-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-25"><a href="#cb16-25" aria-hidden="true" tabindex="-1"></a>    timeout <span class="op">=</span> <span class="dv">20</span></span>
+<span id="cb16-26"><a href="#cb16-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-27"><a href="#cb16-27" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> prefix <span class="kw">in</span> prefixes:</span>
+<span id="cb16-28"><a href="#cb16-28" aria-hidden="true" tabindex="-1"></a>        <span class="co"># the prefix on which to benchmark</span></span>
+<span id="cb16-29"><a href="#cb16-29" aria-hidden="true" tabindex="-1"></a>        data <span class="op">=</span> ts[:prefix]</span>
+<span id="cb16-30"><a href="#cb16-30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-31"><a href="#cb16-31" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> prefix <span class="op">&lt;=</span> <span class="dv">250000</span> <span class="kw">and</span> <span class="kw">not</span> already_run(db, <span class="st">"stumpy"</span>, prefix):</span>
+<span id="cb16-32"><a href="#cb16-32" aria-hidden="true" tabindex="-1"></a>            start <span class="op">=</span> time.time()</span>
+<span id="cb16-33"><a href="#cb16-33" aria-hidden="true" tabindex="-1"></a>            stumpy.stump(data, m<span class="op">=</span>w)</span>
+<span id="cb16-34"><a href="#cb16-34" aria-hidden="true" tabindex="-1"></a>            end <span class="op">=</span> time.time()</span>
+<span id="cb16-35"><a href="#cb16-35" aria-hidden="true" tabindex="-1"></a>            db.execute(<span class="st">"INSERT INTO experiments VALUES (?, ?, ?)"</span>, [<span class="st">"stumpy"</span>, prefix, end <span class="op">-</span> start])</span>
+<span id="cb16-36"><a href="#cb16-36" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-37"><a href="#cb16-37" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> prefix <span class="op">&lt;=</span> <span class="dv">500000</span> <span class="kw">and</span> <span class="kw">not</span> already_run(db, <span class="st">"pyscamp"</span>, prefix):</span>
+<span id="cb16-38"><a href="#cb16-38" aria-hidden="true" tabindex="-1"></a>            start <span class="op">=</span> time.time()</span>
+<span id="cb16-39"><a href="#cb16-39" aria-hidden="true" tabindex="-1"></a>            pyscamp.selfjoin(data, w)</span>
+<span id="cb16-40"><a href="#cb16-40" aria-hidden="true" tabindex="-1"></a>            end <span class="op">=</span> time.time()</span>
+<span id="cb16-41"><a href="#cb16-41" aria-hidden="true" tabindex="-1"></a>            db.execute(<span class="st">"INSERT INTO experiments VALUES (?, ?, ?)"</span>, [<span class="st">"pyscamp"</span>, prefix, end <span class="op">-</span> start])</span>
+<span id="cb16-42"><a href="#cb16-42" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-43"><a href="#cb16-43" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> <span class="kw">not</span> already_run(db, <span class="st">"attimo"</span>, prefix):</span>
+<span id="cb16-44"><a href="#cb16-44" aria-hidden="true" tabindex="-1"></a>            start <span class="op">=</span> time.time()</span>
+<span id="cb16-45"><a href="#cb16-45" aria-hidden="true" tabindex="-1"></a>            motifs_iter <span class="op">=</span> pyattimo.MotifsIterator(data, w<span class="op">=</span>w, max_k<span class="op">=</span><span class="dv">1</span>, repetitions<span class="op">=</span><span class="dv">50</span>, delta<span class="op">=</span><span class="fl">0.01</span>)</span>
+<span id="cb16-46"><a href="#cb16-46" aria-hidden="true" tabindex="-1"></a>            <span class="bu">next</span>(motifs_iter)</span>
+<span id="cb16-47"><a href="#cb16-47" aria-hidden="true" tabindex="-1"></a>            end <span class="op">=</span> time.time()</span>
+<span id="cb16-48"><a href="#cb16-48" aria-hidden="true" tabindex="-1"></a>            db.execute(<span class="st">"INSERT INTO experiments VALUES (?, ?, ?)"</span>, [<span class="st">"attimo"</span>, prefix, end <span class="op">-</span> start])</span>
+<span id="cb16-49"><a href="#cb16-49" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-50"><a href="#cb16-50" aria-hidden="true" tabindex="-1"></a>    results <span class="op">=</span> pd.read_sql(<span class="st">"SELECT prefix, algorithm, time_s FROM experiments ORDER BY prefix, algorithm"</span>, db)</span>
+<span id="cb16-51"><a href="#cb16-51" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-52"><a href="#cb16-52" aria-hidden="true" tabindex="-1"></a>colors <span class="op">=</span> sns.color_palette()</span>
+<span id="cb16-53"><a href="#cb16-53" aria-hidden="true" tabindex="-1"></a>palette <span class="op">=</span> {</span>
+<span id="cb16-54"><a href="#cb16-54" aria-hidden="true" tabindex="-1"></a>    <span class="st">"attimo"</span>: colors[<span class="dv">0</span>],</span>
+<span id="cb16-55"><a href="#cb16-55" aria-hidden="true" tabindex="-1"></a>    <span class="st">"pyscamp"</span>: colors[<span class="dv">1</span>],</span>
+<span id="cb16-56"><a href="#cb16-56" aria-hidden="true" tabindex="-1"></a>    <span class="st">"stumpy"</span>: colors[<span class="dv">2</span>]</span>
+<span id="cb16-57"><a href="#cb16-57" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb16-58"><a href="#cb16-58" aria-hidden="true" tabindex="-1"></a>ax <span class="op">=</span> sns.lineplot(</span>
+<span id="cb16-59"><a href="#cb16-59" aria-hidden="true" tabindex="-1"></a>    data <span class="op">=</span> results,</span>
+<span id="cb16-60"><a href="#cb16-60" aria-hidden="true" tabindex="-1"></a>    x <span class="op">=</span> <span class="st">"prefix"</span>,</span>
+<span id="cb16-61"><a href="#cb16-61" aria-hidden="true" tabindex="-1"></a>    y <span class="op">=</span> <span class="st">"time_s"</span>,</span>
+<span id="cb16-62"><a href="#cb16-62" aria-hidden="true" tabindex="-1"></a>    hue <span class="op">=</span> <span class="st">"algorithm"</span>,</span>
+<span id="cb16-63"><a href="#cb16-63" aria-hidden="true" tabindex="-1"></a>    palette <span class="op">=</span> palette</span>
+<span id="cb16-64"><a href="#cb16-64" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb16-65"><a href="#cb16-65" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-66"><a href="#cb16-66" aria-hidden="true" tabindex="-1"></a><span class="co"># Polynomial (2nd degree) regression to fill in times for larger prefixes</span></span>
+<span id="cb16-67"><a href="#cb16-67" aria-hidden="true" tabindex="-1"></a>fits <span class="op">=</span> {}</span>
+<span id="cb16-68"><a href="#cb16-68" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> algorithm <span class="kw">in</span> [<span class="st">"pyscamp"</span>]:</span>
+<span id="cb16-69"><a href="#cb16-69" aria-hidden="true" tabindex="-1"></a>    fitdat <span class="op">=</span> results[results[<span class="st">"algorithm"</span>] <span class="op">==</span> algorithm]</span>
+<span id="cb16-70"><a href="#cb16-70" aria-hidden="true" tabindex="-1"></a>    fits[algorithm] <span class="op">=</span> np.poly1d(np.polyfit(fitdat[<span class="st">"prefix"</span>], fitdat[<span class="st">"time_s"</span>], <span class="dv">2</span>))</span>
+<span id="cb16-71"><a href="#cb16-71" aria-hidden="true" tabindex="-1"></a>    xs <span class="op">=</span> np.linspace(fitdat[<span class="st">"prefix"</span>].<span class="bu">max</span>(), prefixes[<span class="op">-</span><span class="dv">1</span>])</span>
+<span id="cb16-72"><a href="#cb16-72" aria-hidden="true" tabindex="-1"></a>    ax.plot(xs, fits[algorithm](xs), <span class="st">'--'</span>, color<span class="op">=</span>palette[algorithm])</span>
+<span id="cb16-73"><a href="#cb16-73" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-74"><a href="#cb16-74" aria-hidden="true" tabindex="-1"></a>plt.show()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output cell-output-display page-columns page-full">
+<div class="quarto-figure quarto-figure-center page-columns page-full">
+<figure class="figure page-columns page-full">
+<p><img src="pyattimo_files/figure-html/cell-14-output-1.png" class="figure-img" width="593" height="429"></p>
+<p></p><figcaption class="figure-caption margin-caption">Runtime comparison on time series of different lengths to find the top motif. Dashed lines are for estimated runtimes.</figcaption><p></p>
+</figure>
+</div>
+</div>
+</div>
+<p>The expected behavior of both <code>pyscamp</code> and <code>stumpy</code> is to require time <span class="math inline">\(O(n^2)\)</span>, where <span class="math inline">\(n\)</span> is the length of the time series. Indeed, from the plot we can infer that this is the actual behavior in this experiment: doubling the time series length quadruples the running time.</p>
+<p>As for <code>attimo</code>, note that the running time to find the top motif is much shorter: the following table reports the same times (in seconds) that are shown in the above plot</p>
+<div class="cell" data-execution_count="15">
+<div class="cell-output cell-output-display" data-execution_count="82">
+<table class="table table-sm table-striped">
+<thead>
+<tr class="header">
+<th style="text-align: right;">prefix</th>
+<th style="text-align: right;">attimo</th>
+<th style="text-align: right;">pyscamp</th>
+<th style="text-align: right;">stumpy</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: right;">10000</td>
+<td style="text-align: right;">0.20</td>
+<td style="text-align: right;">0.07</td>
+<td style="text-align: right;">0.28</td>
+</tr>
+<tr class="even">
+<td style="text-align: right;">25000</td>
+<td style="text-align: right;">0.38</td>
+<td style="text-align: right;">0.29</td>
+<td style="text-align: right;">1.90</td>
+</tr>
+<tr class="odd">
+<td style="text-align: right;">30000</td>
+<td style="text-align: right;">0.50</td>
+<td style="text-align: right;">0.38</td>
+<td style="text-align: right;">2.10</td>
+</tr>
+<tr class="even">
+<td style="text-align: right;">50000</td>
+<td style="text-align: right;">0.74</td>
+<td style="text-align: right;">0.95</td>
+<td style="text-align: right;">6.32</td>
+</tr>
+<tr class="odd">
+<td style="text-align: right;">75000</td>
+<td style="text-align: right;">4.81</td>
+<td style="text-align: right;">2.56</td>
+<td style="text-align: right;">20.76</td>
+</tr>
+<tr class="even">
+<td style="text-align: right;">100000</td>
+<td style="text-align: right;">1.46</td>
+<td style="text-align: right;">3.88</td>
+<td style="text-align: right;">40.62</td>
+</tr>
+<tr class="odd">
+<td style="text-align: right;">250000</td>
+<td style="text-align: right;">3.47</td>
+<td style="text-align: right;">26.09</td>
+<td style="text-align: right;">255.20</td>
+</tr>
+<tr class="even">
+<td style="text-align: right;">500000</td>
+<td style="text-align: right;">5.56</td>
+<td style="text-align: right;">83.76</td>
+<td style="text-align: right;">nan</td>
+</tr>
+<tr class="odd">
+<td style="text-align: right;">1000000</td>
+<td style="text-align: right;">18.84</td>
+<td style="text-align: right;">nan</td>
+<td style="text-align: right;">nan</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<p>As said above, both <code>pyscamp</code> and <code>stumpy</code> return the full matrix profile, which contains more information than just the top motif. Indeed, it can be used to retrieve the other motifs (albeit with some caveats). To take into account this, rather than fixing a-priori an arbitrary number of motifs to look for, we fix as a time budget the time employed by the fastest baseline, <code>pyscamp</code>, on one million data points. Given that budget, we traverse the motif iterator provided by <code>attimo</code> until the time budget is exhausted, counting how many motifs we are able to discover. This procedure is implemented by the following snippet.</p>
+<div class="cell" data-execution_count="16">
+<div class="sourceCode cell-code" id="cb17"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> enumerate_with_budget(motifs_iterator, budget):</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>    start <span class="op">=</span> time.time()</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>    times <span class="op">=</span> []</span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>    motifs <span class="op">=</span> []</span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>    cnt <span class="op">=</span> <span class="dv">0</span></span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>    elapsed <span class="op">=</span> <span class="dv">0</span></span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a>    <span class="cf">while</span> elapsed <span class="op">&lt;=</span> budget:</span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a>        <span class="cf">try</span>:</span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a>            m <span class="op">=</span> <span class="bu">next</span>(motifs_iterator)</span>
+<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a>            cnt <span class="op">+=</span> <span class="dv">1</span></span>
+<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a>            elapsed <span class="op">=</span> time.time() <span class="op">-</span> start </span>
+<span id="cb17-12"><a href="#cb17-12" aria-hidden="true" tabindex="-1"></a>            times.append(elapsed)</span>
+<span id="cb17-13"><a href="#cb17-13" aria-hidden="true" tabindex="-1"></a>            motifs.append(m)</span>
+<span id="cb17-14"><a href="#cb17-14" aria-hidden="true" tabindex="-1"></a>        <span class="cf">except</span> <span class="pp">StopIteration</span>:</span>
+<span id="cb17-15"><a href="#cb17-15" aria-hidden="true" tabindex="-1"></a>            <span class="cf">return</span> cnt, times, motifs</span>
+<span id="cb17-16"><a href="#cb17-16" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> cnt, times, motifs</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>The following code runs the experiment, using as a budged the <span class="math inline">\(\approx 300\)</span> seconds employed by <code>pyscamp</code>.</p>
+<div class="cell" data-execution_count="17">
+<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> os</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>fname <span class="op">=</span> <span class="st">".discover.parquet"</span></span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="kw">not</span> os.path.isfile(fname):</span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>    start <span class="op">=</span> time.time() </span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>    motifs <span class="op">=</span> pyattimo.MotifsIterator(ts, w<span class="op">=</span><span class="dv">1000</span>, max_k<span class="op">=</span><span class="dv">300</span>, repetitions<span class="op">=</span><span class="dv">50</span>, delta<span class="op">=</span><span class="fl">0.01</span>)</span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>    end <span class="op">=</span> time.time()</span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>    index_time <span class="op">=</span> end <span class="op">-</span> start</span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>    time_budget <span class="op">=</span> fits[<span class="st">"pyscamp"</span>](<span class="bu">len</span>(ts))</span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>    cnt, elapsed_times, motifs_list <span class="op">=</span> enumerate_with_budget(motifs, time_budget <span class="op">-</span> index_time)</span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a>    <span class="bu">print</span>(<span class="st">"Motifs found in </span><span class="sc">{:.2f}</span><span class="st"> seconds: </span><span class="sc">{}</span><span class="st">"</span>.<span class="bu">format</span>(time_budget, cnt))</span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a>    elapsed_times <span class="op">=</span> pd.DataFrame({</span>
+<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a>        <span class="st">'elapsed_time_s'</span>: elapsed_times,</span>
+<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a>        <span class="st">'motif_distance'</span>: [m.distance <span class="cf">for</span> m <span class="kw">in</span> motifs_list],</span>
+<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a>        <span class="st">'motif_rank'</span>: np.arange(<span class="bu">len</span>(elapsed_times))</span>
+<span id="cb18-16"><a href="#cb18-16" aria-hidden="true" tabindex="-1"></a>    })</span>
+<span id="cb18-17"><a href="#cb18-17" aria-hidden="true" tabindex="-1"></a>    elapsed_times.to_parquet(fname)</span>
+<span id="cb18-18"><a href="#cb18-18" aria-hidden="true" tabindex="-1"></a><span class="cf">else</span>:</span>
+<span id="cb18-19"><a href="#cb18-19" aria-hidden="true" tabindex="-1"></a>    elapsed_times <span class="op">=</span> pd.read_parquet(fname)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Using <code>attimo</code>, we can iterate through 200 motifs before <code>pyscamp</code> is done computing the matrix profile!</p>
+<p>The plot below, reports on the <span class="math inline">\(x\)</span> axis the rank of each motif found, while the <span class="math inline">\(y\)</span> axis reports the time elapsed since the creation of the <code>MotifIterator</code> object and the discovery of each motif. In other words, the leftmost point is the time required taken to discover the first motif.</p>
+<div class="cell" data-execution_count="18">
+<div class="cell-output cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="pyattimo_files/figure-html/cell-18-output-1.png" width="598" height="429" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+<p>You can see that the first <span class="math inline">\(\approx\)</span> 200 motifs are found rather fast, while the last motifs require to invest more computation time. The reason is that the distance of the subsequences making up the lower-ranked motifs is larger than the distance of the top motifs, thus forcing the algorithm to spend more time confirming them.</p>
+<p>Given the above experiment, it is clear why using <code>pyattimo</code> can be advantageous in an interactive setting: the user can stop the computation whenever they find it most convenient.</p>
+
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents" role="doc-bibliography"><h2 class="anchored quarto-appendix-heading">References</h2><div id="refs" class="references csl-bib-body hanging-indent" role="doc-bibliography">
+<div id="ref-DBLP:conf/icdm/ZhuZSYFMBK16" class="csl-entry" role="doc-biblioentry">
+Zhu, Yan, Zachary Zimmerman, Nader Shakibay Senobari, Chin-Chia Michael Yeh, Gareth J. Funning, Abdullah Mueen, Philip Brisk, and Eamonn J. Keogh. 2016. <span>“Matrix Profile <span>II:</span> Exploiting a Novel Algorithm and GPUs to Break the One Hundred Million Barrier for Time Series Motifs and Joins.”</span> In <em><span>ICDM</span></em>, 739–48. <span>IEEE</span> Computer Society.
+</div>
+<div id="ref-DBLP:conf/cloud/ZimmermanKSCFBK19" class="csl-entry" role="doc-biblioentry">
+Zimmerman, Zachary, Kaveh Kamgar, Nader Shakibay Senobari, Brian Crites, Gareth J. Funning, Philip Brisk, and Eamonn J. Keogh. 2019. <span>“Matrix Profile <span>XIV:</span> Scaling Time Series Motif Discovery with GPUs to Break a Quintillion Pairwise Comparisons a Day and Beyond.”</span> In <em>SoCC</em>, 74–86. <span>ACM</span>.
+</div>
+</div></section></div></main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const clipboard = new window.ClipboardJS('.code-copy-button', {
+    target: function(trigger) {
+      return trigger.previousElementSibling;
+    }
+  });
+  clipboard.on('success', function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    setTimeout(function() {
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  });
+  function tippyHover(el, contentFn) {
+    const config = {
+      allowHTML: true,
+      content: contentFn,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start'
+    };
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      let href = ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      return note.innerHTML;
+    });
+  }
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const cites = ref.parentNode.getAttribute('data-cites').split(' ');
+    tippyHover(ref, function() {
+      var popup = window.document.createElement('div');
+      cites.forEach(function(cite) {
+        var citeDiv = window.document.createElement('div');
+        citeDiv.classList.add('hanging-indent');
+        citeDiv.classList.add('csl-entry');
+        var biblioDiv = window.document.getElementById('ref-' + cite);
+        if (biblioDiv) {
+          citeDiv.innerHTML = biblioDiv.innerHTML;
+        }
+        popup.appendChild(citeDiv);
+      });
+      return popup.innerHTML;
+    });
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+</body></html>

@@ -1,0 +1,319 @@
+---
+title: "PyAttimo: scalable time series motifs mining with Python"
+author: 
+  - name: Matteo Ceccarello
+    url: https://www.inf.unibz.it/~ceccarello/
+    affiliation: Free University of Bozen/Bolzano
+jupyter: python3
+execute:
+  cache: true
+bibliography: references.bib
+reference-location: margin
+---
+
+This document showcases the usage of the `pyattimo` Python package for time series motif discovery, on a rather standard laptop.
+Most notably, the `pyattimo` allows to enumerate the motifs one at a time, investing only the computation needed to return the next motif.
+
+------------
+
+## Setting things up
+
+First and foremost, let's import the `pyattimo` package.
+
+```{python}
+import pyattimo
+```
+
+```{python}
+#| echo: false
+import matplotlib.pyplot as plt
+```
+
+Then, let's load a dataset from the ones shipped with the python package. On the first run it will be downloaded on your machine from [this Figshare](https://figshare.com/articles/dataset/Datasets/20747617).
+In this example, we are just loading the first million points from the dataset
+
+```{python}
+ts = pyattimo.load_dataset("ecg", prefix=1000000)
+```
+
+The time series looks like the following.
+
+```{python}
+#| column: body
+#| echo: false
+#| fig-pos: center
+plt.figure(figsize=(9, 2))
+plt.plot(ts)
+```
+
+The above display looks a bit crowded, but if we focus on the first 10000 points, we can more clearly see the structure.
+
+```{python}
+#| column: body
+#| echo: false
+#| fig-pos: center
+plt.figure(figsize=(9, 2))
+plt.plot(ts[:10000])
+```
+
+## Looking for motifs, interactively
+
+The `pyattimo` package provides a rather simple iterator interface: 
+
+- you first construct an instance of the `MotifsIterator` object, specifying the time series, the motif length, and other parameters;
+- then you repeatedly call `next` on this object to iterat through it
+
+Constructing the iterator requires a time proportional to the time series length.
+On my dual core machine, this is about 7.8 seconds for our example time series of length 1000000.
+
+```{python}
+%time motifs = pyattimo.MotifsIterator(ts, w=1000, max_k=100)
+```
+
+Once the index is built, we can ask for the first motif.
+The time required for this operation depends on how distances between subsequences are distributed, rather than by how long the time series is.
+
+```{python}
+%time m = next(motifs)
+```
+
+The returned `pyattimo.Motif` object allows to retrieve the starting indices
+of the subsequences composing the motif, along with the z-normalized Euclidean distance between the two subsequences.
+
+```{python}
+print("Index of first subsequence", m.a)
+print("Index of second subsequence", m.b)
+print("z-normalized Euclidean distance", m.distance)
+```
+
+Furthermore, you can access the data of the subsequences themselves:
+
+```{python}
+print(m.values_a())
+```
+
+```{python}
+print(m.values_b())
+```
+
+The returned `pyattimo.Motif` has a `plot` method that shows the motif subsequences, their z-normalized versions, and the positions of the motif in the original time series.
+
+Finally, and perhaps most importantly for the interactive exploration of time series, the `Motif` object allows you to plot it.
+
+```{python}
+#| fig-cap: "Plot of the top motif in the dataset, with the positions in the original series highlighted (top plot), the plot of the original subsequences overlaid on top of each other (middle), and the plot of the overlay of their z-normalized version."
+#| fig-cap-location: margin
+#| fig-pos: center
+m.plot()
+```
+
+Given that the `MotifsIterator` object is, well, an iterator, you can easily ask for the next motif:
+
+```{python}
+#| fig-cap: "The second motif in the dataset."
+#| fig-cap-location: margin
+#| fig-pos: center
+%time m = next(motifs)
+m.plot()
+```
+
+Notice that the time to discover this second motif is much shorter than the time that was required to discover the first one: microseconds instead of seconds. This is a property of the underlying algorithm: for further details we invite you to read the full paper.
+
+This explorative process of looking at  can be iterated as long as needed, interactively.
+The motifs are returned by increasing values of distance of their subsequences: as soon as we find a motif whose subsequences are so far away as to no longer be interesting, we can stop the process.
+
+## Comparison with `stumpy` and `pyscamp`
+
+So far, we have seen how `pyattimo` allows to _interactively_ explore motifs.
+But how does it compare with the state of the art in motif discovery?
+There is a rich line of work investigating the efficient use of the [_matrix profile_](https://www.cs.ucr.edu/~eamonn/MatrixProfile.html), a data structure that for each subsequence of the input time series holds information about its most similar subsequence.
+
+In particular, the [`stumpy`](https://stumpy.readthedocs.io/en/latest/index.html) Python package implements a Numba JIT-compiled version of the algorithm presented by @DBLP:conf/icdm/ZhuZSYFMBK16, with a very convenient user interface.
+
+A very efficient C++ Matrix Profile implementation (with GPU support) is provided by [`scamp`](https://github.com/zpzim/SCAMP), implementing ideas presented in the paper by @DBLP:conf/cloud/ZimmermanKSCFBK19.
+`scamp` comes with a Python interface, namely [`pyscamp`](https://scamp-docs.readthedocs.io/en/latest/pyscamp/intro.html).
+
+Both `stumpy` and `pyscamp` support GPU execution, but this notebook has been rendered on a system somewhat computationally limited^[A 2017 MacBook Pro with a 2.3 GHz Intel Core i5 dual core processor, with 8GB of RAM memory.].
+In particular, this system does not support CUDA.
+Therefore, we will focus on the CPU functionality provided by both packages, and compare `attimo` with both.
+
+We consider the `ECG` dataset we already introduced above, with 1\,000\,000 data points.
+As a benchmark, we will measure the running time of both `stumpy`, `pyscamp`, and `attimo` on prefixes of increasing size of the time series.
+For `attimo`, we extract from the iterator only the first motif.
+
+Beware that `stumpy` and `pyscamp` compute the full matrix profile, which contains a lot more information than just the top motif.
+The point of this (rather unscientific) benchmark is to get a sense of the gains we can make if we focus on just finding the top motif.[Later we shall see how many motifs we can find before the fastest of the baselines completes.]{.aside}
+
+The plot below reports the results of this experiment (you can expand the code to see how the experiments have been run).
+
+```{python}
+#| code-fold: true
+#| fig-cap: "Runtime comparison on time series of different lengths to find the top motif. Dashed lines are for estimated runtimes."
+#| fig-cap-location: margin
+#| fig-pos: center
+
+import sqlite3
+import time 
+import stumpy
+import pyscamp
+import pandas as pd
+import seaborn as sns
+import numpy as np
+
+w = 1000
+
+# force numba precompilation
+stumpy.stump(ts[:2*w], m=w)
+
+# We persist results in a sqlite database, so to avoid rerunning experiments unnecessarily
+def already_run(db, algorithm, prefix):
+    return db.execute(
+        "SELECT * FROM experiments WHERE algorithm = ? AND prefix = ?", 
+        [algorithm, prefix]).fetchone() is not None
+
+with sqlite3.connect(".quarto/experiments.db") as db:
+    db.execute("CREATE TABLE IF NOT EXISTS experiments (algorithm TEXT, prefix INT, time_s REAL)")
+
+    prefixes = [10000, 25000, 30000, 50000, 75000, 100000, 250000, 500000, 1000000]
+
+    timeout = 20
+
+    for prefix in prefixes:
+        # the prefix on which to benchmark
+        data = ts[:prefix]
+
+        if prefix <= 250000 and not already_run(db, "stumpy", prefix):
+            start = time.time()
+            stumpy.stump(data, m=w)
+            end = time.time()
+            db.execute("INSERT INTO experiments VALUES (?, ?, ?)", ["stumpy", prefix, end - start])
+
+        if prefix <= 500000 and not already_run(db, "pyscamp", prefix):
+            start = time.time()
+            pyscamp.selfjoin(data, w)
+            end = time.time()
+            db.execute("INSERT INTO experiments VALUES (?, ?, ?)", ["pyscamp", prefix, end - start])
+
+        if not already_run(db, "attimo", prefix):
+            start = time.time()
+            motifs_iter = pyattimo.MotifsIterator(data, w=w, max_k=1, repetitions=50, delta=0.01)
+            next(motifs_iter)
+            end = time.time()
+            db.execute("INSERT INTO experiments VALUES (?, ?, ?)", ["attimo", prefix, end - start])
+
+    results = pd.read_sql("SELECT prefix, algorithm, time_s FROM experiments ORDER BY prefix, algorithm", db)
+
+colors = sns.color_palette()
+palette = {
+    "attimo": colors[0],
+    "pyscamp": colors[1],
+    "stumpy": colors[2]
+}
+ax = sns.lineplot(
+    data = results,
+    x = "prefix",
+    y = "time_s",
+    hue = "algorithm",
+    palette = palette
+)
+
+# Polynomial (2nd degree) regression to fill in times for larger prefixes
+fits = {}
+for algorithm in ["pyscamp"]:
+    fitdat = results[results["algorithm"] == algorithm]
+    fits[algorithm] = np.poly1d(np.polyfit(fitdat["prefix"], fitdat["time_s"], 2))
+    xs = np.linspace(fitdat["prefix"].max(), prefixes[-1])
+    ax.plot(xs, fits[algorithm](xs), '--', color=palette[algorithm])
+
+plt.show()
+```
+
+The expected behavior of both `pyscamp` and `stumpy` is to require time $O(n^2)$, where $n$ is the length of the time series.
+Indeed, from the plot we can infer that this is the actual behavior in this experiment: doubling the time series length quadruples the running time.
+
+As for `attimo`, note that the running time to find the top motif is much shorter: the following table reports the same times (in seconds) that are shown in the above plot
+
+```{python}
+#| echo: false
+from tabulate import tabulate
+from IPython.display import Markdown
+pivoted = results.pivot(columns="algorithm", index="prefix", values="time_s")
+pivoted.reset_index(inplace=True)
+Markdown(tabulate(pivoted, pivoted.columns, floatfmt=(".0f", ".2f", ".2f", ".2f"), showindex=False))
+```
+
+
+As said above, both `pyscamp` and `stumpy` return the full matrix profile, which contains more information than just the top motif.
+Indeed, it can be used to retrieve the other motifs (albeit with some caveats).
+To take into account this, rather than fixing a-priori an arbitrary number of motifs to look for, we fix as a time budget the time employed by the fastest baseline, `pyscamp`, on one million data points.
+Given that budget, we traverse the motif iterator provided by `attimo` until the time budget is exhausted, counting how many motifs we are able to discover.
+This procedure is implemented by the following snippet.
+
+```{python}
+def enumerate_with_budget(motifs_iterator, budget):
+    start = time.time()
+    times = []
+    motifs = []
+    cnt = 0
+    elapsed = 0
+    while elapsed <= budget:
+        try:
+            m = next(motifs_iterator)
+            cnt += 1
+            elapsed = time.time() - start 
+            times.append(elapsed)
+            motifs.append(m)
+        except StopIteration:
+            return cnt, times, motifs
+    return cnt, times, motifs
+```
+
+The following code runs the experiment, using as a budged the $\approx 300$ seconds employed by `pyscamp`.
+
+```{python}
+import os
+fname = ".discover.parquet"
+if not os.path.isfile(fname):
+    start = time.time() 
+    motifs = pyattimo.MotifsIterator(ts, w=1000, max_k=300, repetitions=50, delta=0.01)
+    end = time.time()
+    index_time = end - start
+    time_budget = fits["pyscamp"](len(ts))
+    cnt, elapsed_times, motifs_list = enumerate_with_budget(motifs, time_budget - index_time)
+    print("Motifs found in {:.2f} seconds: {}".format(time_budget, cnt))
+
+    elapsed_times = pd.DataFrame({
+        'elapsed_time_s': elapsed_times,
+        'motif_distance': [m.distance for m in motifs_list],
+        'motif_rank': np.arange(len(elapsed_times))
+    })
+    elapsed_times.to_parquet(fname)
+else:
+    elapsed_times = pd.read_parquet(fname)
+
+```
+
+Using `attimo`, we can iterate through 200 motifs before `pyscamp` is done computing the matrix profile!
+
+The plot below, reports on the $x$ axis the rank of each motif found, while the $y$ axis
+reports the time elapsed since the creation of the `MotifIterator` object and the discovery of each motif.
+In other words, the leftmost point is the time required taken to discover the first motif.
+
+
+```{python}
+#| fig-pos: center
+#| echo: false
+sns.lineplot(
+    data = elapsed_times,
+    x = "motif_rank",
+    y = "elapsed_time_s"
+)
+plt.xlabel("Motif rank")
+plt.ylabel("Elapsed time (s)")
+plt.show()
+```
+
+You can see that the first $\approx$ 200 motifs are found rather fast, while the last motifs require to invest more computation time.
+The reason is that the distance of the subsequences making up the lower-ranked motifs is larger than the distance of the top motifs, thus forcing the algorithm to spend more time confirming them.
+
+Given the above experiment, it is clear why using `pyattimo` can be advantageous in an interactive setting: the user can stop the computation whenever they find it most convenient.

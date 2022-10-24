@@ -1,0 +1,23 @@
+project:
+  type: website
+
+website:
+  title: "Attimo: fast time series motif mining"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - about.qmd
+      - href: pyattimo.qmd
+        text: PyAttimo
+      - href: https://cecca.github.io/attimo/VLDB-supplemental/
+        text: VLDB supplement
+
+format:
+  html:
+    theme: litera
+    css: styles.css
+    toc: true
+
+
+
