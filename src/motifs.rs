@@ -740,7 +740,6 @@ impl MotifsEnumerator {
         while self.to_return.is_empty() {
             assert!(self.depth > 0);
             assert!(self.rep < self.repetitions);
-            eprintln!("Repetition {} at prefix {}", self.rep, self.depth);
 
             // Set up buckets for the current repetition
             self.pools.group_subsequences(
