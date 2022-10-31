@@ -122,6 +122,21 @@ Notice that the time to discover this second motif is much shorter than the time
 This explorative process of looking at  can be iterated as long as needed, interactively.
 The motifs are returned by increasing values of distance of their subsequences: as soon as we find a motif whose subsequences are so far away as to no longer be interesting, we can stop the process.
 
+## Getting motifs by index
+
+The library also gives the chance to access motifs directly by their rank:
+
+```{python}
+# Access the top motif
+motifs[0]
+
+# Access the fifth motif, and plot it
+motifs[4].plot()
+```
+
+if a motif has yet to be discovered, then it is first computed and then returned.
+The `motifs` object caches the motifs as it finds them
+
 ## Comparison with `stumpy` and `pyscamp`
 
 So far, we have seen how `pyattimo` allows to _interactively_ explore motifs.

@@ -599,9 +599,11 @@ fn explore_tries(
 pub struct MotifsEnumerator {
     start: Instant,
     ts: Arc<WindowedTimeseries>,
-    max_k: usize,
+    pub max_k: usize,
     topk: TopK,
     to_return: BinaryHeap<Reverse<Motif>>,
+    /// used to cache the motifs already discovered so that we can use the enumerator as a collection
+    returned: Vec<Motif>,
     repetitions: usize,
     delta: f64,
     exclusion_zone: usize,
@@ -658,6 +660,7 @@ impl MotifsEnumerator {
             max_k,
             topk,
             to_return: BinaryHeap::new(),
+            returned: Vec::new(),
             repetitions,
             delta,
             exclusion_zone,
@@ -729,6 +732,7 @@ impl MotifsEnumerator {
     pub fn next_motif(&mut self) -> Option<Motif> {
         // First, try to empty the buffer of motifs to return, if any
         if let Some(motif) = self.to_return.pop() {
+            self.returned.push(motif.0.clone());
             return Some(motif.0);
         }
 
@@ -879,7 +883,22 @@ impl MotifsEnumerator {
         }
 
         // return the found motif with the smallest distance
-        self.to_return.pop().map(|m| m.0)
+        let m = self.to_return.pop().map(|m| m.0);
+        if let Some(m) = m.clone() {
+            self.returned.push(m);
+        }
+        m
+    }
+
+    /// Gets the motif at the given rank, possibly computing it if not already discovered.
+    pub fn get_ranked(&mut self, rank: usize) -> &Motif {
+        if rank >= self.max_k {
+            panic!("Index out of bounds");
+        }
+        while self.returned.len() <= rank {
+            self.next();
+        }
+        &self.returned[rank]
     }
 }
 

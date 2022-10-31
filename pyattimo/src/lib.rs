@@ -131,6 +131,15 @@ impl MotifsIterator {
             .next_motif()
             .map(|m| Motif::with_context(m, slf.inner.get_ts()))
     }
+
+    fn __len__(&self) -> usize {
+        self.inner.max_k
+    }
+
+    fn __getitem__(&mut self, idx: isize) -> Motif {
+        assert!(idx >= 0);
+        Motif::with_context(self.inner.get_ranked(idx as usize).clone(), self.inner.get_ts())
+    }
 }
 
 #[pyfunction(prefix = "None")]

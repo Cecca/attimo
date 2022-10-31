@@ -189,6 +189,7 @@ div.csl-indent {
   <ul>
   <li><a href="#setting-things-up" id="toc-setting-things-up" class="nav-link active" data-scroll-target="#setting-things-up">Setting things up</a></li>
   <li><a href="#looking-for-motifs-interactively" id="toc-looking-for-motifs-interactively" class="nav-link" data-scroll-target="#looking-for-motifs-interactively">Looking for motifs, interactively</a></li>
+  <li><a href="#getting-motifs-by-index" id="toc-getting-motifs-by-index" class="nav-link" data-scroll-target="#getting-motifs-by-index">Getting motifs by index</a></li>
   <li><a href="#comparison-with-stumpy-and-pyscamp" id="toc-comparison-with-stumpy-and-pyscamp" class="nav-link" data-scroll-target="#comparison-with-stumpy-and-pyscamp">Comparison with <code>stumpy</code> and <code>pyscamp</code></a></li>
   </ul>
 <div class="toc-actions"><div><i class="bi bi-github"></i></div><div class="action-links"><p><a href="https://github.com/Cecca/attimo/issues/new" class="toc-action">Report an issue</a></p></div></div></nav>
@@ -269,23 +270,26 @@ div.csl-indent {
 <div class="cell" data-execution_count="7">
 <div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="op">%</span>time motifs <span class="op">=</span> pyattimo.MotifsIterator(ts, w<span class="op">=</span><span class="dv">1000</span>, max_k<span class="op">=</span><span class="dv">100</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>CPU times: user 13 s, sys: 303 ms, total: 13.3 s
-Wall time: 10 s</code></pre>
+<pre><code>CPU times: user 12.6 s, sys: 263 ms, total: 12.9 s
+Wall time: 7.94 s</code></pre>
 </div>
 </div>
 <p>Once the index is built, we can ask for the first motif. The time required for this operation depends on how distances between subsequences are distributed, rather than by how long the time series is.</p>
 <div class="cell" data-execution_count="8">
 <div class="sourceCode cell-code" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="op">%</span>time m <span class="op">=</span> <span class="bu">next</span>(motifs)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>CPU times: user 17.9 s, sys: 340 ms, total: 18.2 s
-Wall time: 12.7 s</code></pre>
+<pre><code>CPU times: user 17.7 s, sys: 202 ms, total: 17.9 s</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Wall time: 9.48 s</code></pre>
 </div>
 </div>
 <p>The returned <code>pyattimo.Motif</code> object allows to retrieve the starting indices of the subsequences composing the motif, along with the z-normalized Euclidean distance between the two subsequences.</p>
 <div class="cell" data-execution_count="9">
-<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"Index of first subsequence"</span>, m.a)</span>
-<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"Index of second subsequence"</span>, m.b)</span>
-<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"z-normalized Euclidean distance"</span>, m.distance)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"Index of first subsequence"</span>, m.a)</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"Index of second subsequence"</span>, m.b)</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"z-normalized Euclidean distance"</span>, m.distance)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Index of first subsequence 723776
 Index of second subsequence 796052
@@ -294,13 +298,13 @@ z-normalized Euclidean distance 0.4335137534580184</code></pre>
 </div>
 <p>Furthermore, you can access the data of the subsequences themselves:</p>
 <div class="cell" data-execution_count="10">
-<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(m.values_a())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(m.values_a())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[-0.734, -0.734, -0.734, -0.734, -1.002, -1.002, -1.002, -1.002, -1.22, -1.22, -1.22, -1.22, -1.376, -1.376, -1.376, -1.376, -1.482, -1.482, -1.482, -1.482, -1.476, -1.476, -1.476, -1.476, -1.351, -1.351, -1.351, -1.351, -1.218, -1.218, -1.218, -1.218, -1.066, -1.066, -1.066, -1.066, -0.879, -0.879, -0.879, -0.879, -0.642, -0.642, -0.642, -0.642, -0.376, -0.376, -0.376, -0.376, -0.192, -0.192, -0.192, -0.192, -0.103, -0.103, -0.103, -0.103, -0.066, -0.066, -0.066, -0.066, -0.044, -0.044, -0.044, -0.044, -0.028, -0.028, -0.028, -0.028, -0.01, -0.01, -0.01, -0.01, 0.001, 0.001, 0.001, 0.001, 0.009, 0.009, 0.009, 0.009, 0.016, 0.016, 0.016, 0.016, 0.024, 0.024, 0.024, 0.024, 0.031, 0.031, 0.031, 0.031, 0.038, 0.038, 0.038, 0.038, 0.044, 0.044, 0.044, 0.044, 0.048, 0.048, 0.048, 0.048, 0.051, 0.051, 0.051, 0.051, 0.054, 0.054, 0.054, 0.054, 0.057, 0.057, 0.057, 0.057, 0.06, 0.06, 0.06, 0.06, 0.061, 0.061, 0.061, 0.061, 0.065, 0.065, 0.065, 0.065, 0.066, 0.066, 0.066, 0.066, 0.068, 0.068, 0.068, 0.068, 0.07, 0.07, 0.07, 0.07, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.068, 0.068, 0.068, 0.068, 0.067, 0.067, 0.067, 0.067, 0.068, 0.068, 0.068, 0.068, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.068, 0.068, 0.068, 0.068, 0.067, 0.067, 0.067, 0.067, 0.07, 0.07, 0.07, 0.07, 0.067, 0.067, 0.067, 0.067, 0.066, 0.066, 0.066, 0.066, 0.066, 0.066, 0.066, 0.066, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.066, 0.066, 0.066, 0.066, 0.067, 0.067, 0.067, 0.067, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.067, 0.067, 0.067, 0.067, 0.068, 0.068, 0.068, 0.068, 0.07, 0.07, 0.07, 0.07, 0.068, 0.068, 0.068, 0.068, 0.067, 0.067, 0.067, 0.067, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.067, 0.067, 0.067, 0.067, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.068, 0.068, 0.068, 0.068, 0.067, 0.067, 0.067, 0.067, 0.068, 0.068, 0.068, 0.068, 0.067, 0.067, 0.067, 0.067, 0.067, 0.067, 0.067, 0.067, 0.067, 0.067, 0.067, 0.067, 0.066, 0.066, 0.066, 0.066, 0.068, 0.068, 0.068, 0.068, 0.067, 0.067, 0.067, 0.067, 0.067, 0.067, 0.067, 0.067, 0.068, 0.068, 0.068, 0.068, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.071, 0.071, 0.071, 0.071, 0.07, 0.07, 0.07, 0.07, 0.071, 0.071, 0.071, 0.071, 0.07, 0.07, 0.07, 0.07, 0.071, 0.071, 0.071, 0.071, 0.068, 0.068, 0.068, 0.068, 0.066, 0.066, 0.066, 0.066, 0.065, 0.065, 0.065, 0.065, 0.063, 0.063, 0.063, 0.063, 0.061, 0.061, 0.061, 0.061, 0.06, 0.06, 0.06, 0.06, 0.057, 0.057, 0.057, 0.057, 0.055, 0.055, 0.055, 0.055, 0.055, 0.055, 0.055, 0.055, 0.052, 0.052, 0.052, 0.052, 0.05, 0.05, 0.05, 0.05, 0.049, 0.049, 0.049, 0.049, 0.046, 0.046, 0.046, 0.046, 0.043, 0.043, 0.043, 0.043, 0.039, 0.039, 0.039, 0.039, 0.037, 0.037, 0.037, 0.037, 0.033, 0.033, 0.033, 0.033, 0.028, 0.028, 0.028, 0.028, 0.023, 0.023, 0.023, 0.023, 0.02, 0.02, 0.02, 0.02, 0.016, 0.016, 0.016, 0.016, 0.01, 0.01, 0.01, 0.01, 0.004, 0.004, 0.004, 0.004, -0.001, -0.001, -0.001, -0.001, -0.006, -0.006, -0.006, -0.006, -0.011, -0.011, -0.011, -0.011, -0.016, -0.016, -0.016, -0.016, -0.022, -0.022, -0.022, -0.022, -0.021, -0.021, -0.021, -0.021, -0.024, -0.024, -0.024, -0.024, -0.023, -0.023, -0.023, -0.023, -0.023, -0.023, -0.023, -0.023, -0.023, -0.023, -0.023, -0.023, -0.02, -0.02, -0.02, -0.02, -0.018, -0.018, -0.018, -0.018, -0.017, -0.017, -0.017, -0.017, -0.013, -0.013, -0.013, -0.013, -0.011, -0.011, -0.011, -0.011, -0.007, -0.007, -0.007, -0.007, -0.006, -0.006, -0.006, -0.006, -0.006, -0.006, -0.006, -0.006, -0.006, -0.006, -0.006, -0.006, -0.004, -0.004, -0.004, -0.004, -0.002, -0.002, -0.002, -0.002, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.004, 0.004, 0.004, 0.004, 0.005, 0.005, 0.005, 0.005, 0.007, 0.007, 0.007, 0.007, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.01, 0.01, 0.01, 0.01, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.01, 0.01, 0.01, 0.01, 0.011, 0.011, 0.011, 0.011, 0.012, 0.012, 0.012, 0.012, 0.011, 0.011, 0.011, 0.011, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.012, 0.012, 0.012, 0.012, 0.015, 0.015, 0.015, 0.015, 0.012, 0.012, 0.012, 0.012, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.012, 0.012, 0.012, 0.012, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.01, 0.01, 0.01, 0.01, 0.011, 0.011, 0.011, 0.011, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.012, 0.012, 0.012, 0.012, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.011, 0.011, 0.011, 0.011, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.011, 0.011, 0.011, 0.011, 0.01, 0.01, 0.01, 0.01, 0.009, 0.009, 0.009, 0.009, 0.007, 0.007, 0.007, 0.007, 0.007, 0.007, 0.007, 0.007, 0.004, 0.004, 0.004, 0.004, 0.005, 0.005, 0.005, 0.005, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.005, 0.005, 0.005, 0.005, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.004, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.006, 0.004, 0.004, 0.004, 0.004, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.002, 0.004, 0.004, 0.004, 0.004, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.002, 0.002, 0.002, 0.002, 0.004, 0.004, 0.004, 0.004, 0.001, 0.001, 0.001, 0.001, 0.002, 0.002, 0.002, 0.002, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, 0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.001, -0.001, -0.001, -0.001, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004, -0.004]</code></pre>
 </div>
 </div>
 <div class="cell" data-execution_count="11">
-<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(m.values_b())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb12"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(m.values_b())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[-0.707, -0.707, -0.707, -0.707, -0.972, -0.972, -0.972, -0.972, -1.194, -1.194, -1.194, -1.194, -1.345, -1.345, -1.345, -1.345, -1.448, -1.448, -1.448, -1.448, -1.435, -1.435, -1.435, -1.435, -1.314, -1.314, -1.314, -1.314, -1.182, -1.182, -1.182, -1.182, -1.039, -1.039, -1.039, -1.039, -0.855, -0.855, -0.855, -0.855, -0.623, -0.623, -0.623, -0.623, -0.354, -0.354, -0.354, -0.354, -0.175, -0.175, -0.175, -0.175, -0.088, -0.088, -0.088, -0.088, -0.052, -0.052, -0.052, -0.052, -0.033, -0.033, -0.033, -0.033, -0.018, -0.018, -0.018, -0.018, -0.001, -0.001, -0.001, -0.001, 0.01, 0.01, 0.01, 0.01, 0.016, 0.016, 0.016, 0.016, 0.024, 0.024, 0.024, 0.024, 0.032, 0.032, 0.032, 0.032, 0.038, 0.038, 0.038, 0.038, 0.043, 0.043, 0.043, 0.043, 0.049, 0.049, 0.049, 0.049, 0.054, 0.054, 0.054, 0.054, 0.06, 0.06, 0.06, 0.06, 0.062, 0.062, 0.062, 0.062, 0.063, 0.063, 0.063, 0.063, 0.067, 0.067, 0.067, 0.067, 0.071, 0.071, 0.071, 0.071, 0.072, 0.072, 0.072, 0.072, 0.071, 0.071, 0.071, 0.071, 0.072, 0.072, 0.072, 0.072, 0.073, 0.073, 0.073, 0.073, 0.072, 0.072, 0.072, 0.072, 0.072, 0.072, 0.072, 0.072, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.076, 0.076, 0.076, 0.076, 0.073, 0.073, 0.073, 0.073, 0.072, 0.072, 0.072, 0.072, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.071, 0.071, 0.071, 0.071, 0.068, 0.068, 0.068, 0.068, 0.07, 0.07, 0.07, 0.07, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.068, 0.072, 0.072, 0.072, 0.072, 0.074, 0.074, 0.074, 0.074, 0.073, 0.073, 0.073, 0.073, 0.073, 0.073, 0.073, 0.073, 0.074, 0.074, 0.074, 0.074, 0.073, 0.073, 0.073, 0.073, 0.076, 0.076, 0.076, 0.076, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.078, 0.078, 0.078, 0.078, 0.076, 0.076, 0.076, 0.076, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.074, 0.073, 0.073, 0.073, 0.073, 0.072, 0.072, 0.072, 0.072, 0.076, 0.076, 0.076, 0.076, 0.074, 0.074, 0.074, 0.074, 0.076, 0.076, 0.076, 0.076, 0.073, 0.073, 0.073, 0.073, 0.076, 0.076, 0.076, 0.076, 0.077, 0.077, 0.077, 0.077, 0.078, 0.078, 0.078, 0.078, 0.077, 0.077, 0.077, 0.077, 0.078, 0.078, 0.078, 0.078, 0.079, 0.079, 0.079, 0.079, 0.078, 0.078, 0.078, 0.078, 0.078, 0.078, 0.078, 0.078, 0.081, 0.081, 0.081, 0.081, 0.082, 0.082, 0.082, 0.082, 0.082, 0.082, 0.082, 0.082, 0.082, 0.082, 0.082, 0.082, 0.082, 0.082, 0.082, 0.082, 0.081, 0.081, 0.081, 0.081, 0.078, 0.078, 0.078, 0.078, 0.078, 0.078, 0.078, 0.078, 0.077, 0.077, 0.077, 0.077, 0.077, 0.077, 0.077, 0.077, 0.077, 0.077, 0.077, 0.077, 0.074, 0.074, 0.074, 0.074, 0.073, 0.073, 0.073, 0.073, 0.073, 0.073, 0.073, 0.073, 0.07, 0.07, 0.07, 0.07, 0.068, 0.068, 0.068, 0.068, 0.066, 0.066, 0.066, 0.066, 0.065, 0.065, 0.065, 0.065, 0.065, 0.065, 0.065, 0.065, 0.062, 0.062, 0.062, 0.062, 0.059, 0.059, 0.059, 0.059, 0.057, 0.057, 0.057, 0.057, 0.055, 0.055, 0.055, 0.055, 0.052, 0.052, 0.052, 0.052, 0.048, 0.048, 0.048, 0.048, 0.044, 0.044, 0.044, 0.044, 0.04, 0.04, 0.04, 0.04, 0.033, 0.033, 0.033, 0.033, 0.027, 0.027, 0.027, 0.027, 0.023, 0.023, 0.023, 0.023, 0.017, 0.017, 0.017, 0.017, 0.011, 0.011, 0.011, 0.011, 0.005, 0.005, 0.005, 0.005, 0.001, 0.001, 0.001, 0.001, -0.004, -0.004, -0.004, -0.004, -0.007, -0.007, -0.007, -0.007, -0.012, -0.012, -0.012, -0.012, -0.016, -0.016, -0.016, -0.016, -0.015, -0.015, -0.015, -0.015, -0.017, -0.017, -0.017, -0.017, -0.017, -0.017, -0.017, -0.017, -0.016, -0.016, -0.016, -0.016, -0.013, -0.013, -0.013, -0.013, -0.011, -0.011, -0.011, -0.011, -0.009, -0.009, -0.009, -0.009, -0.006, -0.006, -0.006, -0.006, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, 0.004, 0.004, 0.004, 0.004, 0.006, 0.006, 0.006, 0.006, 0.007, 0.007, 0.007, 0.007, 0.009, 0.009, 0.009, 0.009, 0.012, 0.012, 0.012, 0.012, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.018, 0.018, 0.018, 0.018, 0.02, 0.02, 0.02, 0.02, 0.021, 0.021, 0.021, 0.021, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.022, 0.022, 0.022, 0.022, 0.023, 0.023, 0.023, 0.023, 0.024, 0.024, 0.024, 0.024, 0.024, 0.024, 0.024, 0.024, 0.024, 0.024, 0.024, 0.024, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.024, 0.024, 0.024, 0.024, 0.026, 0.026, 0.026, 0.026, 0.027, 0.027, 0.027, 0.027, 0.027, 0.027, 0.027, 0.027, 0.026, 0.026, 0.026, 0.026, 0.027, 0.027, 0.027, 0.027, 0.027, 0.027, 0.027, 0.027, 0.024, 0.024, 0.024, 0.024, 0.023, 0.023, 0.023, 0.023, 0.026, 0.026, 0.026, 0.026, 0.028, 0.028, 0.028, 0.028, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.026, 0.023, 0.023, 0.023, 0.023, 0.024, 0.024, 0.024, 0.024, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.024, 0.024, 0.024, 0.024, 0.026, 0.026, 0.026, 0.026, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.021, 0.021, 0.021, 0.021, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.022, 0.022, 0.022, 0.022, 0.021, 0.021, 0.021, 0.021, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.022, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.023, 0.022, 0.022, 0.022, 0.022, 0.023, 0.023, 0.023, 0.023, 0.024, 0.024, 0.024, 0.024, 0.023, 0.023, 0.023, 0.023, 0.022, 0.022, 0.022, 0.022, 0.021, 0.021, 0.021, 0.021, 0.022, 0.022, 0.022, 0.022, 0.021, 0.021, 0.021, 0.021, 0.021, 0.021, 0.021, 0.021, 0.018, 0.018, 0.018, 0.018, 0.021, 0.021, 0.021, 0.021, 0.021, 0.021, 0.021, 0.021, 0.021, 0.021, 0.021, 0.021, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.017, 0.017, 0.017, 0.017, 0.018, 0.018, 0.018, 0.018, 0.018, 0.018, 0.018, 0.018, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.016, 0.013, 0.013, 0.013, 0.013, 0.012, 0.012, 0.012, 0.012, 0.013, 0.013, 0.013, 0.013, 0.012, 0.012, 0.012, 0.012, 0.015, 0.015, 0.015, 0.015, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.012, 0.012, 0.012, 0.012, 0.011, 0.011, 0.011, 0.011, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.012, 0.015, 0.015, 0.015, 0.015, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.011, 0.011, 0.011, 0.011, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.015, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.012, 0.012, 0.012, 0.012, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.013, 0.012, 0.012, 0.012, 0.012, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.011, 0.009, 0.009, 0.009, 0.009, 0.01, 0.01, 0.01, 0.01, 0.009, 0.009, 0.009, 0.009, 0.01, 0.01, 0.01, 0.01, 0.009, 0.009, 0.009, 0.009, 0.01, 0.01, 0.01, 0.01, 0.012, 0.012, 0.012, 0.012, 0.011, 0.011, 0.011, 0.011]</code></pre>
 </div>
@@ -308,7 +312,7 @@ z-normalized Euclidean distance 0.4335137534580184</code></pre>
 <p>The returned <code>pyattimo.Motif</code> has a <code>plot</code> method that shows the motif subsequences, their z-normalized versions, and the positions of the motif in the original time series.</p>
 <p>Finally, and perhaps most importantly for the interactive exploration of time series, the <code>Motif</code> object allows you to plot it.</p>
 <div class="cell page-columns page-full" data-execution_count="12">
-<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>m.plot()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a>m.plot()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-display page-columns page-full">
 <div class="quarto-figure quarto-figure-center page-columns page-full">
 <figure class="figure page-columns page-full">
@@ -320,11 +324,11 @@ z-normalized Euclidean distance 0.4335137534580184</code></pre>
 </div>
 <p>Given that the <code>MotifsIterator</code> object is, well, an iterator, you can easily ask for the next motif:</p>
 <div class="cell page-columns page-full" data-execution_count="13">
-<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="op">%</span>time m <span class="op">=</span> <span class="bu">next</span>(motifs)</span>
-<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>m.plot()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="op">%</span>time m <span class="op">=</span> <span class="bu">next</span>(motifs)</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>m.plot()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>CPU times: user 7 µs, sys: 1 µs, total: 8 µs
-Wall time: 11 µs</code></pre>
+<pre><code>CPU times: user 6 µs, sys: 1 µs, total: 7 µs
+Wall time: 10 µs</code></pre>
 </div>
 <div class="cell-output cell-output-display page-columns page-full">
 <div class="quarto-figure quarto-figure-center page-columns page-full">
@@ -338,6 +342,21 @@ Wall time: 11 µs</code></pre>
 <p>Notice that the time to discover this second motif is much shorter than the time that was required to discover the first one: microseconds instead of seconds. This is a property of the underlying algorithm: for further details we invite you to read the full paper.</p>
 <p>This explorative process of looking at can be iterated as long as needed, interactively. The motifs are returned by increasing values of distance of their subsequences: as soon as we find a motif whose subsequences are so far away as to no longer be interesting, we can stop the process.</p>
 </section>
+<section id="getting-motifs-by-index" class="level2">
+<h2 class="anchored" data-anchor-id="getting-motifs-by-index">Getting motifs by index</h2>
+<p>The library also gives the chance to access motifs directly by their rank:</p>
+<div class="cell" data-execution_count="14">
+<div class="sourceCode cell-code" id="cb17"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Access the top motif</span></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>motifs[<span class="dv">0</span>]</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Access the fifth motif, and plot it</span></span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>motifs[<span class="dv">4</span>].plot()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-display">
+<p><img src="pyattimo_files/figure-html/cell-14-output-1.png" width="662" height="474"></p>
+</div>
+</div>
+<p>if a motif has yet to be discovered, then it is first computed and then returned. The <code>motifs</code> object caches the motifs as it finds them</p>
+</section>
 <section id="comparison-with-stumpy-and-pyscamp" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="comparison-with-stumpy-and-pyscamp">Comparison with <code>stumpy</code> and <code>pyscamp</code></h2>
 <p>So far, we have seen how <code>pyattimo</code> allows to <em>interactively</em> explore motifs. But how does it compare with the state of the art in motif discovery? There is a rich line of work investigating the efficient use of the <a href="https://www.cs.ucr.edu/~eamonn/MatrixProfile.html"><em>matrix profile</em></a>, a data structure that for each subsequence of the input time series holds information about its most similar subsequence.</p>
@@ -347,88 +366,88 @@ Wall time: 11 µs</code></pre>
 <p>We consider the <code>ECG</code> dataset we already introduced above, with 1,000,000 data points. As a benchmark, we will measure the running time of both <code>stumpy</code>, <code>pyscamp</code>, and <code>attimo</code> on prefixes of increasing size of the time series. For <code>attimo</code>, we extract from the iterator only the first motif.</p>
 <div class="page-columns page-full"><p>Beware that <code>stumpy</code> and <code>pyscamp</code> compute the full matrix profile, which contains a lot more information than just the top motif. The point of this (rather unscientific) benchmark is to get a sense of the gains we can make if we focus on just finding the top motif.</p><div class="no-row-height column-margin column-container"><span class="aside">Later we shall see how many motifs we can find before the fastest of the baselines completes.</span></div></div>
 <p>The plot below reports the results of this experiment (you can expand the code to see how the experiments have been run).</p>
-<div class="cell page-columns page-full" data-execution_count="14">
+<div class="cell page-columns page-full" data-execution_count="15">
 <details>
 <summary>Code</summary>
-<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> sqlite3</span>
-<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> time </span>
-<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> stumpy</span>
-<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyscamp</span>
-<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
-<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> seaborn <span class="im">as</span> sns</span>
-<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np</span>
-<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>w <span class="op">=</span> <span class="dv">1000</span></span>
-<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a><span class="co"># force numba precompilation</span></span>
-<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a>stumpy.stump(ts[:<span class="dv">2</span><span class="op">*</span>w], m<span class="op">=</span>w)</span>
-<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a><span class="co"># We persist results in a sqlite database, so to avoid rerunning experiments unnecessarily</span></span>
-<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> already_run(db, algorithm, prefix):</span>
-<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> db.execute(</span>
-<span id="cb16-17"><a href="#cb16-17" aria-hidden="true" tabindex="-1"></a>        <span class="st">"SELECT * FROM experiments WHERE algorithm = ? AND prefix = ?"</span>, </span>
-<span id="cb16-18"><a href="#cb16-18" aria-hidden="true" tabindex="-1"></a>        [algorithm, prefix]).fetchone() <span class="kw">is</span> <span class="kw">not</span> <span class="va">None</span></span>
-<span id="cb16-19"><a href="#cb16-19" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-20"><a href="#cb16-20" aria-hidden="true" tabindex="-1"></a><span class="cf">with</span> sqlite3.<span class="ex">connect</span>(<span class="st">".quarto/experiments.db"</span>) <span class="im">as</span> db:</span>
-<span id="cb16-21"><a href="#cb16-21" aria-hidden="true" tabindex="-1"></a>    db.execute(<span class="st">"CREATE TABLE IF NOT EXISTS experiments (algorithm TEXT, prefix INT, time_s REAL)"</span>)</span>
-<span id="cb16-22"><a href="#cb16-22" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-23"><a href="#cb16-23" aria-hidden="true" tabindex="-1"></a>    prefixes <span class="op">=</span> [<span class="dv">10000</span>, <span class="dv">25000</span>, <span class="dv">30000</span>, <span class="dv">50000</span>, <span class="dv">75000</span>, <span class="dv">100000</span>, <span class="dv">250000</span>, <span class="dv">500000</span>, <span class="dv">1000000</span>]</span>
-<span id="cb16-24"><a href="#cb16-24" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-25"><a href="#cb16-25" aria-hidden="true" tabindex="-1"></a>    timeout <span class="op">=</span> <span class="dv">20</span></span>
-<span id="cb16-26"><a href="#cb16-26" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-27"><a href="#cb16-27" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> prefix <span class="kw">in</span> prefixes:</span>
-<span id="cb16-28"><a href="#cb16-28" aria-hidden="true" tabindex="-1"></a>        <span class="co"># the prefix on which to benchmark</span></span>
-<span id="cb16-29"><a href="#cb16-29" aria-hidden="true" tabindex="-1"></a>        data <span class="op">=</span> ts[:prefix]</span>
-<span id="cb16-30"><a href="#cb16-30" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-31"><a href="#cb16-31" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> prefix <span class="op">&lt;=</span> <span class="dv">250000</span> <span class="kw">and</span> <span class="kw">not</span> already_run(db, <span class="st">"stumpy"</span>, prefix):</span>
-<span id="cb16-32"><a href="#cb16-32" aria-hidden="true" tabindex="-1"></a>            start <span class="op">=</span> time.time()</span>
-<span id="cb16-33"><a href="#cb16-33" aria-hidden="true" tabindex="-1"></a>            stumpy.stump(data, m<span class="op">=</span>w)</span>
-<span id="cb16-34"><a href="#cb16-34" aria-hidden="true" tabindex="-1"></a>            end <span class="op">=</span> time.time()</span>
-<span id="cb16-35"><a href="#cb16-35" aria-hidden="true" tabindex="-1"></a>            db.execute(<span class="st">"INSERT INTO experiments VALUES (?, ?, ?)"</span>, [<span class="st">"stumpy"</span>, prefix, end <span class="op">-</span> start])</span>
-<span id="cb16-36"><a href="#cb16-36" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-37"><a href="#cb16-37" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> prefix <span class="op">&lt;=</span> <span class="dv">500000</span> <span class="kw">and</span> <span class="kw">not</span> already_run(db, <span class="st">"pyscamp"</span>, prefix):</span>
-<span id="cb16-38"><a href="#cb16-38" aria-hidden="true" tabindex="-1"></a>            start <span class="op">=</span> time.time()</span>
-<span id="cb16-39"><a href="#cb16-39" aria-hidden="true" tabindex="-1"></a>            pyscamp.selfjoin(data, w)</span>
-<span id="cb16-40"><a href="#cb16-40" aria-hidden="true" tabindex="-1"></a>            end <span class="op">=</span> time.time()</span>
-<span id="cb16-41"><a href="#cb16-41" aria-hidden="true" tabindex="-1"></a>            db.execute(<span class="st">"INSERT INTO experiments VALUES (?, ?, ?)"</span>, [<span class="st">"pyscamp"</span>, prefix, end <span class="op">-</span> start])</span>
-<span id="cb16-42"><a href="#cb16-42" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-43"><a href="#cb16-43" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> <span class="kw">not</span> already_run(db, <span class="st">"attimo"</span>, prefix):</span>
-<span id="cb16-44"><a href="#cb16-44" aria-hidden="true" tabindex="-1"></a>            start <span class="op">=</span> time.time()</span>
-<span id="cb16-45"><a href="#cb16-45" aria-hidden="true" tabindex="-1"></a>            motifs_iter <span class="op">=</span> pyattimo.MotifsIterator(data, w<span class="op">=</span>w, max_k<span class="op">=</span><span class="dv">1</span>, repetitions<span class="op">=</span><span class="dv">50</span>, delta<span class="op">=</span><span class="fl">0.01</span>)</span>
-<span id="cb16-46"><a href="#cb16-46" aria-hidden="true" tabindex="-1"></a>            <span class="bu">next</span>(motifs_iter)</span>
-<span id="cb16-47"><a href="#cb16-47" aria-hidden="true" tabindex="-1"></a>            end <span class="op">=</span> time.time()</span>
-<span id="cb16-48"><a href="#cb16-48" aria-hidden="true" tabindex="-1"></a>            db.execute(<span class="st">"INSERT INTO experiments VALUES (?, ?, ?)"</span>, [<span class="st">"attimo"</span>, prefix, end <span class="op">-</span> start])</span>
-<span id="cb16-49"><a href="#cb16-49" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-50"><a href="#cb16-50" aria-hidden="true" tabindex="-1"></a>    results <span class="op">=</span> pd.read_sql(<span class="st">"SELECT prefix, algorithm, time_s FROM experiments ORDER BY prefix, algorithm"</span>, db)</span>
-<span id="cb16-51"><a href="#cb16-51" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-52"><a href="#cb16-52" aria-hidden="true" tabindex="-1"></a>colors <span class="op">=</span> sns.color_palette()</span>
-<span id="cb16-53"><a href="#cb16-53" aria-hidden="true" tabindex="-1"></a>palette <span class="op">=</span> {</span>
-<span id="cb16-54"><a href="#cb16-54" aria-hidden="true" tabindex="-1"></a>    <span class="st">"attimo"</span>: colors[<span class="dv">0</span>],</span>
-<span id="cb16-55"><a href="#cb16-55" aria-hidden="true" tabindex="-1"></a>    <span class="st">"pyscamp"</span>: colors[<span class="dv">1</span>],</span>
-<span id="cb16-56"><a href="#cb16-56" aria-hidden="true" tabindex="-1"></a>    <span class="st">"stumpy"</span>: colors[<span class="dv">2</span>]</span>
-<span id="cb16-57"><a href="#cb16-57" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb16-58"><a href="#cb16-58" aria-hidden="true" tabindex="-1"></a>ax <span class="op">=</span> sns.lineplot(</span>
-<span id="cb16-59"><a href="#cb16-59" aria-hidden="true" tabindex="-1"></a>    data <span class="op">=</span> results,</span>
-<span id="cb16-60"><a href="#cb16-60" aria-hidden="true" tabindex="-1"></a>    x <span class="op">=</span> <span class="st">"prefix"</span>,</span>
-<span id="cb16-61"><a href="#cb16-61" aria-hidden="true" tabindex="-1"></a>    y <span class="op">=</span> <span class="st">"time_s"</span>,</span>
-<span id="cb16-62"><a href="#cb16-62" aria-hidden="true" tabindex="-1"></a>    hue <span class="op">=</span> <span class="st">"algorithm"</span>,</span>
-<span id="cb16-63"><a href="#cb16-63" aria-hidden="true" tabindex="-1"></a>    palette <span class="op">=</span> palette</span>
-<span id="cb16-64"><a href="#cb16-64" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb16-65"><a href="#cb16-65" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-66"><a href="#cb16-66" aria-hidden="true" tabindex="-1"></a><span class="co"># Polynomial (2nd degree) regression to fill in times for larger prefixes</span></span>
-<span id="cb16-67"><a href="#cb16-67" aria-hidden="true" tabindex="-1"></a>fits <span class="op">=</span> {}</span>
-<span id="cb16-68"><a href="#cb16-68" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> algorithm <span class="kw">in</span> [<span class="st">"pyscamp"</span>]:</span>
-<span id="cb16-69"><a href="#cb16-69" aria-hidden="true" tabindex="-1"></a>    fitdat <span class="op">=</span> results[results[<span class="st">"algorithm"</span>] <span class="op">==</span> algorithm]</span>
-<span id="cb16-70"><a href="#cb16-70" aria-hidden="true" tabindex="-1"></a>    fits[algorithm] <span class="op">=</span> np.poly1d(np.polyfit(fitdat[<span class="st">"prefix"</span>], fitdat[<span class="st">"time_s"</span>], <span class="dv">2</span>))</span>
-<span id="cb16-71"><a href="#cb16-71" aria-hidden="true" tabindex="-1"></a>    xs <span class="op">=</span> np.linspace(fitdat[<span class="st">"prefix"</span>].<span class="bu">max</span>(), prefixes[<span class="op">-</span><span class="dv">1</span>])</span>
-<span id="cb16-72"><a href="#cb16-72" aria-hidden="true" tabindex="-1"></a>    ax.plot(xs, fits[algorithm](xs), <span class="st">'--'</span>, color<span class="op">=</span>palette[algorithm])</span>
-<span id="cb16-73"><a href="#cb16-73" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-74"><a href="#cb16-74" aria-hidden="true" tabindex="-1"></a>plt.show()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> sqlite3</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> time </span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> stumpy</span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyscamp</span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> seaborn <span class="im">as</span> sns</span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np</span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>w <span class="op">=</span> <span class="dv">1000</span></span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a><span class="co"># force numba precompilation</span></span>
+<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a>stumpy.stump(ts[:<span class="dv">2</span><span class="op">*</span>w], m<span class="op">=</span>w)</span>
+<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a><span class="co"># We persist results in a sqlite database, so to avoid rerunning experiments unnecessarily</span></span>
+<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> already_run(db, algorithm, prefix):</span>
+<span id="cb18-16"><a href="#cb18-16" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> db.execute(</span>
+<span id="cb18-17"><a href="#cb18-17" aria-hidden="true" tabindex="-1"></a>        <span class="st">"SELECT * FROM experiments WHERE algorithm = ? AND prefix = ?"</span>, </span>
+<span id="cb18-18"><a href="#cb18-18" aria-hidden="true" tabindex="-1"></a>        [algorithm, prefix]).fetchone() <span class="kw">is</span> <span class="kw">not</span> <span class="va">None</span></span>
+<span id="cb18-19"><a href="#cb18-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-20"><a href="#cb18-20" aria-hidden="true" tabindex="-1"></a><span class="cf">with</span> sqlite3.<span class="ex">connect</span>(<span class="st">".quarto/experiments.db"</span>) <span class="im">as</span> db:</span>
+<span id="cb18-21"><a href="#cb18-21" aria-hidden="true" tabindex="-1"></a>    db.execute(<span class="st">"CREATE TABLE IF NOT EXISTS experiments (algorithm TEXT, prefix INT, time_s REAL)"</span>)</span>
+<span id="cb18-22"><a href="#cb18-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-23"><a href="#cb18-23" aria-hidden="true" tabindex="-1"></a>    prefixes <span class="op">=</span> [<span class="dv">10000</span>, <span class="dv">25000</span>, <span class="dv">30000</span>, <span class="dv">50000</span>, <span class="dv">75000</span>, <span class="dv">100000</span>, <span class="dv">250000</span>, <span class="dv">500000</span>, <span class="dv">1000000</span>]</span>
+<span id="cb18-24"><a href="#cb18-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-25"><a href="#cb18-25" aria-hidden="true" tabindex="-1"></a>    timeout <span class="op">=</span> <span class="dv">20</span></span>
+<span id="cb18-26"><a href="#cb18-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-27"><a href="#cb18-27" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> prefix <span class="kw">in</span> prefixes:</span>
+<span id="cb18-28"><a href="#cb18-28" aria-hidden="true" tabindex="-1"></a>        <span class="co"># the prefix on which to benchmark</span></span>
+<span id="cb18-29"><a href="#cb18-29" aria-hidden="true" tabindex="-1"></a>        data <span class="op">=</span> ts[:prefix]</span>
+<span id="cb18-30"><a href="#cb18-30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-31"><a href="#cb18-31" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> prefix <span class="op">&lt;=</span> <span class="dv">250000</span> <span class="kw">and</span> <span class="kw">not</span> already_run(db, <span class="st">"stumpy"</span>, prefix):</span>
+<span id="cb18-32"><a href="#cb18-32" aria-hidden="true" tabindex="-1"></a>            start <span class="op">=</span> time.time()</span>
+<span id="cb18-33"><a href="#cb18-33" aria-hidden="true" tabindex="-1"></a>            stumpy.stump(data, m<span class="op">=</span>w)</span>
+<span id="cb18-34"><a href="#cb18-34" aria-hidden="true" tabindex="-1"></a>            end <span class="op">=</span> time.time()</span>
+<span id="cb18-35"><a href="#cb18-35" aria-hidden="true" tabindex="-1"></a>            db.execute(<span class="st">"INSERT INTO experiments VALUES (?, ?, ?)"</span>, [<span class="st">"stumpy"</span>, prefix, end <span class="op">-</span> start])</span>
+<span id="cb18-36"><a href="#cb18-36" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-37"><a href="#cb18-37" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> prefix <span class="op">&lt;=</span> <span class="dv">500000</span> <span class="kw">and</span> <span class="kw">not</span> already_run(db, <span class="st">"pyscamp"</span>, prefix):</span>
+<span id="cb18-38"><a href="#cb18-38" aria-hidden="true" tabindex="-1"></a>            start <span class="op">=</span> time.time()</span>
+<span id="cb18-39"><a href="#cb18-39" aria-hidden="true" tabindex="-1"></a>            pyscamp.selfjoin(data, w)</span>
+<span id="cb18-40"><a href="#cb18-40" aria-hidden="true" tabindex="-1"></a>            end <span class="op">=</span> time.time()</span>
+<span id="cb18-41"><a href="#cb18-41" aria-hidden="true" tabindex="-1"></a>            db.execute(<span class="st">"INSERT INTO experiments VALUES (?, ?, ?)"</span>, [<span class="st">"pyscamp"</span>, prefix, end <span class="op">-</span> start])</span>
+<span id="cb18-42"><a href="#cb18-42" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-43"><a href="#cb18-43" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> <span class="kw">not</span> already_run(db, <span class="st">"attimo"</span>, prefix):</span>
+<span id="cb18-44"><a href="#cb18-44" aria-hidden="true" tabindex="-1"></a>            start <span class="op">=</span> time.time()</span>
+<span id="cb18-45"><a href="#cb18-45" aria-hidden="true" tabindex="-1"></a>            motifs_iter <span class="op">=</span> pyattimo.MotifsIterator(data, w<span class="op">=</span>w, max_k<span class="op">=</span><span class="dv">1</span>, repetitions<span class="op">=</span><span class="dv">50</span>, delta<span class="op">=</span><span class="fl">0.01</span>)</span>
+<span id="cb18-46"><a href="#cb18-46" aria-hidden="true" tabindex="-1"></a>            <span class="bu">next</span>(motifs_iter)</span>
+<span id="cb18-47"><a href="#cb18-47" aria-hidden="true" tabindex="-1"></a>            end <span class="op">=</span> time.time()</span>
+<span id="cb18-48"><a href="#cb18-48" aria-hidden="true" tabindex="-1"></a>            db.execute(<span class="st">"INSERT INTO experiments VALUES (?, ?, ?)"</span>, [<span class="st">"attimo"</span>, prefix, end <span class="op">-</span> start])</span>
+<span id="cb18-49"><a href="#cb18-49" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-50"><a href="#cb18-50" aria-hidden="true" tabindex="-1"></a>    results <span class="op">=</span> pd.read_sql(<span class="st">"SELECT prefix, algorithm, time_s FROM experiments ORDER BY prefix, algorithm"</span>, db)</span>
+<span id="cb18-51"><a href="#cb18-51" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-52"><a href="#cb18-52" aria-hidden="true" tabindex="-1"></a>colors <span class="op">=</span> sns.color_palette()</span>
+<span id="cb18-53"><a href="#cb18-53" aria-hidden="true" tabindex="-1"></a>palette <span class="op">=</span> {</span>
+<span id="cb18-54"><a href="#cb18-54" aria-hidden="true" tabindex="-1"></a>    <span class="st">"attimo"</span>: colors[<span class="dv">0</span>],</span>
+<span id="cb18-55"><a href="#cb18-55" aria-hidden="true" tabindex="-1"></a>    <span class="st">"pyscamp"</span>: colors[<span class="dv">1</span>],</span>
+<span id="cb18-56"><a href="#cb18-56" aria-hidden="true" tabindex="-1"></a>    <span class="st">"stumpy"</span>: colors[<span class="dv">2</span>]</span>
+<span id="cb18-57"><a href="#cb18-57" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb18-58"><a href="#cb18-58" aria-hidden="true" tabindex="-1"></a>ax <span class="op">=</span> sns.lineplot(</span>
+<span id="cb18-59"><a href="#cb18-59" aria-hidden="true" tabindex="-1"></a>    data <span class="op">=</span> results,</span>
+<span id="cb18-60"><a href="#cb18-60" aria-hidden="true" tabindex="-1"></a>    x <span class="op">=</span> <span class="st">"prefix"</span>,</span>
+<span id="cb18-61"><a href="#cb18-61" aria-hidden="true" tabindex="-1"></a>    y <span class="op">=</span> <span class="st">"time_s"</span>,</span>
+<span id="cb18-62"><a href="#cb18-62" aria-hidden="true" tabindex="-1"></a>    hue <span class="op">=</span> <span class="st">"algorithm"</span>,</span>
+<span id="cb18-63"><a href="#cb18-63" aria-hidden="true" tabindex="-1"></a>    palette <span class="op">=</span> palette</span>
+<span id="cb18-64"><a href="#cb18-64" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb18-65"><a href="#cb18-65" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-66"><a href="#cb18-66" aria-hidden="true" tabindex="-1"></a><span class="co"># Polynomial (2nd degree) regression to fill in times for larger prefixes</span></span>
+<span id="cb18-67"><a href="#cb18-67" aria-hidden="true" tabindex="-1"></a>fits <span class="op">=</span> {}</span>
+<span id="cb18-68"><a href="#cb18-68" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> algorithm <span class="kw">in</span> [<span class="st">"pyscamp"</span>]:</span>
+<span id="cb18-69"><a href="#cb18-69" aria-hidden="true" tabindex="-1"></a>    fitdat <span class="op">=</span> results[results[<span class="st">"algorithm"</span>] <span class="op">==</span> algorithm]</span>
+<span id="cb18-70"><a href="#cb18-70" aria-hidden="true" tabindex="-1"></a>    fits[algorithm] <span class="op">=</span> np.poly1d(np.polyfit(fitdat[<span class="st">"prefix"</span>], fitdat[<span class="st">"time_s"</span>], <span class="dv">2</span>))</span>
+<span id="cb18-71"><a href="#cb18-71" aria-hidden="true" tabindex="-1"></a>    xs <span class="op">=</span> np.linspace(fitdat[<span class="st">"prefix"</span>].<span class="bu">max</span>(), prefixes[<span class="op">-</span><span class="dv">1</span>])</span>
+<span id="cb18-72"><a href="#cb18-72" aria-hidden="true" tabindex="-1"></a>    ax.plot(xs, fits[algorithm](xs), <span class="st">'--'</span>, color<span class="op">=</span>palette[algorithm])</span>
+<span id="cb18-73"><a href="#cb18-73" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-74"><a href="#cb18-74" aria-hidden="true" tabindex="-1"></a>plt.show()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output cell-output-display page-columns page-full">
 <div class="quarto-figure quarto-figure-center page-columns page-full">
 <figure class="figure page-columns page-full">
-<p><img src="pyattimo_files/figure-html/cell-14-output-1.png" class="figure-img" width="593" height="429"></p>
+<p><img src="pyattimo_files/figure-html/cell-15-output-1.png" class="figure-img" width="593" height="429"></p>
 <p></p><figcaption class="figure-caption margin-caption">Runtime comparison on time series of different lengths to find the top motif. Dashed lines are for estimated runtimes.</figcaption><p></p>
 </figure>
 </div>
@@ -436,8 +455,8 @@ Wall time: 11 µs</code></pre>
 </div>
 <p>The expected behavior of both <code>pyscamp</code> and <code>stumpy</code> is to require time <span class="math inline">\(O(n^2)\)</span>, where <span class="math inline">\(n\)</span> is the length of the time series. Indeed, from the plot we can infer that this is the actual behavior in this experiment: doubling the time series length quadruples the running time.</p>
 <div class="page-columns page-full"><p>As for <code>attimo</code>, note that the running time to find the top motif is much shorter: the following table reports the same times (in seconds) that are shown in the above plot</p><div class="no-row-height column-margin column-container"><span class="aside">Entries reporting <code>-</code> are for timed out runs.</span></div></div>
-<div class="cell" data-execution_count="15">
-<div class="cell-output cell-output-display" data-execution_count="62">
+<div class="cell" data-execution_count="16">
+<div class="cell-output cell-output-display" data-execution_count="32">
 <table class="table table-sm table-striped">
 <thead>
 <tr class="header">
@@ -507,46 +526,46 @@ Wall time: 11 µs</code></pre>
 </div>
 </div>
 <p>As said above, both <code>pyscamp</code> and <code>stumpy</code> return the full matrix profile, which contains more information than just the top motif. Indeed, it can be used to retrieve the other motifs (albeit with some caveats). To take into account this, rather than fixing a-priori an arbitrary number of motifs to look for, we fix as a time budget the time employed by the fastest baseline, <code>pyscamp</code>, on one million data points. Given that budget, we traverse the motif iterator provided by <code>attimo</code> until the time budget is exhausted, counting how many motifs we are able to discover. This procedure is implemented by the following snippet.</p>
-<div class="cell" data-execution_count="16">
-<div class="sourceCode cell-code" id="cb17"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> enumerate_with_budget(motifs_iterator, budget):</span>
-<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>    start <span class="op">=</span> time.time()</span>
-<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>    times <span class="op">=</span> []</span>
-<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>    motifs <span class="op">=</span> []</span>
-<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>    cnt <span class="op">=</span> <span class="dv">0</span></span>
-<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>    elapsed <span class="op">=</span> <span class="dv">0</span></span>
-<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a>    <span class="cf">while</span> elapsed <span class="op">&lt;=</span> budget:</span>
-<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a>        <span class="cf">try</span>:</span>
-<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a>            m <span class="op">=</span> <span class="bu">next</span>(motifs_iterator)</span>
-<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a>            cnt <span class="op">+=</span> <span class="dv">1</span></span>
-<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a>            elapsed <span class="op">=</span> time.time() <span class="op">-</span> start </span>
-<span id="cb17-12"><a href="#cb17-12" aria-hidden="true" tabindex="-1"></a>            times.append(elapsed)</span>
-<span id="cb17-13"><a href="#cb17-13" aria-hidden="true" tabindex="-1"></a>            motifs.append(m)</span>
-<span id="cb17-14"><a href="#cb17-14" aria-hidden="true" tabindex="-1"></a>        <span class="cf">except</span> <span class="pp">StopIteration</span>:</span>
-<span id="cb17-15"><a href="#cb17-15" aria-hidden="true" tabindex="-1"></a>            <span class="cf">return</span> cnt, times, motifs</span>
-<span id="cb17-16"><a href="#cb17-16" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> cnt, times, motifs</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell" data-execution_count="17">
+<div class="sourceCode cell-code" id="cb19"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> enumerate_with_budget(motifs_iterator, budget):</span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>    start <span class="op">=</span> time.time()</span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>    times <span class="op">=</span> []</span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a>    motifs <span class="op">=</span> []</span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a>    cnt <span class="op">=</span> <span class="dv">0</span></span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a>    elapsed <span class="op">=</span> <span class="dv">0</span></span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a>    <span class="cf">while</span> elapsed <span class="op">&lt;=</span> budget:</span>
+<span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a>        <span class="cf">try</span>:</span>
+<span id="cb19-9"><a href="#cb19-9" aria-hidden="true" tabindex="-1"></a>            m <span class="op">=</span> <span class="bu">next</span>(motifs_iterator)</span>
+<span id="cb19-10"><a href="#cb19-10" aria-hidden="true" tabindex="-1"></a>            cnt <span class="op">+=</span> <span class="dv">1</span></span>
+<span id="cb19-11"><a href="#cb19-11" aria-hidden="true" tabindex="-1"></a>            elapsed <span class="op">=</span> time.time() <span class="op">-</span> start </span>
+<span id="cb19-12"><a href="#cb19-12" aria-hidden="true" tabindex="-1"></a>            times.append(elapsed)</span>
+<span id="cb19-13"><a href="#cb19-13" aria-hidden="true" tabindex="-1"></a>            motifs.append(m)</span>
+<span id="cb19-14"><a href="#cb19-14" aria-hidden="true" tabindex="-1"></a>        <span class="cf">except</span> <span class="pp">StopIteration</span>:</span>
+<span id="cb19-15"><a href="#cb19-15" aria-hidden="true" tabindex="-1"></a>            <span class="cf">return</span> cnt, times, motifs</span>
+<span id="cb19-16"><a href="#cb19-16" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> cnt, times, motifs</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p>The following code runs the experiment, using as a budged the <span class="math inline">\(\approx 300\)</span> seconds employed by <code>pyscamp</code>.</p>
-<div class="cell" data-execution_count="17">
-<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> os</span>
-<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>fname <span class="op">=</span> <span class="st">".discover.parquet"</span></span>
-<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>time_budget <span class="op">=</span> fits[<span class="st">"pyscamp"</span>](<span class="bu">len</span>(ts))</span>
-<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="kw">not</span> os.path.isfile(fname):</span>
-<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>    start <span class="op">=</span> time.time() </span>
-<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>    motifs <span class="op">=</span> pyattimo.MotifsIterator(ts, w<span class="op">=</span><span class="dv">1000</span>, max_k<span class="op">=</span><span class="dv">300</span>, repetitions<span class="op">=</span><span class="dv">50</span>, delta<span class="op">=</span><span class="fl">0.01</span>)</span>
-<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>    end <span class="op">=</span> time.time()</span>
-<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>    index_time <span class="op">=</span> end <span class="op">-</span> start</span>
-<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>    cnt, elapsed_times, motifs_list <span class="op">=</span> enumerate_with_budget(motifs, time_budget <span class="op">-</span> index_time)</span>
-<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a>    elapsed_times <span class="op">=</span> pd.DataFrame({</span>
-<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a>        <span class="st">'elapsed_time_s'</span>: elapsed_times,</span>
-<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a>        <span class="st">'motif_distance'</span>: [m.distance <span class="cf">for</span> m <span class="kw">in</span> motifs_list],</span>
-<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a>        <span class="st">'motif_rank'</span>: np.arange(<span class="bu">len</span>(elapsed_times))</span>
-<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a>    })</span>
-<span id="cb18-16"><a href="#cb18-16" aria-hidden="true" tabindex="-1"></a>    elapsed_times.to_parquet(fname)</span>
-<span id="cb18-17"><a href="#cb18-17" aria-hidden="true" tabindex="-1"></a><span class="cf">else</span>:</span>
-<span id="cb18-18"><a href="#cb18-18" aria-hidden="true" tabindex="-1"></a>    elapsed_times <span class="op">=</span> pd.read_parquet(fname)</span>
-<span id="cb18-19"><a href="#cb18-19" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb18-20"><a href="#cb18-20" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"Motifs found in </span><span class="sc">{:.2f}</span><span class="st"> seconds: </span><span class="sc">{}</span><span class="st">"</span>.<span class="bu">format</span>(time_budget, elapsed_times.shape[<span class="dv">0</span>]))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell" data-execution_count="18">
+<div class="sourceCode cell-code" id="cb20"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> os</span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>fname <span class="op">=</span> <span class="st">".discover.parquet"</span></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>time_budget <span class="op">=</span> fits[<span class="st">"pyscamp"</span>](<span class="bu">len</span>(ts))</span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="kw">not</span> os.path.isfile(fname):</span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a>    start <span class="op">=</span> time.time() </span>
+<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a>    motifs <span class="op">=</span> pyattimo.MotifsIterator(ts, w<span class="op">=</span><span class="dv">1000</span>, max_k<span class="op">=</span><span class="dv">300</span>, repetitions<span class="op">=</span><span class="dv">50</span>, delta<span class="op">=</span><span class="fl">0.01</span>)</span>
+<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a>    end <span class="op">=</span> time.time()</span>
+<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a>    index_time <span class="op">=</span> end <span class="op">-</span> start</span>
+<span id="cb20-9"><a href="#cb20-9" aria-hidden="true" tabindex="-1"></a>    cnt, elapsed_times, motifs_list <span class="op">=</span> enumerate_with_budget(motifs, time_budget <span class="op">-</span> index_time)</span>
+<span id="cb20-10"><a href="#cb20-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-11"><a href="#cb20-11" aria-hidden="true" tabindex="-1"></a>    elapsed_times <span class="op">=</span> pd.DataFrame({</span>
+<span id="cb20-12"><a href="#cb20-12" aria-hidden="true" tabindex="-1"></a>        <span class="st">'elapsed_time_s'</span>: elapsed_times,</span>
+<span id="cb20-13"><a href="#cb20-13" aria-hidden="true" tabindex="-1"></a>        <span class="st">'motif_distance'</span>: [m.distance <span class="cf">for</span> m <span class="kw">in</span> motifs_list],</span>
+<span id="cb20-14"><a href="#cb20-14" aria-hidden="true" tabindex="-1"></a>        <span class="st">'motif_rank'</span>: np.arange(<span class="bu">len</span>(elapsed_times))</span>
+<span id="cb20-15"><a href="#cb20-15" aria-hidden="true" tabindex="-1"></a>    })</span>
+<span id="cb20-16"><a href="#cb20-16" aria-hidden="true" tabindex="-1"></a>    elapsed_times.to_parquet(fname)</span>
+<span id="cb20-17"><a href="#cb20-17" aria-hidden="true" tabindex="-1"></a><span class="cf">else</span>:</span>
+<span id="cb20-18"><a href="#cb20-18" aria-hidden="true" tabindex="-1"></a>    elapsed_times <span class="op">=</span> pd.read_parquet(fname)</span>
+<span id="cb20-19"><a href="#cb20-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb20-20"><a href="#cb20-20" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"Motifs found in </span><span class="sc">{:.2f}</span><span class="st"> seconds: </span><span class="sc">{}</span><span class="st">"</span>.<span class="bu">format</span>(time_budget, elapsed_times.shape[<span class="dv">0</span>]))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Motifs found in 297.47 seconds: 243</code></pre>
 </div>
