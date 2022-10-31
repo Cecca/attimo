@@ -1,2 +1,10 @@
+default:
+    just -l
+
+# Preview the website
+preview:
+    quarto preview
+
+# Render the website
 render:
     quarto render --output-dir ../docs

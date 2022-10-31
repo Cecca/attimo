@@ -1,10 +1,52 @@
 ---
 title: "Attimo: fast time series motif mining"
+jupyter: python3
+execute:
+  cache: true
 ---
 
-`Attimo` stands for AdapTive Timeseries Motifs, and is a software package to find motifs in time series.
+`Attimo` is a software package for quickly finding motifs in time series.
+Its name, that is Italian means _instant_, is an acronym for *A*dap*T*ive *TI*meseries *MO*tifs:
+in fact, the peculiarity of the algorithm underlying this implementation is that it is _adaptive_ to the data distribution.
+
+## What is a motif?
+
+A time series (i.e. a sequence of time-varying values) can be chunked in several _subsequences_ of a given length $w$.
+The _similarity_ between two given subsequences of a time series can be measured using several distance measures. A very common choice is the _Euclidean distance_, along with its variant the _z-normalized Euclidean distance_.
 
 Intuitively, a _motif_ is a subsequence in a time series that has at least one similar occurrence in another location of the same time series.
+
 More formally, for a fixed subsequence length $w$ and for a given distance function between subsequences of length $m$ of a time series, we can define the top motif as being the pair of subsequences at minimum distance.
 Since subsequences can overlap, usually overlapping subsequences are ignored^[This definition of subsequences to be ignored is somewhat flexible. For instance, we can allow for overlaps of at most $w/4$, or $w/2$].
 
+## How does this software work?
+
+This software is implemented in the [Rust](https://www.rust-lang.org/) programming language and can be used as a `Rust` library.
+For convenience, we provide a [Python wrapper](pyattimo.qmd) providing the full functionality.
+
+In particular, you can specify an input time series and the desired window length, and the library will return a _lazy iterator_ of the top motifs:
+
+```{python}
+# Load the library
+import pyattimo
+# Load an example dataset
+ts = pyattimo.load_dataset("ecg", prefix=100000)
+# Build the iterator
+motifs_iter = pyattimo.MotifsIterator(ts, w=1000, max_k=10)
+# Iterate through the motifs
+for rank, motif in enumerate(motifs_iter):
+    print("Motif {} between {} and {} at distance {:.3}".format(
+        rank,
+        motif.a,
+        motif.b,
+        motif.distance
+    ))
+```
+
+## How does the algorithm work?
+
+The algorithm is based on [Locality Sensitive Hashing](https://cecca.github.io/attimo/VLDB-supplemental/) and takes advantage of the distribution of distances in the dataset.
+
+The details are described in the paper
+_Fast and Scalable Mining of Time Series Motifs with Probabilistic Guarantees_
+by Matteo Ceccarello and Johann Gamper, soon to appear in PVLDB 15(13).

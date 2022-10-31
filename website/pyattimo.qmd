@@ -231,7 +231,7 @@ plt.show()
 The expected behavior of both `pyscamp` and `stumpy` is to require time $O(n^2)$, where $n$ is the length of the time series.
 Indeed, from the plot we can infer that this is the actual behavior in this experiment: doubling the time series length quadruples the running time.
 
-As for `attimo`, note that the running time to find the top motif is much shorter: the following table reports the same times (in seconds) that are shown in the above plot
+As for `attimo`, note that the running time to find the top motif is much shorter: the following table reports the same times (in seconds) that are shown in the above plot[Entries reporting `-` are for timed out runs.]{.aside}
 
 ```{python}
 #| echo: false
@@ -239,7 +239,7 @@ from tabulate import tabulate
 from IPython.display import Markdown
 pivoted = results.pivot(columns="algorithm", index="prefix", values="time_s")
 pivoted.reset_index(inplace=True)
-Markdown(tabulate(pivoted, pivoted.columns, floatfmt=(".0f", ".2f", ".2f", ".2f"), showindex=False))
+Markdown(tabulate(pivoted, pivoted.columns, floatfmt=(".0f", ".2f", ".2f", ".2f"), missingval='-', showindex=False).replace("nan", "-"))
 ```
 
 
@@ -273,14 +273,13 @@ The following code runs the experiment, using as a budged the $\approx 300$ seco
 ```{python}
 import os
 fname = ".discover.parquet"
+time_budget = fits["pyscamp"](len(ts))
 if not os.path.isfile(fname):
     start = time.time() 
     motifs = pyattimo.MotifsIterator(ts, w=1000, max_k=300, repetitions=50, delta=0.01)
     end = time.time()
     index_time = end - start
-    time_budget = fits["pyscamp"](len(ts))
     cnt, elapsed_times, motifs_list = enumerate_with_budget(motifs, time_budget - index_time)
-    print("Motifs found in {:.2f} seconds: {}".format(time_budget, cnt))
 
     elapsed_times = pd.DataFrame({
         'elapsed_time_s': elapsed_times,
@@ -291,29 +290,7 @@ if not os.path.isfile(fname):
 else:
     elapsed_times = pd.read_parquet(fname)
 
+print("Motifs found in {:.2f} seconds: {}".format(time_budget, elapsed_times.shape[0]))
 ```
 
-Using `attimo`, we can iterate through 200 motifs before `pyscamp` is done computing the matrix profile!
-
-The plot below, reports on the $x$ axis the rank of each motif found, while the $y$ axis
-reports the time elapsed since the creation of the `MotifIterator` object and the discovery of each motif.
-In other words, the leftmost point is the time required taken to discover the first motif.
-
-
-```{python}
-#| fig-pos: center
-#| echo: false
-sns.lineplot(
-    data = elapsed_times,
-    x = "motif_rank",
-    y = "elapsed_time_s"
-)
-plt.xlabel("Motif rank")
-plt.ylabel("Elapsed time (s)")
-plt.show()
-```
-
-You can see that the first $\approx$ 200 motifs are found rather fast, while the last motifs require to invest more computation time.
-The reason is that the distance of the subsequences making up the lower-ranked motifs is larger than the distance of the top motifs, thus forcing the algorithm to spend more time confirming them.
-
-Given the above experiment, it is clear why using `pyattimo` can be advantageous in an interactive setting: the user can stop the computation whenever they find it most convenient.
+Using `attimo`, we can iterate through over 200 motifs before `pyscamp` is done computing the matrix profile!

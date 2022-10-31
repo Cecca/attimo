@@ -15,6 +15,7 @@ use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
 use std::cell::RefCell;
+use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::ops::Range;
 use std::sync::atomic::AtomicUsize;
@@ -600,7 +601,7 @@ pub struct MotifsEnumerator {
     ts: Arc<WindowedTimeseries>,
     max_k: usize,
     topk: TopK,
-    to_return: BinaryHeap<Motif>,
+    to_return: BinaryHeap<Reverse<Motif>>,
     repetitions: usize,
     delta: f64,
     exclusion_zone: usize,
@@ -728,7 +729,7 @@ impl MotifsEnumerator {
     pub fn next_motif(&mut self) -> Option<Motif> {
         // First, try to empty the buffer of motifs to return, if any
         if let Some(motif) = self.to_return.pop() {
-            return Some(motif);
+            return Some(motif.0);
         }
 
         // check we already returned all we could
@@ -852,7 +853,7 @@ impl MotifsEnumerator {
                     }
                 }
             });
-            self.to_return.extend(buf.drain(..));
+            self.to_return.extend(buf.drain(..).map(|m| Reverse(m)));
 
             // set up next repetition
             self.rep += 1;
@@ -878,7 +879,7 @@ impl MotifsEnumerator {
         }
 
         // return the found motif with the smallest distance
-        self.to_return.pop()
+        self.to_return.pop().map(|m| m.0)
     }
 }
 
