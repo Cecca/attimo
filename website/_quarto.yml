@@ -2,7 +2,9 @@ project:
   type: website
 
 website:
-  title: "Attimo: fast time series motif mining"
+  title: "ATTIMO"
+  repo-url: https://github.com/Cecca/attimo
+  repo-actions: [issue]
   navbar:
     left:
       - href: index.qmd
@@ -12,6 +14,10 @@ website:
         text: PyAttimo
       - href: https://cecca.github.io/attimo/VLDB-supplemental/
         text: VLDB supplement
+    right:
+      - icon: github
+        href: https://github.com/Cecca/attimo
+        aria-label: Attimo GitHub
 
 format:
   html:
