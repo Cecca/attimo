@@ -9,7 +9,6 @@ website:
     left:
       - href: index.qmd
         text: Home
-      - about.qmd
       - href: pyattimo.qmd
         text: PyAttimo
       - href: https://cecca.github.io/attimo/VLDB-supplemental/

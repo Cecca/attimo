@@ -54,12 +54,5 @@
     "title": "Attimo: fast time series motif mining",
     "section": "How does the algorithm work?",
     "text": "How does the algorithm work?\nThe algorithm is based on Locality Sensitive Hashing and takes advantage of the distribution of distances in the dataset.\nThe details are described in the paper Fast and Scalable Mining of Time Series Motifs with Probabilistic Guarantees by Matteo Ceccarello and Johann Gamper, soon to appear in PVLDB 15(13)."
-  },
-  {
-    "objectID": "about.html",
-    "href": "about.html",
-    "title": "About",
-    "section": "",
-    "text": "About this site"
   }
 ]
