@@ -1,5 +1,4 @@
-use anyhow::Context;
-use anyhow::Result;
+use anyhow::{Result, Context, bail};
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
@@ -46,11 +45,12 @@ fn load_from<R: BufRead>(mut reader: R, prefix: Option<usize>) -> Result<Vec<f64
             Ok(0) => break, // EOF reached
             Ok(_) => {
                 if !buf.trim_end().is_empty() {
-                    res.push(
-                        fast_float::parse_partial(&buf)
-                            .with_context(|| format!("parsing `{}`", buf))?
-                            .0,
-                    );
+                    let (x, rest) = fast_float::parse_partial(&buf)
+                        .with_context(|| format!("parsing `{}`", buf))?;
+                    if !buf[rest..].trim_end().is_empty() {
+                        bail!("Cannot parse `{}` into a number", buf);
+                    }
+                    res.push(x);
                 }
             }
             Err(e) => anyhow::bail!(e),
