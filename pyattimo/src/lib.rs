@@ -31,7 +31,7 @@ impl Motif {
 
 const PLOT_SCRIPT: &str = r#"
 import matplotlib.pyplot as plt
-fig, axs = plt.subplots(3, height_ratios=[0.5, 1, 0.5])
+fig, axs = plt.subplots(3, gridspec_kw={'height_ratios': [0.5, 1, 0.5]})
 axs[0].plot(timeseries, color = "gray")
 axs[0].axvline(a, color="red")
 axs[0].axvline(b, color="red")
