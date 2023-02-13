@@ -48,7 +48,9 @@ Usage
 -----
 
 In essence, the library provides an iterator over the motifs of the given time series.
-The following snippet illustrates the basic usage::
+The following snippet illustrates the basic usage:
+
+.. code-block:: python
 
     import pyattimo
 
