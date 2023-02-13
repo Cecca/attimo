@@ -33,7 +33,7 @@ Installation
     pip install pyattimo
 
 Otherwise, you need the Rust toolchain installed to be able to compile it.
-The simplest way is to visit [https://rustup.rs/]() and follow the instructions there. You will need the
+The simplest way is to visit https://rustup.rs/ and follow the instructions there. You will need the
 `nightly` toolchain::
 
     curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain nightly
