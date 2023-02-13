@@ -4,6 +4,28 @@ ATTIMO: AdapTive TImeseries MOtifs
 This is the implementation of the ATTIMO algorithm for fast mining
 of timeseries motifs, with probabilistic guarantees.
 
+The inner workings and guarantees of the algorithm are described in [this paper](https://www.vldb.org/pvldb/vol15/p3841-ceccarello.pdf>).
+
+If you find this software useful for your research, please use the following citation:
+
+```
+@article{DBLP:journals/pvldb/CeccarelloG22,
+  author    = {Matteo Ceccarello and
+               Johann Gamper},
+  title     = {Fast and Scalable Mining of Time Series Motifs with Probabilistic
+               Guarantees},
+  journal   = {Proc. {VLDB} Endow.},
+  volume    = {15},
+  number    = {13},
+  pages     = {3841--3853},
+  year      = {2022},
+  url       = {https://www.vldb.org/pvldb/vol15/p3841-ceccarello.pdf},
+  timestamp = {Wed, 11 Jan 2023 17:06:38 +0100},
+  biburl    = {https://dblp.org/rec/journals/pvldb/CeccarelloG22.bib},
+  bibsource = {dblp computer science bibliography, https://dblp.org}
+}
+```
+
 ## Installation
 
 First, you need to install Rust on your system. The simplest way is to visit
