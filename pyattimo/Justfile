@@ -1,0 +1,5 @@
+publish:
+    cd .. && cargo test
+    cargo test
+    maturin publish --skip-existing
+
