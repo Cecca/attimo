@@ -1,5 +1,26 @@
-publish:
+publish: wheel
+    maturin upload --skip-existing target/wheels/*
+
+
+wheel:
     cd .. && cargo test
     cargo test
-    maturin publish --skip-existing
+    just cross-wheel x86_64-unknown-linux-gnu
+    just cross-wheel x86_64-unknown-linux-musl
+    #just cross-wheel x86_64-apple-darwin
+    just cross-wheel aarch64-unknown-linux-gnu
+    just cross-wheel aarch64-unknown-linux-musl
+    #just cross-wheel aarch64-apple-darwin
+
+# Cross compiles (linking with zig) for the given platform
+cross-wheel target:
+    rustup target add {{target}}
+    maturin build --release --zig --target {{target}}
+
+# Check if the target platform is installed, and install it
+# if not.
+ensure-target target:
+    rustup target list --installed | grep {{target}} || \
+        rustup target add {{target}}
+
 
