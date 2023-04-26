@@ -644,15 +644,11 @@ impl MotifsEnumerator {
 
         info!("hash computation"; "tag" => "phase");
         let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
-        let mem_before = allocated();
         let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
         let pools = Arc::new(pools);
-        let pools_size = allocated() - mem_before;
         drop(fft_data);
 
-        let cnt_dist = AtomicUsize::new(0);
-
-        let mut topk = TopK::new(max_k, exclusion_zone);
+        let topk = TopK::new(max_k, exclusion_zone);
 
         info!("tries exploration"; "tag" => "phase");
         // This vector holds the (sorted) hashed subsequences, and their index
