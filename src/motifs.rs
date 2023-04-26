@@ -264,8 +264,6 @@ pub fn motifs(
     topk: usize,
     repetitions: usize,
     delta: f64,
-    max_correlation: Option<f64>,
-    min_correlation: Option<f64>,
     seed: u64,
     start: Instant, // when the program started, to compute elapsed confirmation times
 ) -> Vec<Motif> {
@@ -273,14 +271,7 @@ pub fn motifs(
     let exclusion_zone = ts.w;
     let fft_data = FFTData::new(&ts);
 
-    let max_dist = min_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
-    let min_dist = max_correlation.map(|c| ((1.0 - c) * (2.0 * ts.w as f64)).sqrt());
-    println!(
-        "Distance constrained between {:?} and {:?}",
-        min_dist, max_dist
-    );
-
-    let hasher_width = Hasher::estimate_width(&ts, &fft_data, topk, min_dist, seed);
+    let hasher_width = Hasher::estimate_width(&ts, &fft_data, topk, None, seed);
     info!("Computed hasher width"; "hasher_width" => hasher_width);
 
     info!("hash computation"; "tag" => "phase");
@@ -314,8 +305,6 @@ pub fn motifs(
         topk,
         delta,
         exclusion_zone,
-        min_dist,
-        max_dist,
         start,
         &mut output,
         &mut column_buffer,
@@ -349,8 +338,6 @@ fn explore_tries(
     topk: usize,
     delta: f64,
     exclusion_zone: usize,
-    min_dist: Option<f64>,
-    max_dist: Option<f64>,
     start: Instant,
     output: &mut TopK,
     column_buffer: &mut Vec<(HashValue, u32)>,
@@ -403,15 +390,7 @@ fn explore_tries(
     };
 
     //// We proceed for decreasing depths in the tries, starting from the full hash values.
-    let mut depth = if let Some(min_dist) = min_dist {
-        level_for_distance(min_dist, K as isize)
-    } else {
-        K as isize
-    };
-    println!(
-        "Exploring tries starting from minimum distance {:?} at depth {}",
-        min_dist, depth
-    );
+    let mut depth = K as isize;
     let mut previous_depth = None;
     while depth >= 0 {
         let depth_timer = Instant::now();
@@ -481,7 +460,7 @@ fn explore_tries(
                                             //// After computing the distance between the two subsequences,
                                             //// we try to insert the pair in the top data structure
                                             let d = zeucl(&ts, a_idx, b_idx);
-                                            if d.is_finite() && d > min_dist.unwrap_or(-1.0) {
+                                            if d.is_finite() {
                                                 dists += 1;
 
                                                 let m = Motif {
@@ -561,11 +540,6 @@ fn explore_tries(
             if output.num_confirmed() == topk {
                 return;
             }
-            if let Some(max_dist) = max_dist {
-                if stopping_condition(max_dist, depth, previous_depth, rep) {
-                    return;
-                }
-            }
         }
 
         pbar.finish_and_clear();
@@ -583,11 +557,7 @@ fn explore_tries(
         previous_depth.replace(depth as usize);
         if let Some(m) = output.first_not_confirmed() {
             let orig_depth = depth;
-            let d = if let Some(max_dist) = max_dist {
-                std::cmp::min_by(max_dist, m.distance, |a, b| a.partial_cmp(b).unwrap())
-            } else {
-                m.distance
-            };
+            let d = m.distance;
             depth = level_for_distance(d, depth);
             if depth == orig_depth {
                 depth -= 1;
@@ -935,7 +905,7 @@ mod test {
             let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
             let ts = WindowedTimeseries::new(ts, w, true);
 
-            let motif = *motifs(&ts, 1, 20, 0.001, None, None, 12435, Instant::now())
+            let motif = *motifs(&ts, 1, 20, 0.001, 12435, Instant::now())
                 .first()
                 .unwrap();
             println!(
@@ -960,7 +930,7 @@ mod test {
             let ts = WindowedTimeseries::new(ts, w, true);
             // assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
 
-            let motif = *motifs(&ts, 1, 200, 0.001, None, None, 12435, Instant::now())
+            let motif = *motifs(&ts, 1, 200, 0.001, 12435, Instant::now())
                 .first()
                 .unwrap();
             println!("Motif distance {}", motif.distance);
@@ -994,7 +964,7 @@ mod test {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", None).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
-        let motifs = motifs(&ts, 10, 200, 0.01, None, None, 12435, Instant::now());
+        let motifs = motifs(&ts, 10, 200, 0.01, 12435, Instant::now());
         for (a, b, dist) in top10 {
             // look for this in the motifs, allowing up to w displacement
             println!("looking for ({a} {b} {dist})");
@@ -1085,7 +1055,7 @@ mod test {
         let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", None).unwrap();
         let ts = WindowedTimeseries::new(ts, w, false);
 
-        let motifs = motifs(&ts, 10, 800, 0.01, None, None, 12435, Instant::now());
+        let motifs = motifs(&ts, 10, 800, 0.01, 12435, Instant::now());
         for (a, b, dist) in top10 {
             // look for this in the motifs, allowing up to w displacement
             println!("looking for ({a} {b} {dist})");

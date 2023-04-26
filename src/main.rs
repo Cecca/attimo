@@ -18,7 +18,7 @@ const VERSION: u32 = 21;
 static A: CountingAllocator = CountingAllocator;
 
 #[derive(FromArgs)]
-/// ATTIMO computes ApproximaTe TImeseries MOtifs.
+/// ATTIMO computes AdapTive TImeseries MOtifs.
 struct Config {
     #[argh(option, short = 'w')]
     /// subsequcence length
@@ -28,17 +28,9 @@ struct Config {
     /// the number of motifs to look for
     pub motifs: usize,
 
-    #[argh(option)]
-    /// the minimum allowed correlation between motifs pairs
-    pub min_correlation: Option<f64>,
-
-    #[argh(option)]
-    /// the maximum allowed correlation between motifs pairs, to filter out trivial matches
-    pub max_correlation: Option<f64>,
-
     #[argh(option, default = "0.001")]
     /// failure probability of the LSH scheme
-    pub delta: f64,
+    pub failure_probability: f64,
 
     #[argh(option)]
     /// the number of repetitions to perform
@@ -116,9 +108,7 @@ fn main() -> Result<()> {
         &ts,
         config.motifs,
         config.repetitions,
-        config.delta,
-        config.max_correlation,
-        config.min_correlation,
+        config.failure_probability,
         config.seed,
         total_timer
     );
