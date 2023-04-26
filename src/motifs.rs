@@ -18,9 +18,9 @@ use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::ops::Range;
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use thread_local::ThreadLocal;
@@ -54,6 +54,8 @@ pub struct Motif {
     pub distance: f64,
     /// When the motif was confirmed
     pub elapsed: Option<Duration>,
+    /// when the motif was first found
+    pub discovered: Duration,
 }
 
 impl Eq for Motif {}
@@ -487,6 +489,7 @@ fn explore_tries(
                                                     idx_b: b_idx as usize,
                                                     distance: d,
                                                     elapsed: None,
+                                                    discovered: start.elapsed()
                                                 };
                                                 tl_top.borrow_mut().insert(m);
                                             }
@@ -531,6 +534,10 @@ fn explore_tries(
             // Confirm the pairs that can be confirmed in this iteration
             output.for_each(|m| {
                 if m.elapsed.is_none() {
+                    // pbar.println(format!(
+                    //     "Motif ({}, {}) distance {:.5} first found after {:?}",
+                    //     m.idx_a, m.idx_b, m.distance, m.discovered
+                    // ));
                     if stopping_condition(m.distance, depth, previous_depth, rep) {
                         m.elapsed.replace(start.elapsed());
                         pbar.println(format!(
@@ -816,6 +823,7 @@ impl MotifsEnumerator {
                                                     idx_b: b_idx as usize,
                                                     distance: d,
                                                     elapsed: None,
+                                                    discovered: self.start.elapsed()
                                                 };
                                                 tl_top.borrow_mut().insert(m);
                                             }

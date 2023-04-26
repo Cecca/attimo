@@ -478,6 +478,7 @@ impl Hasher {
                                             elapsed: None,
                                             idx_a: a_idx,
                                             idx_b: b_idx,
+                                            discovered: timer.elapsed()
                                         });
                                     }
                                     if topk.k_th().is_some() {
