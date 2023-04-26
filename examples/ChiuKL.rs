@@ -186,6 +186,7 @@ fn projection_motifs(
                     idx_b: *b,
                     distance: d,
                     elapsed: None,
+                    discovered: start.elapsed(),
                 };
                 topk.insert(m);
             }

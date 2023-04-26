@@ -294,6 +294,7 @@ fn main() -> Result<()> {
             idx_b: std::cmp::max(i, *j),
             distance: *d,
             elapsed: None,
+            discovered: timer.elapsed(),
         };
         topk.insert(m);
     }
