@@ -203,17 +203,19 @@ pub fn bench_zdot(c: &mut Criterion) {
         .sample_iter(Uniform::new(0.0, 1.0))
         .take(n)
         .collect();
+    let a1 = a.clone();
     let b: Vec<f64> = (&mut rng)
         .sample_iter(Uniform::new(0.0, 1.0))
         .take(n)
         .collect();
+    let b1 = b.clone();
     let ma = a.iter().sum::<f64>() / a.len() as f64;
     let mb = b.iter().sum::<f64>() / a.len() as f64;
     let sa = ((a.iter().map(|x| (x - ma).powi(2)).sum::<f64>()) / (a.len() - 1) as f64).sqrt();
     let sb = ((b.iter().map(|x| (x - mb).powi(2)).sum::<f64>()) / (b.len() - 1) as f64).sqrt();
 
     c.bench_function("zdot bench", move |bencher| {
-        bencher.iter(|| zdot(&a, ma, sa, &b, mb, sb))
+        bencher.iter(|| zdot(&a1, ma, sa, &b1, mb, sb))
     });
 }
 
@@ -225,7 +227,7 @@ pub fn bench_zeucl(c: &mut Criterion) {
         bencher.iter(|| zeucl(&ts, 0, 1340))
     });
 
-    let ts = loadts("data/HumanY.txt", Some(1000000)).unwrap();
+    let ts = loadts("data/HumanY.txt.gz", Some(1000000)).unwrap();
     let ts = WindowedTimeseries::new(ts, 18000, false);
 
     c.bench_function("ops/zeucl/HumanY", move |bencher| {

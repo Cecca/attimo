@@ -71,44 +71,45 @@ pub fn zdot(a: &[f64], ma: f64, sda: f64, b: &[f64], mb: f64, sdb: f64) -> f64 {
     if sda == 0.0 || sdb == 0.0 {
         return f64::NAN;
     }
-    use packed_simd::f64x8;
+    // Chunking the inputs this way allows to the compiler to automatically
+    // vectorize the code.
     let ac = a.chunks_exact(8);
     let bc = b.chunks_exact(8);
-    let rem = ac
+    let mut sum = ac
         .remainder()
         .iter()
         .zip(bc.remainder().iter())
         .map(|(a, b)| (a - ma) * (b - mb))
         .sum::<f64>() as f64;
-    let ma = f64x8::splat(ma);
-    let mb = f64x8::splat(mb);
-    let part = ac
-        .map(f64x8::from_slice_unaligned)
-        .zip(bc.map(f64x8::from_slice_unaligned))
-        .map(|(a, b)| (a - ma) * (b - mb))
-        .sum::<f64x8>()
-        .sum() as f64;
-    (part + rem) / (sda * sdb)
+
+    sum += ac
+        .zip(bc)
+        .map(|(ac, bc)| {
+            ac.iter()
+                .zip(bc)
+                .map(|(a, b)| (a - ma) * (b - mb))
+                .sum::<f64>()
+        })
+        .sum::<f64>() as f64;
+
+    sum / (sda * sdb)
 }
 
 #[inline]
 pub fn dot(a: &[f64], b: &[f64]) -> f64 {
-    use packed_simd::f64x8;
     let ac = a.chunks_exact(8);
     let bc = b.chunks_exact(8);
-    let rem = ac
+    let mut sum = ac
         .remainder()
         .iter()
         .zip(bc.remainder().iter())
         .map(|(a, b)| a * b)
         .sum::<f64>() as f64;
-    let part = ac
-        .map(f64x8::from_slice_unaligned)
-        .zip(bc.map(f64x8::from_slice_unaligned))
-        .map(|(a, b)| a * b)
-        .sum::<f64x8>()
-        .sum() as f64;
-    part + rem
+    sum += ac
+        .zip(bc)
+        .map(|(ac, bc)| ac.iter().zip(bc).map(|(a, b)| a * b).sum::<f64>())
+        .sum::<f64>();
+    sum
 }
 
 pub fn norm(a: &[f64]) -> f64 {
