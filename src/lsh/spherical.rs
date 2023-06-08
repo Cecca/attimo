@@ -1,9 +1,10 @@
-use rand::Rng;
-
 use crate::{
     load::loadts,
+    sort::*,
     timeseries::{FFTData, WindowedTimeseries},
 };
+use rand::Rng;
+use std::time::Instant;
 
 const K: usize = 32;
 const K_HALF: usize = K / 2;
@@ -44,10 +45,26 @@ fn get_minimal_index_pair(idx: usize) -> (usize, usize) {
     }
 }
 
-fn interleave_bits(mut a: u16, mut b: u16) -> u32 {
+fn interleave_zeros(input: u16) -> u32 {
+    let mut res = input as u32;
+
+    res = (res ^ (res << 8)) & 0x00ff00ff;
+    res = (res ^ (res << 4)) & 0x0f0f0f0f;
+    res = (res ^ (res << 2)) & 0x33333333;
+    res = (res ^ (res << 1)) & 0x55555555;
+
+    res
+}
+
+fn interleave_bits(a: u16, b: u16) -> u32 {
+    (interleave_zeros(a) << 1) | interleave_zeros(b)
+}
+
+#[cfg(test)]
+fn interleave_bits_slow(mut a: u16, mut b: u16) -> u32 {
     let mut r = 0u32;
 
-    for i in 0..16 {
+    for _ in 0..16 {
         r <<= 1;
         r |= (a & 1) as u32;
         a >>= 1;
@@ -82,6 +99,7 @@ impl<'ts> LSHTablesBuilder<'ts> {
             .map(|_| SimHash::new(dimension, rng))
             .collect();
         let half_hashes = vec![0u16; tensor_reps * n];
+        eprintln!("Allocated hashers and space");
         Self {
             ts,
             dimension,
@@ -96,32 +114,41 @@ impl<'ts> LSHTablesBuilder<'ts> {
         let n = self.ts.num_subsequences();
         let fft_data = FFTData::new(&self.ts);
 
-        let mut hashers = self.hashers.chunks_exact(K_HALF);
+        let hashers = self.hashers.chunks_exact(K_HALF);
         assert!(hashers.remainder().is_empty());
-        let mut half_hashes = self.half_hashes.chunks_exact_mut(n);
+        let half_hashes = self.half_hashes.chunks_exact_mut(n);
 
+        eprintln!("Compute half-width hashes");
+        let start = Instant::now();
         // TODO do this in parallel
         for (hashes, hashers) in half_hashes.zip(hashers) {
             for h in hashers {
                 h.hash(&self.ts, &fft_data, hashes);
             }
         }
+        let end = Instant::now();
+        eprintln!("elapsed: {:?}", end - start);
 
-        let mut tables = Vec::new();
+        let mut tables = Vec::with_capacity(self.repetitions);
 
+        eprintln!("setup sorted tables");
+        let start = Instant::now();
         for r in 0..self.repetitions {
             let (l_idx, r_idx) = get_minimal_index_pair(r);
             let l_hashes = &self.half_hashes[l_idx * n..(l_idx + 1) * n];
             let r_hashes = &self.half_hashes[r_idx * n..(r_idx + 1) * n];
             // TODO loop unrolling
-            let mut table = Vec::new();
+            let mut table = Vec::with_capacity(n);
             for i in 0..n {
                 let h = interleave_bits(l_hashes[i], r_hashes[i]);
                 table.push((h, i));
             }
-            table.sort();
+            table.radix_sort();
+            // table.sort_unstable_by_key(|pair| pair.0);
             tables.push(table);
         }
+        let end = Instant::now();
+        eprintln!("elapsed: {:?}", end - start);
 
         LSHTables {
             dimension: self.ts.w,
@@ -221,7 +248,6 @@ fn test_failure_probability_tensor() {
         for rep in 0..repetitions {
             let fp = tables.failure_probability(dotp, rep, bits);
             let fp_independent = tables.independent_failure_probability(dotp, rep, bits);
-            dbg!(fp);
             assert!(fp >= 0.0);
             assert!(fp >= fp_independent);
             if fp < 0.01 && !printed {
