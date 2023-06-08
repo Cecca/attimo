@@ -26,6 +26,8 @@
 //// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
+pub mod spherical;
+
 use crate::motifs::Motif;
 use crate::{alloc_cnt, allocator::*};
 // TODO Remove this dependency
@@ -39,11 +41,7 @@ use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
 use std::ops::Range;
 use std::time::Duration;
-use std::{
-    cell::{UnsafeCell},
-    sync::Arc,
-    time::Instant,
-};
+use std::{cell::UnsafeCell, sync::Arc, time::Instant};
 
 //// ## Hash values
 //// We consider hash values made of 8-bit words. So we have to make sure, setting the
@@ -245,8 +243,8 @@ impl HashCollection {
         let l = &self.left(i, repetition);
         let r = &self.right(i, repetition);
         for h in 0..usize::div_ceil(prefix, 2) {
-            hv[2*h] = l[h];
-            hv[2*h+1] = r[h];
+            hv[2 * h] = l[h];
+            hv[2 * h + 1] = r[h];
         }
         HashValue(xxhash_rust::xxh32::xxh32(&hv[..prefix], 1234))
     }
@@ -478,7 +476,7 @@ impl Hasher {
                                             elapsed: None,
                                             idx_a: a_idx,
                                             idx_b: b_idx,
-                                            discovered: timer.elapsed()
+                                            discovered: timer.elapsed(),
                                         });
                                     }
                                     if topk.k_th().is_some() {
