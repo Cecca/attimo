@@ -240,30 +240,73 @@ impl<'table> TableSegments<'table> {
         0xFFFFFFFF << (32 - self.prefix_length)
     }
 
-    /// Iterate through contiguous runs of indices sharing the same prefix at the
-    /// current prefix length.
-    pub fn iter(&self) -> impl Iterator<Item = &'table [usize]> + '_ {
-        #[cfg(test)]
+    pub fn for_each_segment<F: FnMut(&[usize])>(&self, mut f: F) {
         let mask = self.current_mask();
+        let mut b_start = 0;
 
-        self.breakpoints
-            .iter()
-            .zip(&self.breakpoints[1..])
-            .map(move |(&start, &end)| {
-                #[cfg(test)]
-                {
-                    let hs = &self.table.hashes[start..end];
-                    for &h in hs {
-                        assert_eq!(h & mask, hs[0] & mask);
-                    }
+        while b_start < self.breakpoints.len() - 1 {
+            let mut b_end = b_start + 1;
+            while b_end < self.breakpoints.len() - 1
+                && self.breakpoints[b_end] < self.table.hashes.len()
+                && self.table.hashes[self.breakpoints[b_end]] & mask
+                    == self.table.hashes[self.breakpoints[b_start]] & mask
+            {
+                b_end += 1;
+            }
+            let start = self.breakpoints[b_start];
+            let end = self.breakpoints[b_end];
+            #[cfg(test)]
+            {
+                for a in start..end {
+                    assert_eq!(self.table.hashes[a] & mask, self.table.hashes[start] & mask);
                 }
-                &self.table.indices[start..end]
-            })
+            }
+
+            f(&self.table.indices[start..end]);
+            b_start = b_end;
+        }
+    }
+
+    pub fn for_each_neighboring_segments<F: FnMut(&[usize], &[usize])>(&self, mut f: F) {
+        let mask = self.current_mask();
+        let mut b_start = 0;
+
+        while b_start < self.breakpoints.len() - 1 {
+            let mut b_end = b_start + 1;
+            while b_end < self.breakpoints.len() - 1
+                && self.breakpoints[b_end] < self.table.hashes.len()
+                && self.table.hashes[self.breakpoints[b_end]] & mask
+                    == self.table.hashes[self.breakpoints[b_start]] & mask
+            {
+                b_end += 1;
+            }
+
+            let breaks = &self.breakpoints[b_start..=b_end];
+            for i in 0..(breaks.len() - 1) {
+                for j in (i + 1)..(breaks.len() - 1) {
+                    let range_a = breaks[i]..breaks[i + 1];
+                    let range_b = breaks[j]..breaks[j + 1];
+                    #[cfg(test)]
+                    {
+                        for a in range_a.clone() {
+                            for b in range_b.clone() {
+                                assert_eq!(
+                                    self.table.hashes[a] & mask,
+                                    self.table.hashes[b] & mask
+                                );
+                            }
+                        }
+                    }
+
+                    f(&self.table.indices[range_a], &self.table.indices[range_b]);
+                }
+            }
+            b_start = b_end;
+        }
     }
 
     pub fn shorten_prefix(&mut self, new_prefix: usize) {
         assert!(new_prefix < self.prefix_length);
-        self.prefix_length = new_prefix;
         let mask = self.current_mask();
 
         assert_eq!(self.breakpoints[0], 0);
@@ -273,6 +316,7 @@ impl<'table> TableSegments<'table> {
 
         let hashes = &self.table.hashes;
 
+        // do cleanup of breakpoints already sharing the (now old) prefix
         self.breakpoints.retain(|b| {
             if *b == 0 || *b == hashes.len() {
                 // keep the first and the last
@@ -282,6 +326,11 @@ impl<'table> TableSegments<'table> {
             last_hash = hashes[*b];
             keep
         });
+
+        // only *now* set the prefix length to the requested one.
+        // This leaves multiple segments with the same prefix, allowing
+        // users of this type to avoid visiting the same pairs over and over again.
+        self.prefix_length = new_prefix;
 
         assert_eq!(self.breakpoints[0], 0);
         assert_eq!(*self.breakpoints.last().unwrap(), self.table.hashes.len());
@@ -378,16 +427,11 @@ fn test_segments() {
     let repetitions = 4;
     let tables = LSHTables::from_ts(&ts, repetitions, &mut rng);
     let t = &tables.tables[0];
+    // assertions are in the functions themselves
     let mut segments = t.segments();
-    let _ = segments.iter().count();
-    segments.shorten_prefix(31);
-    let _ = segments.iter().count();
-    segments.shorten_prefix(29);
-    let _ = segments.iter().count();
-    segments.shorten_prefix(1);
-    assert_eq!(segments.iter().count(), 2);
-    segments.shorten_prefix(0);
-    assert_eq!(segments.iter().count(), 1);
+    segments.for_each_segment(|_| {});
+    segments.shorten_prefix(20);
+    segments.for_each_neighboring_segments(|_, _| {});
 }
 
 #[test]
