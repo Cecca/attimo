@@ -1,6 +1,8 @@
 use crate::timeseries::{FFTData, WindowedTimeseries};
 use rand::Rng;
-use std::time::Instant;
+use rayon::prelude::*;
+use std::{cell::RefCell, time::Instant};
+use thread_local::ThreadLocal;
 
 const K: usize = 32;
 const K_HALF: usize = K / 2;
@@ -116,45 +118,52 @@ impl<'ts> LSHTablesBuilder<'ts> {
 
     fn build(mut self) -> LSHTables {
         let n = self.ts.num_subsequences();
+        let ts = &self.ts;
         let fft_data = FFTData::new(&self.ts);
 
-        let hashers = self.hashers.chunks_exact(K_HALF);
+        let hashers = self.hashers.par_chunks_exact(K_HALF);
         assert!(hashers.remainder().is_empty());
-        let half_hashes = self.half_hashes.chunks_exact_mut(n);
+        let half_hashes = self.half_hashes.par_chunks_exact_mut(n);
 
         eprintln!("Compute half-width hashes");
         let start = Instant::now();
-        // TODO do this in parallel
-        for (hashes, hashers) in half_hashes.zip(hashers) {
+        half_hashes.zip(hashers).for_each(|(hashes, hashers)| {
             for h in hashers {
-                h.hash(&self.ts, &fft_data, hashes);
+                h.hash(&ts, &fft_data, hashes);
             }
-        }
+        });
+
         let end = Instant::now();
         eprintln!("elapsed: {:?}", end - start);
 
-        let mut tables = Vec::with_capacity(self.repetitions);
+        // let mut tables = Vec::with_capacity(self.repetitions);
 
-        let mut scratch = Vec::with_capacity(n);
+        let scratch = ThreadLocal::new();
         eprintln!("setup sorted tables");
+
         let start = Instant::now();
-        // TODO also parallelize
-        for r in 0..self.repetitions {
-            let (l_idx, r_idx) = get_minimal_index_pair(r);
-            let l_hashes = &self.half_hashes[l_idx * n..(l_idx + 1) * n];
-            let r_hashes = &self.half_hashes[r_idx * n..(r_idx + 1) * n];
+        let tables = (0..self.repetitions)
+            .into_par_iter()
+            .map(|r| {
+                let mut scratch = scratch
+                    .get_or(|| RefCell::new(Vec::with_capacity(n)))
+                    .borrow_mut();
+                let (l_idx, r_idx) = get_minimal_index_pair(r);
+                let l_hashes = &self.half_hashes[l_idx * n..(l_idx + 1) * n];
+                let r_hashes = &self.half_hashes[r_idx * n..(r_idx + 1) * n];
 
-            let table = Table::new(
-                n,
-                (0..n).map(|i| {
-                    let h = interleave_bits(l_hashes[i], r_hashes[i]);
-                    (h, i)
-                }),
-                &mut scratch,
-            );
+                let table = Table::new(
+                    n,
+                    (0..n).map(|i| {
+                        let h = interleave_bits(l_hashes[i], r_hashes[i]);
+                        (h, i)
+                    }),
+                    &mut scratch,
+                );
 
-            tables.push(table);
-        }
+                table
+            })
+            .collect();
         let end = Instant::now();
         eprintln!("elapsed: {:?}", end - start);
 
@@ -296,15 +305,22 @@ impl LSHTables {
         self.tables.iter().map(|t| t.segments()).collect()
     }
 
-    /// The collision probability of a single hash function at the given dot product
-    pub fn collision_probability_at(&self, dotp: f64) -> f64 {
+    /// The collision probability of a single hash function at the given z-normalized Euclidean
+    /// distance
+    pub fn collision_probability_at(&self, zeucl_dist: f64) -> f64 {
+        let dotp = (2.0 * self.dimension as f64 - (zeucl_dist * zeucl_dist)) / 2.0;
         let theta = (dotp / self.dimension as f64).acos();
         1.0 - theta / std::f64::consts::PI
     }
 
     /// What would be the failure probability if iterations were independent
-    pub fn independent_failure_probability(&self, dotp: f64, reps: usize, bits: usize) -> f64 {
-        let p = self.collision_probability_at(dotp);
+    pub fn independent_failure_probability(
+        &self,
+        zeucl_dist: f64,
+        reps: usize,
+        bits: usize,
+    ) -> f64 {
+        let p = self.collision_probability_at(zeucl_dist);
 
         let cur_failure = (1.0 - p.powi(bits as i32)).powi(reps as i32 + 1);
         let prev_failure =
@@ -312,8 +328,8 @@ impl LSHTables {
         return cur_failure * prev_failure;
     }
 
-    pub fn failure_probability(&self, dotp: f64, reps: usize, bits: usize) -> f64 {
-        let p = self.collision_probability_at(dotp);
+    pub fn failure_probability(&self, zeucl_dist: f64, reps: usize, bits: usize) -> f64 {
+        let p = self.collision_probability_at(zeucl_dist);
 
         // TODO: precompute all these numbers
         let cur_left_bits = (bits as f64 / 2.0).floor() as i32;
@@ -385,13 +401,12 @@ fn test_failure_probability_tensor() {
     let repetitions = 128;
     let tables = LSHTables::from_ts(&ts, repetitions, &mut rng);
     let zdist = zeucl(&ts, 0, 10);
-    let dotp = (2.0 * (w as f64) - zdist.powi(2)) / 2.0;
-    let p = tables.collision_probability_at(dotp);
+    let p = tables.collision_probability_at(zdist);
     let mut printed = false;
     for bits in (31..=K).rev() {
         for rep in 0..repetitions {
-            let fp = tables.failure_probability(dotp, rep, bits);
-            let fp_independent = tables.independent_failure_probability(dotp, rep, bits);
+            let fp = tables.failure_probability(zdist, rep, bits);
+            let fp_independent = tables.independent_failure_probability(zdist, rep, bits);
             assert!(fp >= 0.0);
             assert!(fp >= fp_independent);
             if fp < 0.01 && !printed {
