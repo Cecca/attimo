@@ -56,18 +56,26 @@ fn interleave_bits(a: u16, b: u16) -> u32 {
     (interleave_zeros(a) << 1) | interleave_zeros(b)
 }
 
+#[test]
+fn test_interleave_bits() {
+    // Exhaustively check all pairs of u16 (takes about 40 seconds)
+    for a in 0..std::u16::MAX {
+        for b in 0..std::u16::MAX {
+            assert_eq!(interleave_bits_slow(a, b), interleave_bits(a, b));
+        }
+    }
+}
+
 #[cfg(test)]
 fn interleave_bits_slow(mut a: u16, mut b: u16) -> u32 {
     let mut r = 0u32;
 
-    for _ in 0..16 {
+    for i in (0..16).rev() {
         r <<= 1;
-        r |= (a & 1) as u32;
-        a >>= 1;
+        r |= ((a >> i) & 1) as u32;
 
         r <<= 1;
-        r |= (b & 1) as u32;
-        b >>= 1;
+        r |= ((b >> i) & 1) as u32;
     }
 
     r
