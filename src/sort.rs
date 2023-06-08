@@ -20,7 +20,7 @@ impl GetByte for u8 {
 
 impl GetByte for u32 {
     fn num_bytes(&self) -> usize {
-        1
+        4
     }
 
     #[inline(always)]

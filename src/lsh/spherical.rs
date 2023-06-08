@@ -1,8 +1,4 @@
-use crate::{
-    load::loadts,
-    sort::*,
-    timeseries::{FFTData, WindowedTimeseries},
-};
+use crate::timeseries::{FFTData, WindowedTimeseries};
 use rand::Rng;
 use std::time::Instant;
 
@@ -131,20 +127,24 @@ impl<'ts> LSHTablesBuilder<'ts> {
 
         let mut tables = Vec::with_capacity(self.repetitions);
 
+        let mut scratch = Vec::with_capacity(n);
         eprintln!("setup sorted tables");
         let start = Instant::now();
+        // TODO also parallelize
         for r in 0..self.repetitions {
             let (l_idx, r_idx) = get_minimal_index_pair(r);
             let l_hashes = &self.half_hashes[l_idx * n..(l_idx + 1) * n];
             let r_hashes = &self.half_hashes[r_idx * n..(r_idx + 1) * n];
-            // TODO loop unrolling
-            let mut table = Vec::with_capacity(n);
-            for i in 0..n {
-                let h = interleave_bits(l_hashes[i], r_hashes[i]);
-                table.push((h, i));
-            }
-            table.radix_sort();
-            // table.sort_unstable_by_key(|pair| pair.0);
+
+            let table = Table::new(
+                n,
+                (0..n).map(|i| {
+                    let h = interleave_bits(l_hashes[i], r_hashes[i]);
+                    (h, i)
+                }),
+                &mut scratch,
+            );
+
             tables.push(table);
         }
         let end = Instant::now();
@@ -159,17 +159,133 @@ impl<'ts> LSHTablesBuilder<'ts> {
     }
 }
 
+struct Table {
+    hashes: Vec<u32>,
+    indices: Vec<usize>,
+}
+
+impl Table {
+    fn new<I: IntoIterator<Item = (u32, usize)>>(
+        n: usize,
+        iter_elements: I,
+        scratch: &mut Vec<(u32, usize)>,
+    ) -> Self {
+        scratch.clear();
+        scratch.reserve_exact(n);
+        for pair in iter_elements {
+            scratch.push(pair);
+        }
+        scratch.sort_unstable_by_key(|pair| pair.0);
+        let (hashes, indices): (Vec<u32>, Vec<usize>) = scratch.drain(..).unzip();
+        debug_assert!(hashes.is_sorted());
+        Self { hashes, indices }
+    }
+
+    fn segments<'slf>(&'slf self) -> TableSegments<'slf> {
+        TableSegments::new(self)
+    }
+}
+
+/// A collection of segments of lexicograpyically sorted elements, with the invariant
+/// that all elements in the same range have the same prefix of the given number of bits.
+pub struct TableSegments<'table> {
+    table: &'table Table,
+    prefix_length: usize,
+    /// The breakpoints between one segment and the other
+    breakpoints: Vec<usize>,
+}
+
+impl<'table> TableSegments<'table> {
+    fn new(table: &'table Table) -> Self {
+        let prefix_length = 32;
+        let mut breakpoints = Vec::new();
+
+        let mut b = 0;
+        breakpoints.push(b);
+        while b < table.hashes.len() {
+            let needle = table.hashes[b];
+            b += table.hashes[b..].partition_point(|h| *h == needle);
+            breakpoints.push(b);
+        }
+        assert_eq!(b, table.hashes.len());
+
+        Self {
+            table,
+            prefix_length,
+            breakpoints,
+        }
+    }
+
+    fn current_mask(&self) -> u32 {
+        if self.prefix_length == 0 {
+            return 0;
+        }
+        0xFFFFFFFF << (32 - self.prefix_length)
+    }
+
+    /// Iterate through contiguous runs of indices sharing the same prefix at the
+    /// current prefix length.
+    pub fn iter(&self) -> impl Iterator<Item = &'table [usize]> + '_ {
+        #[cfg(test)]
+        let mask = self.current_mask();
+
+        self.breakpoints
+            .iter()
+            .zip(&self.breakpoints[1..])
+            .map(move |(&start, &end)| {
+                #[cfg(test)]
+                {
+                    let hs = &self.table.hashes[start..end];
+                    for &h in hs {
+                        assert_eq!(h & mask, hs[0] & mask);
+                    }
+                }
+                &self.table.indices[start..end]
+            })
+    }
+
+    pub fn shorten_prefix(&mut self, new_prefix: usize) {
+        assert!(new_prefix < self.prefix_length);
+        self.prefix_length = new_prefix;
+        let mask = self.current_mask();
+
+        assert_eq!(self.breakpoints[0], 0);
+        assert_eq!(*self.breakpoints.last().unwrap(), self.table.hashes.len());
+
+        let mut last_hash = self.table.hashes[0];
+
+        let hashes = &self.table.hashes;
+
+        self.breakpoints.retain(|b| {
+            if *b == 0 || *b == hashes.len() {
+                // keep the first and the last
+                return true;
+            }
+            let keep = (hashes[*b] & mask) != (last_hash & mask);
+            last_hash = hashes[*b];
+            keep
+        });
+
+        assert_eq!(self.breakpoints[0], 0);
+        assert_eq!(*self.breakpoints.last().unwrap(), self.table.hashes.len());
+    }
+}
+
 pub struct LSHTables {
     dimension: usize,
     repetitions: usize,
     tensor_repetitions: usize,
-    tables: Vec<Vec<(u32, usize)>>,
+    tables: Vec<Table>,
 }
 
 impl LSHTables {
     pub fn from_ts<R: Rng>(ts: &WindowedTimeseries, repetitions: usize, rng: &mut R) -> Self {
         let builder = LSHTablesBuilder::new(ts, ts.w, repetitions, rng);
         builder.build()
+    }
+
+    pub fn segments<'tables>(&'tables self) -> Vec<TableSegments<'tables>> {
+        self.tables.iter().map(|t| t.segments()).collect()
     }
 
     /// The collision probability of a single hash function at the given dot product
@@ -230,12 +346,32 @@ impl LSHTables {
 }
 
 #[test]
+fn test_segments() {
+    let w = 1000;
+    let ts = crate::load::loadts("data/ECG.csv.gz", Some(3000)).unwrap();
+    let ts = WindowedTimeseries::new(ts, w, false);
+    let mut rng = rand::thread_rng();
+    let repetitions = 4;
+    let tables = LSHTables::from_ts(&ts, repetitions, &mut rng);
+    let t = &tables.tables[0];
+    let mut segments = t.segments();
+    let _ = segments.iter().count();
+    segments.shorten_prefix(31);
+    let _ = segments.iter().count();
+    segments.shorten_prefix(29);
+    let _ = segments.iter().count();
+    segments.shorten_prefix(1);
+    assert_eq!(segments.iter().count(), 2);
+    segments.shorten_prefix(0);
+    assert_eq!(segments.iter().count(), 1);
+}
+
+#[test]
 fn test_failure_probability_tensor() {
     use crate::distance::zeucl;
-    use std::io::Write;
 
     let w = 1000;
-    let ts = loadts("data/ECG.csv.gz", Some(3000)).unwrap();
+    let ts = crate::load::loadts("data/ECG.csv.gz", Some(3000)).unwrap();
     let ts = WindowedTimeseries::new(ts, w, false);
     let mut rng = rand::thread_rng();
     let repetitions = 128;

@@ -16,22 +16,22 @@ fn main() {
     let tables = LSHTables::from_ts(&ts, repetitions, &mut rng);
     let end = Instant::now();
     eprintln!("Building {} hash tables: {:?}", repetitions, end - start);
-    let zdist = zeucl(&ts, 0, 10);
-    let dotp = (2.0 * (w as f64) - zdist.powi(2)) / 2.0;
-    println!("bits,rep,fp,independent");
-    let mut printed = false;
-    for bits in (1..=K).rev() {
-        for rep in 0..repetitions {
-            let fp = tables.failure_probability(dotp, rep, bits);
-            let fp_independent = tables.independent_failure_probability(dotp, rep, bits);
-            assert!(fp >= 0.0);
-            // assert!(fp >= fp_independent);
-            if fp < 0.01 && !printed {
-                eprintln!("bits {} rep {}", bits, rep);
-                printed = true;
-            }
-            println!("{},{},{},{}", bits, rep, fp, false);
-            println!("{},{},{},{}", bits, rep, fp_independent, true);
-        }
-    }
+    // let zdist = zeucl(&ts, 0, 10);
+    // let dotp = (2.0 * (w as f64) - zdist.powi(2)) / 2.0;
+    // println!("bits,rep,fp,independent");
+    // let mut printed = false;
+    // for bits in (1..=K).rev() {
+    //     for rep in 0..repetitions {
+    //         let fp = tables.failure_probability(dotp, rep, bits);
+    //         let fp_independent = tables.independent_failure_probability(dotp, rep, bits);
+    //         assert!(fp >= 0.0);
+    //         // assert!(fp >= fp_independent);
+    //         if fp < 0.01 && !printed {
+    //             eprintln!("bits {} rep {}", bits, rep);
+    //             printed = true;
+    //         }
+    //         println!("{},{},{},{}", bits, rep, fp, false);
+    //         println!("{},{},{},{}", bits, rep, fp_independent, true);
+    //     }
+    // }
 }
