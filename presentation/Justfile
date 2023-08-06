@@ -1,0 +1,2 @@
+preview:
+  quarto preview index.qmd
