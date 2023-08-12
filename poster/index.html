@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title></title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="styles.css" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn" crossorigin="anonymous">
+    <!-- The loading of KaTeX is deferred to speed up page rendering -->
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" integrity="sha384-cpW21h6RZv/phavutF+AuVYrr+dA8xD9zs6FwLpaCct6O9ctzYFfFr4dgmgccOTx" crossorigin="anonymous"></script>
+    <!-- To automatically render math in text elements, include the auto-render extension: -->
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"
+        onload="renderMathInElement(document.body);"></script>
+  </head>
+  <body class="border-4">
+
+    <header class="w-full bg-red-800 p-20 text-gray-200">
+      <h1 class="text-7xl text-center">Fast and Scalable Mining of Time Series Motifs with Probabilistic Guarantees</h1>
+      <div class="flex flex-row justify-center w-full text-5xl mt-9 gap-20">
+        <div class="flex flex-col text-center">
+          <span>Matteo Ceccarello</span>
+          <span>University of Padova</span>
+          <span>Italy</span>
+        </div>
+        <div class="flex flex-col text-center">
+          <span>Johann Gamper</span>
+          <span>University of Bolzano</span>
+          <span>Italy</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="flex flex-col flex-wrap gap-0 bg-gray-200 font-sans">
+      <section class="card">
+        <h1>Introduction</h1>
+
+        <p>
+          Time series motifs are repeated subsequences in time series, which
+          are often of interest because they correspond to relevant behavior
+          in the system under study.
+        </p>
+
+        <figure class="mt-12 flex flex-row flex-wrap gap w-full">
+          <img class="flex-shrink w-full" src="imgs/insect_top3_pos.png" alt=""/>
+          <!--
+          <div class="w-8/12 mt-6">
+            <span class="font-bold">Top:</span> 
+            Electric Penetration Graph time series of the insect
+            Circulifer Tenellus, window length 400.
+            <span class="font-bold">Right:</span>
+            The top-3 motifs are highlighted in blue,
+            orange, and green, together with their z-normalized Euclidean
+            distances. This classic example of motifs has been associated
+            with different feeding behaviors of the insect.
+          </div>
+          -->
+          <div class="w-8/12">
+            <h2 class="text-4xl font-normal">Definition</h2>
+            <p>
+                Given a time series 𝑇 and a window length
+                \(w\), the top-\(k\) motifs are the 
+                \(k\) pairs of subsequences of length \(w\)
+                with smallest distance, such that no two subsequences in any pair
+                overlap with each other by more than a given fraction of the window.
+            </p>
+          </div>
+          <img class="ml-10 flex-shrink h-96" src="imgs/insect_top3_catalog.png" alt=""/>
+        </figure>
+      </section>
+
+      <!--
+      <section class="card">
+        <h1>Definition</h1>
+        <p>
+            Given a time series 𝑇 and a window length
+            \(w\), the top-\(k\) motifs are the 
+            \(k\) pairs of subsequences of length \(w\)
+            with smallest distance, such that no two subsequences in any pair
+            overlap with each other by more than a given fraction of the window.
+        </p>
+      </section> -->
+
+      <section class="card">
+        <h1>Related work</h1>
+
+        <p>
+          The Matrix Profile [1] holds the distance of each subsequence to its
+          nearest neighbor.
+          We can recover the position of the motifs by looking at 
+          pairs of minima in the Matrix Profile.
+          The Matrix Profile provides a lot of other information as well, 
+          including <em>discords</em> and <em>shapelets</em>.
+        </p>
+
+        <figure class="mt-12 mb-12">
+          <img class="w-full" src="imgs/insect_top3_mp.png" alt=""/>
+          <div class="text-center text-gray-600 text-2xl">
+            Time series with its corresponding Matrix Profile at window size 400. 
+          </div>
+        </figure>
+
+        <p>
+          The exact computation of the Matrix Profile requires time
+          \(\Omega(n^2)\), where \(n\) is the length of the time series,
+          since we have to compute the distance between all pairs 
+          of subsequences.
+        </p>
+        <p>
+        <span class="font-mono">SCAMP</span> is a very efficient GPU-based implementation of
+        the Matrix Profile [2], able to handle <em>billion-long</em> time
+        series in a single day!
+        </p>
+
+        <hr class="mt-6 mb-6" />
+        <ol class="text-2xl">
+          <li>
+            [1] Yeh et al. 
+            &middot;
+            <em>Matrix Profile I: All Pairs Similarity Joins for Time Series: A Unifying View that Includes Motifs, Discords and Shapelets</em>
+            &middot;
+            <span class="font-bold">ICDM 2016</span></li>
+          <li>
+            [2] Zimmerman et al. 
+            &middot;
+            <em>Matrix Proﬁle XIV: Scaling Time Series Motif Discovery with GPUs: Breaking the Quintillion Pairwise Comparisons a Day Barrier</em>
+            &middot;
+            <span class="font-bold">SoCC 2019</span></li>
+        </ol>
+      </section>
+
+      <section class="card">
+        <h1>Locality Sensitive Hashing</h1>
+
+        <p>
+          What if we indexed the subsequences, while accepting a small and controllable failure probability?
+        </p>
+
+        <div class="flex flex-row">
+          <div class="w-2/3">
+          \[
+          h(\vec{x}) = \left\lfloor\frac{\vec{a} \cdot \vec{x} + b}{r}\right\rfloor
+          \]
+          </div>
+          <div>
+            <ul>
+              <li>\( r \in \mathbb{R}^+ \)</li>
+              <li>\( \vec{a} \sim \mathcal{N}(0,1)^w \)</li>
+              <li>\( b \sim \mathcal{U}(0, r) \)</li>
+            </ul>
+          </div>
+        </div>
+
+        <figure class="flex flex-row">
+          <img class="object-contain h-96" src="imgs/steam-hashes-k1-l1.png" alt="">
+          <img class="object-contain h-96" src="imgs/steam-cp-k1-l1.png" alt="">
+        </figure>
+
+        <div>
+          Increase precision, we concatenate \(k\) functions
+          \[
+            \hat{h}(\vec{x}) = \langle h_1(\vec{x}), \dots, h_k(\vec{x}) \rangle
+          \]
+        </div>
+        <figure class="flex flex-row">
+          <img class="object-contain h-96" src="imgs/steam-hashes-k2-l1.png" alt="">
+          <img class="object-contain h-96" src="imgs/steam-cp-kmany-l1.png" alt="">
+        </figure>
+
+        <div>
+          To increase recall, we have to repeat \(L\) times
+        </div>
+
+        <figure class="flex flex-row">
+          <div class="grid grid-cols-2">
+            <img class="object-contain" src="imgs/steam-hashes-k2-1234.png" alt="">
+            <img class="object-contain" src="imgs/steam-hashes-k2-1234.png" alt="">
+            <img class="object-contain" src="imgs/steam-hashes-k2-1234.png" alt="">
+            <img class="object-contain" src="imgs/steam-hashes-k2-1234.png" alt="">
+          </div>
+          <img class="object-contain h-96" src="imgs/steam-sp.png" alt="">
+        </figure>
+
+      </section>
+
+      <section class="card">
+        <h1>Algorithm</h1>
+      </section>
+
+      <section class="card">
+        <h1>Complexity</h1>
+      </section>
+
+      <section class="card">
+        <h1>Experiments</h1>
+      </section>
+
+      <section class="card">
+        <h1>About</h1>
+        <p>Try out the code!</p>
+        <img src="imgs/qr-attimo-repo.png" alt="">
+      </section>
+    </main>
+    
+  </body>
+</html>

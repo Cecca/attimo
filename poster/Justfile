@@ -1,0 +1,5 @@
+tailwind:
+  npx tailwindcss -i styles.in.css -o styles.css --watch
+
+serve:
+  python -m http.server 9999

@@ -132,6 +132,7 @@ plot_ts(steam)
 :::{.fragment .absolute top=0 fragment-index=1}
 ```{python}
 plot_ts(steam, w=w, highlight=[i, j])
+plt.savefig("imgs/steam-highlight.png", dpi=300)
 ```
 :::
 
@@ -166,6 +167,7 @@ plot_projection_circle(prj)
 :::{.fragment .absolute top="20%" fragment-index=1}
 ```{python}
 plot_hashes(prj, k=1, r=0.25, seed=1234)
+plt.savefig("imgs/steam-hashes-k1-l1.png", dpi=300)
 ```
 :::
 
@@ -188,6 +190,7 @@ subsequences falling into the same bucket.
 :::{.fragment .absolute bottom=0 left="54%" fragment-index=2}
 ```{python}
 plot_cp(w, 1)
+plt.savefig("imgs/steam-cp-k1-l1.png", dpi=300)
 ```
 :::
 
@@ -196,6 +199,7 @@ plot_cp(w, 1)
 :::{.absolute top="20%" fragment-index=1}
 ```{python}
 plot_hashes(prj, k=2, r=0.25, seed=1234)
+plt.savefig("imgs/steam-hashes-k2-l1.png", dpi=300)
 ```
 :::
 
@@ -212,6 +216,7 @@ this makes for a better _precision_ of the index.
 ```{python}
 #plot_cp(w, [0.5,1,2])
 plot_cp(w, 1, [1,2,3,4])
+plt.savefig("imgs/steam-cp-kmany-l1.png", dpi=300)
 ```
 :::
 
@@ -222,6 +227,7 @@ plot_cp(w, 1, [1,2,3,4])
 #| layout-ncol: 2
 for seed in [1234, 243,256,23562,235,2]:
     plot_hashes(prj, k=2, r=0.25, seed=seed, size=2)
+    plt.savefig(f"imgs/steam-hashes-k2-{seed}.png", dpi=300)
 ```
 :::
 
@@ -233,6 +239,7 @@ And to increase the _recall_ of the index we repeat $L$ times.
 :::{.absolute bottom=0 left="54%" fragment-index=2}
 ```{python}
 plot_success_p(w, 1, k=2, ls=[1, 10, 100])
+plt.savefig("imgs/steam-sp.png", dpi=300)
 ```
 :::
 
