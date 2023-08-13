@@ -15,191 +15,404 @@
   </head>
   <body class="border-4">
 
-    <header class="w-full bg-red-800 p-20 text-gray-200">
-      <h1 class="text-7xl text-center">Fast and Scalable Mining of Time Series Motifs with Probabilistic Guarantees</h1>
-      <div class="flex flex-row justify-center w-full text-5xl mt-9 gap-20">
-        <div class="flex flex-col text-center">
-          <span>Matteo Ceccarello</span>
-          <span>University of Padova</span>
-          <span>Italy</span>
-        </div>
-        <div class="flex flex-col text-center">
-          <span>Johann Gamper</span>
-          <span>University of Bolzano</span>
-          <span>Italy</span>
-        </div>
+    <header class="w-full bg-red-800 p-12 text-gray-100">
+      <h1 class="text-center" style="font-size: 5.5rem;">Fast and Scalable Mining of Time Series Motifs with Probabilistic Guarantees</h1>
+      <div class="flex flex-row justify-between w-full text-5xl mt-7 gap-20 pl-40 pr-40">
+        <img class="object-contain h-48" src="https://www.unipd.it/sites/unipd.it/themes/unipd_2017/img/logo-UNIPD-white.png" alt="">
+        <!-- <div class="flex flex-row gap-20"> -->
+          <div class="flex flex-col text-center">
+            <span>Matteo Ceccarello</span>
+            <span>University of Padova</span>
+            <span>Italy</span>
+            <span class="font-mono">matteo.ceccarello@unipd.it</span>
+          </div>
+          <div class="flex flex-col text-center">
+            <span>Johann Gamper</span>
+            <span>University of Bolzano</span>
+            <span>Italy</span>
+            <span class="font-mono">gamper@inf.unibz.it</span>
+          </div>
+        <!-- </div> -->
+        <svg width="12rem" height="12rem" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 65 52">
+          <path class="fill-gray-300" d="M38.9 0.2h25.7v3.6H38.9V0.2zM12.6 34.5H9v-1.3c-1 1-2.2 1.5-3.6 1.5 -1.4 0-2.6-0.4-3.5-1.3 -1-1-1.5-2.4-1.5-4.1V20h3.7v8.8c0 0.9 0.3 1.6 0.8 2.1 0.4 0.4 1 0.6 1.6 0.6 0.7 0 1.2-0.2 1.6-0.6 0.5-0.5 0.8-1.1 0.8-2.1V20h3.7V34.5M28.2 34.5h-3.7v-8.8c0-0.9-0.3-1.6-0.8-2.1 -0.4-0.4-1-0.6-1.6-0.6 -0.7 0-1.2 0.2-1.6 0.6 -0.5 0.5-0.8 1.2-0.8 2.1v8.8H16V20h3.6v1.3c1-1 2.2-1.5 3.7-1.5 1.4 0 2.6 0.4 3.5 1.3 1 1 1.5 2.4 1.5 4.1V34.5M31.7 14.6h3.7v2.9h-3.7V14.6zM31.7 20h3.7v14.5h-3.7V20zM51.2 27.2c0 1.5-0.1 2.6-0.2 3.3 -0.2 1.2-0.6 2.1-1.3 2.8 -0.9 0.9-2.1 1.3-3.6 1.3 -1.5 0-2.7-0.5-3.6-1.5v1.4h-3.5V14.7h3.7v6.6c0.9-1 2-1.4 3.5-1.4 1.5 0 2.7 0.4 3.5 1.3 0.7 0.6 1.1 1.6 1.3 2.8C51.1 24.7 51.2 25.8 51.2 27.2M47.5 27.2c0-1.3-0.1-2.2-0.3-2.8 -0.4-0.9-1.1-1.4-2.1-1.4 -1.1 0-1.8 0.5-2.1 1.4 -0.2 0.6-0.3 1.5-0.3 2.8 0 1.3 0.1 2.2 0.3 2.8 0.4 0.9 1.1 1.4 2.1 1.4 1.1 0 1.8-0.5 2.1-1.4C47.4 29.4 47.5 28.5 47.5 27.2M64.6 34.5H53.5v-2.7l6.5-8.5h-6.1V20h10.8v2.8L58 31.3h6.6V34.5M38.9 47.4h25.7V51H38.9V47.4z"></path>
+        </svg>
       </div>
     </header>
 
-    <main class="flex flex-col flex-wrap gap-0 bg-gray-200 font-sans">
-      <section class="card">
-        <h1>Introduction</h1>
+    <main class="grid grid-cols-3 gap-5 p-5 bg-gray-200 font-sans">
+      <div class="flex flex-col gap-5">
+        <section class="card">
+          <h1>1. Introduction</h1>
 
-        <p>
-          Time series motifs are repeated subsequences in time series, which
-          are often of interest because they correspond to relevant behavior
-          in the system under study.
-        </p>
+          <p>
+            Time series motifs are repeated subsequences in time series, which
+            are often of interest because they correspond to relevant behavior
+            in the system under study.
+          </p>
 
-        <figure class="mt-12 flex flex-row flex-wrap gap w-full">
-          <img class="flex-shrink w-full" src="imgs/insect_top3_pos.png" alt=""/>
-          <!--
-          <div class="w-8/12 mt-6">
-            <span class="font-bold">Top:</span> 
-            Electric Penetration Graph time series of the insect
-            Circulifer Tenellus, window length 400.
-            <span class="font-bold">Right:</span>
-            The top-3 motifs are highlighted in blue,
-            orange, and green, together with their z-normalized Euclidean
-            distances. This classic example of motifs has been associated
-            with different feeding behaviors of the insect.
+          <figure class="mt-12 flex flex-row flex-wrap gap w-full">
+            <img class="flex-shrink w-full" src="imgs/insect_top3_pos.png" alt=""/>
+            <!--
+            <div class="w-8/12 mt-6">
+              <span class="font-bold">Top:</span> 
+              Electric Penetration Graph time series of the insect
+              Circulifer Tenellus, window length 400.
+              <span class="font-bold">Right:</span>
+              The top-3 motifs are highlighted in blue,
+              orange, and green, together with their z-normalized Euclidean
+              distances. This classic example of motifs has been associated
+              with different feeding behaviors of the insect.
+            </div>
+            -->
+            <div class="w-8/12">
+              <h2 class="text-4xl font-normal">Definition</h2>
+              <p>
+                  Given a time series 𝑇 and a window length
+                  \(w\), the top-\(k\) motifs are the 
+                  \(k\) pairs of subsequences of length \(w\)
+                  with smallest distance, such that no two subsequences in any pair
+                  overlap with each other by more than a given fraction of the window.
+              </p>
+            </div>
+            <img class="ml-10 flex-shrink h-96" src="imgs/insect_top3_catalog.png" alt=""/>
+          </figure>
+        </section>
+
+        <!--
+        <section class="card">
+          <h1>Definition</h1>
+          <p>
+              Given a time series 𝑇 and a window length
+              \(w\), the top-\(k\) motifs are the 
+              \(k\) pairs of subsequences of length \(w\)
+              with smallest distance, such that no two subsequences in any pair
+              overlap with each other by more than a given fraction of the window.
+          </p>
+        </section> -->
+
+        <section class="card">
+          <h1>2. Related work</h1>
+
+          <p>
+            The Matrix Profile [1] holds the distance of each subsequence to its
+            nearest neighbor.
+            We can recover the position of the motifs by looking at 
+            pairs of minima in the Matrix Profile.
+            The Matrix Profile provides a lot of other information as well, 
+            including <em>discords</em> and <em>shapelets</em>.
+          </p>
+
+          <figure class="mt-12 mb-12">
+            <img class="w-full" src="imgs/insect_top3_mp.png" alt=""/>
+            <div class="text-center text-gray-600 text-2xl">
+              Time series with its corresponding Matrix Profile at window size 400. 
+            </div>
+          </figure>
+
+          <p>
+            The exact computation of the Matrix Profile requires time
+            \(\Omega(n^2)\), where \(n\) is the length of the time series,
+            since we have to compute the distance between all pairs 
+            of subsequences.
+          </p>
+          <p>
+          <span class="font-mono">SCAMP</span> is a very efficient GPU-based implementation of
+          the Matrix Profile [2], able to handle <span class="font-normal">billion-scale</span> time
+          series.
+          </p>
+
+        </section>
+
+        <section class="card">
+          <h1>3. Locality Sensitive Hashing</h1>
+
+          <p>
+            What if we indexed the subsequences, while accepting a small and controllable failure probability?
+          </p>
+          <p>
+            Each subsequence is a vector \(\mathbb{R}^w\) with
+            the \(z\)-normalized Euclidean distance.
+          </p>
+
+          <div class="flex flex-row">
+            <div class="w-2/3">
+            \[
+            h(\vec{x}) = \left\lfloor\frac{\vec{a} \cdot \vec{x} + b}{r}\right\rfloor
+            \]
+            </div>
+            <div>
+              <ul>
+                <li>\( r \in \mathbb{R}^+ \)</li>
+                <li>\( \vec{a} \sim \mathcal{N}(0,1)^w \)</li>
+                <li>\( b \sim \mathcal{U}(0, r) \)</li>
+              </ul>
+            </div>
           </div>
-          -->
-          <div class="w-8/12">
-            <h2 class="text-4xl font-normal">Definition</h2>
+
+          <figure class="flex flex-row">
+            <img class="object-contain h-96" src="imgs/steam-hashes-k1-l1.png" alt="">
+            <img class="object-contain h-96" src="imgs/steam-cp-k1-l1.png" alt="">
+          </figure>
+
+          <div>
+            Increase precision, we concatenate \(k\) functions
+            \[
+              \hat{h}(\vec{x}) = \langle h_1(\vec{x}), \dots, h_k(\vec{x}) \rangle
+            \]
+          </div>
+          <figure class="flex flex-row">
+            <img class="object-contain h-96" src="imgs/steam-hashes-k2-l1.png" alt="">
+            <img class="object-contain h-96" src="imgs/steam-cp-kmany-l1.png" alt="">
+          </figure>
+
+          <div>
+            To increase recall, we have to repeat \(L\) times
+          </div>
+
+          <figure class="flex flex-row">
+            <div class="grid grid-cols-2">
+              <img class="object-contain" src="imgs/steam-hashes-k2-1234.png" alt="">
+              <img class="object-contain" src="imgs/steam-hashes-k2-243.png" alt="">
+              <img class="object-contain" src="imgs/steam-hashes-k2-256.png" alt="">
+              <img class="object-contain" src="imgs/steam-hashes-k2-235.png" alt="">
+            </div>
+            <img class="object-contain h-96" src="imgs/steam-sp.png" alt="">
+          </figure>
+
+        </section>
+      </div>
+
+      <div class="flex flex-col gap-5">
+        <section class="card">
+          <h1>4. Algorithm</h1>
+          <div class="border-2 border-slate-200 p-6 mb-10">
+            <p class="font-bold">Parameters</p>
+            <ol>
+              <li>\(\delta\): target failure probability</li>
+              <li>\(k_{max}\): maximum number of hash concatenations</li>
+              <li>\(L_{max}\): maximum number of repetitions</li>
+            </ol>
+          </div>
+          <p>
+            Automatically search the most efficient configuration of \(k\) and 
+            \(L\) to achieve recall \(\ge 1 - \delta\) for the dataset at hand, within the configured bounds
+            \(k_{max}\) and \(L_{max}\).
+          </p>
+          <ul class="list-disc list-inside">
+            <li>For each repetition compute the \(k_{max}\) hashes for each
+              subsequence, and arrange them in a <em>trie</em>;</li>
+            <li>Compute the distance of all subsequences in the same leaf;</li>
+            <li>Keep track of the top \(k\) motifs seen so far</li>
+            <li>Based on the distance of the \(k\)-th motif, compute the
+              failure probability</li>
+            <li>If the failure probability is too high, consider shorter hashes by going up one level in the tries.</li>
+          </ul>
+          <figure class="grid grid-cols-2 mt-12 gap-10 text-2xl font-bold">
+            <div>
+              <span>Repetition 1</span>
+              <img class="object-contain" src="imgs/example-rep1.png" alt="">
+            </div>
+            <div>
+              <span>Repetition 2</span>
+              <img class="object-contain" src="imgs/example-rep2.png" alt="">
+            </div>
+          </figure>
+
+          <figure class="mt-12">
+            <figcaption class="font-bold text-2xl">Example execution</figcaption>
+            <img class="object-contain" src="imgs/execution1.png" alt="">
+            <!-- <img class="object-contain" src="imgs/execution2.png" alt=""> -->
+            <!-- <img class="object-contain" src="imgs/execution3.png" alt=""> -->
+            <!-- <img class="object-contain" src="imgs/execution4.png" alt=""> -->
+            <img class="object-contain" src="imgs/execution5.png" alt="">
+          </figure>
+        </section>
+
+        <section class="card">
+          <h1>5. Guarantees</h1>
+
+          <p class="text-5xl">The above algorithm finds the <span class="font-bold">exact</span> top-\(k\) motifs,
+            each with probability \(1 - \delta\).</p>
+        </section>
+
+        <section class="card">
+          <h1>6. Complexity</h1>
+          <p class="mb-10 mt-10 text-5xl">
+            Index construction time is <span class="font-normal">data independent</span>,
+            index query time is <span class="font-normal">data dependent</span>.
+          </p>
+
+          <div>
+            <span class="font-bold">Theorem 1:</span>
+            The LSH index construction takes time
+            \[
+              O(K \cdot \sqrt{L} n\log n)
+            \]
+          </div>
+
+          <div class="mt-10">
             <p>
-                Given a time series 𝑇 and a window length
-                \(w\), the top-\(k\) motifs are the 
-                \(k\) pairs of subsequences of length \(w\)
-                with smallest distance, such that no two subsequences in any pair
-                overlap with each other by more than a given fraction of the window.
+            <span class="font-bold">Theorem 2:</span>
+            Let \(d(m_k)\) be the distance of the \(k\)-th motif,
+            and \(i'\le K\), \(j' \le L\) be the parameters used
+            by the optimal LSH algorithm.
+            Then, the algorithm considers
+            </p>
+            <div class="text-3xl">
+            \[
+              O\left(
+              j'\sum_{m\in T^w\times T^w} p(d(m))^{i'}
+              +
+              (L-j')\sum_{m\in T^w\times T^w} p(d(m))^{i'+1}
+              \right)
+            \]
+            </div>
+            <p>
+            pairs in expectation.
             </p>
           </div>
-          <img class="ml-10 flex-shrink h-96" src="imgs/insect_top3_catalog.png" alt=""/>
-        </figure>
-      </section>
 
-      <!--
-      <section class="card">
-        <h1>Definition</h1>
-        <p>
-            Given a time series 𝑇 and a window length
-            \(w\), the top-\(k\) motifs are the 
-            \(k\) pairs of subsequences of length \(w\)
-            with smallest distance, such that no two subsequences in any pair
-            overlap with each other by more than a given fraction of the window.
-        </p>
-      </section> -->
+        </section>
 
-      <section class="card">
-        <h1>Related work</h1>
+      </div>
 
-        <p>
-          The Matrix Profile [1] holds the distance of each subsequence to its
-          nearest neighbor.
-          We can recover the position of the motifs by looking at 
-          pairs of minima in the Matrix Profile.
-          The Matrix Profile provides a lot of other information as well, 
-          including <em>discords</em> and <em>shapelets</em>.
-        </p>
+      <div class="flex flex-col gap-5">
 
-        <figure class="mt-12 mb-12">
-          <img class="w-full" src="imgs/insect_top3_mp.png" alt=""/>
-          <div class="text-center text-gray-600 text-2xl">
-            Time series with its corresponding Matrix Profile at window size 400. 
-          </div>
-        </figure>
-
-        <p>
-          The exact computation of the Matrix Profile requires time
-          \(\Omega(n^2)\), where \(n\) is the length of the time series,
-          since we have to compute the distance between all pairs 
-          of subsequences.
-        </p>
-        <p>
-        <span class="font-mono">SCAMP</span> is a very efficient GPU-based implementation of
-        the Matrix Profile [2], able to handle <em>billion-long</em> time
-        series in a single day!
-        </p>
-
-        <hr class="mt-6 mb-6" />
-        <ol class="text-2xl">
-          <li>
-            [1] Yeh et al. 
-            &middot;
-            <em>Matrix Profile I: All Pairs Similarity Joins for Time Series: A Unifying View that Includes Motifs, Discords and Shapelets</em>
-            &middot;
-            <span class="font-bold">ICDM 2016</span></li>
-          <li>
-            [2] Zimmerman et al. 
-            &middot;
-            <em>Matrix Proﬁle XIV: Scaling Time Series Motif Discovery with GPUs: Breaking the Quintillion Pairwise Comparisons a Day Barrier</em>
-            &middot;
-            <span class="font-bold">SoCC 2019</span></li>
-        </ol>
-      </section>
-
-      <section class="card">
-        <h1>Locality Sensitive Hashing</h1>
-
-        <p>
-          What if we indexed the subsequences, while accepting a small and controllable failure probability?
-        </p>
-
-        <div class="flex flex-row">
-          <div class="w-2/3">
+        <section class="card">
+          <h1>7. Relative Contrast</h1>
+          Measures how much the \(k\)-th motif <em>stands out</em> compared to
+          the average subsequence pair.
           \[
-          h(\vec{x}) = \left\lfloor\frac{\vec{a} \cdot \vec{x} + b}{r}\right\rfloor
+          RC = \frac{d_{avg}}{d_{k}}
           \]
+        </section>
+
+        <section class="card">
+          <h1>8. Experiments</h1>
+          <div class="mt-10 grid grid-cols-1 gap-y-10">
+            <table class="w-10/12 table-fixed border-collapse place-self-center">
+            <thead>
+            <tr class="header">
+            <th class="" style="text-align: left;">dataset</th>
+            <th style="text-align: right;">\(n\) (millions)</th>
+            <th style="text-align: right;">window</th>
+            <th style="text-align: right;">RC</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr class="">
+            <td class="border-slate-800" style="text-align: left;">astro</td>
+            <td style="text-align: right;">1</td>
+            <td style="text-align: right;">100</td>
+            <td style="text-align: right;">8.63</td>
+            </tr>
+            <tr class="even">
+            <td style="text-align: left;">GAP</td>
+            <td style="text-align: right;">2</td>
+            <td style="text-align: right;">600</td>
+            <td style="text-align: right;">9.17</td>
+            </tr>
+            <tr class="odd">
+            <td style="text-align: left;">freezer</td>
+            <td style="text-align: right;">7</td>
+            <td style="text-align: right;">5000</td>
+            <td style="text-align: right;">7.95</td>
+            </tr>
+            <tr class="even">
+            <td style="text-align: left;">ECG</td>
+            <td style="text-align: right;">7</td>
+            <td style="text-align: right;">1000</td>
+            <td style="text-align: right;">109.06</td>
+            </tr>
+            <tr class="odd">
+            <td style="text-align: left;">HumanY</td>
+            <td style="text-align: right;">26</td>
+            <td style="text-align: right;">18000</td>
+            <td style="text-align: right;">581.03</td>
+            </tr>
+            <tr class="even">
+            <td style="text-align: left;">Whales</td>
+            <td style="text-align: right;">308</td>
+            <td style="text-align: right;">140</td>
+            <td style="text-align: right;">21.66</td>
+            </tr>
+            <tr class="odd">
+            <td style="text-align: left;">Seismic</td>
+            <td style="text-align: right;">1000</td>
+            <td style="text-align: right;">100</td>
+            <td style="text-align: right;">274.44</td>
+            </tr>
+            </tbody>
+            </table>
+
+            <figure>
+              <figcaption>
+                Time to find the top-10 motifs,
+                with <span class="font-mono">SCAMP</span> as a baseline.
+                The orange bar is the index construction, the black line
+                is the query time, with a tick every time a motif is
+                confirmed.
+              </figcaption>
+              <img src="imgs/10-motifs.png" alt="">
+            </figure>
+
+            <!-- <figure> -->
+            <!--   <figcaption>End-to-end memory (Gb) usage.</figcaption> -->
+            <!--   <img src="imgs/memory.png" alt=""> -->
+            <!-- </figure> -->
+
+            <figure>
+              <figcaption>
+                Time vs. dataset size to find a planted motif in
+                synthetic data, for different relative contrasts of the motif.
+                Being data-independent <span class="font-mono">SCAMP</span> only has one line.
+              </figcaption>
+              <img src="imgs/scalability_n.png" alt="">
+            </figure>
+
           </div>
-          <div>
-            <ul>
-              <li>\( r \in \mathbb{R}^+ \)</li>
-              <li>\( \vec{a} \sim \mathcal{N}(0,1)^w \)</li>
-              <li>\( b \sim \mathcal{U}(0, r) \)</li>
-            </ul>
+
+
+        </section>
+
+        <section class="card">
+          <h1>9. About</h1>
+          <div class="grid grid-cols-2 ">
+            <div class="w-full place-items-center flex flex-col">
+              <p>Try out the code!</p>
+              <img class="object-contain" src="imgs/qr-attimo-repo.png" alt="">
+            </div>
+            <div class="w-full place-items-center flex flex-col">
+              <p>Read the paper!</p>
+              <img class="object-contain" src="imgs/qr-attimo-paper.png" alt="">
+            </div>
           </div>
-        </div>
+          <p class="mt-10 font-3xl">
+            Partially funded by the European Fund for Regional Development
+            (EFRE 2014-2020) and the Autonomous Province of Bozen-Bolzano
+            (EFRE1164).
+          </p>
+        </section>
 
-        <figure class="flex flex-row">
-          <img class="object-contain h-96" src="imgs/steam-hashes-k1-l1.png" alt="">
-          <img class="object-contain h-96" src="imgs/steam-cp-k1-l1.png" alt="">
-        </figure>
+        <section class="card">
+          <h1>10. References</h1>
+          <ol class="text-4xl">
+            <li>
+              [1] Yeh et al. 
+              &middot;
+              <em>Matrix Profile I: All Pairs Similarity Joins for Time Series: A Unifying View that Includes Motifs, Discords and Shapelets</em>
+              &middot;
+              <span class="font-bold">ICDM 2016</span></li>
+            <li>
+              [2] Zimmerman et al. 
+              &middot;
+              <em>Matrix Proﬁle XIV: Scaling Time Series Motif Discovery with GPUs: Breaking the Quintillion Pairwise Comparisons a Day Barrier</em>
+              &middot;
+              <span class="font-bold">SoCC 2019</span></li>
+          </ol>
 
-        <div>
-          Increase precision, we concatenate \(k\) functions
-          \[
-            \hat{h}(\vec{x}) = \langle h_1(\vec{x}), \dots, h_k(\vec{x}) \rangle
-          \]
-        </div>
-        <figure class="flex flex-row">
-          <img class="object-contain h-96" src="imgs/steam-hashes-k2-l1.png" alt="">
-          <img class="object-contain h-96" src="imgs/steam-cp-kmany-l1.png" alt="">
-        </figure>
-
-        <div>
-          To increase recall, we have to repeat \(L\) times
-        </div>
-
-        <figure class="flex flex-row">
-          <div class="grid grid-cols-2">
-            <img class="object-contain" src="imgs/steam-hashes-k2-1234.png" alt="">
-            <img class="object-contain" src="imgs/steam-hashes-k2-1234.png" alt="">
-            <img class="object-contain" src="imgs/steam-hashes-k2-1234.png" alt="">
-            <img class="object-contain" src="imgs/steam-hashes-k2-1234.png" alt="">
-          </div>
-          <img class="object-contain h-96" src="imgs/steam-sp.png" alt="">
-        </figure>
-
-      </section>
-
-      <section class="card">
-        <h1>Algorithm</h1>
-      </section>
-
-      <section class="card">
-        <h1>Complexity</h1>
-      </section>
-
-      <section class="card">
-        <h1>Experiments</h1>
-      </section>
-
-      <section class="card">
-        <h1>About</h1>
-        <p>Try out the code!</p>
-        <img src="imgs/qr-attimo-repo.png" alt="">
-      </section>
+        </section>
+      </div>
     </main>
     
   </body>
