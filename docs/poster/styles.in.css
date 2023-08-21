@@ -16,7 +16,7 @@ main {
 @tailwind utilities;
 @layer components {
   .card {
-    @apply bg-white p-10 text-4xl border-2 border-black flex-grow;
+    @apply bg-white p-10 text-4xl rounded-md shadow-xl flex-grow;
   }
   .card > h1 {
     @apply text-5xl mb-4 font-normal;

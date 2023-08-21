@@ -109,7 +109,7 @@ def plot_success_p(w, r, k, ls=[10], p_threshold=None, dist=None, text=False):
     plt.tight_layout()
 
 
-def plot_execution(w, r, k, rep, max_reps=100, p_threshold=None, dist=None):
+def plot_execution(w, r, k, rep, max_reps=100, p_threshold=None, dist=None, figsize=(8, 5)):
     def success_p(dists):
         probs_cur = cp_pstable(dists, w, r)**k
         probs_prev = cp_pstable(dists, w, r)**(k+1)
@@ -120,7 +120,7 @@ def plot_execution(w, r, k, rep, max_reps=100, p_threshold=None, dist=None):
 
     dists = np.arange(1000) / 100
     success = success_p(dists)
-    plt.figure(figsize=(8, 5))
+    plt.figure(figsize=figsize)
     plt.plot(dists, success)
     plt.xlabel("Distance")
     plt.ylabel("Success probability")
@@ -139,12 +139,14 @@ def plot_execution(w, r, k, rep, max_reps=100, p_threshold=None, dist=None):
         success = success_p(dist)
         success_s = f"{success:.2e}" if success < 0.1 else f"{success:.4f}"
         if success > 0.9:
-            va = "top"
             color = "forestgreen"
+        else:
+            color = "black"
+        if success > 0.8:
+            va = "top"
             offset = -0.1
         else:
             va = "bottom"
-            color = "black"
             offset = 0
         plt.text(
             10, success + offset, f"Current success probability = {success_s}",
@@ -228,3 +230,21 @@ def plot_hashes(prj, seed, r, k, size=4):
     plt.tight_layout()
     plt.tight_layout()
     plt.tight_layout()
+
+if __name__ == "__main__":
+    figsize=(8,3)
+    k=4
+    dist = 1
+    w = 640
+    plot_execution(w, r=1, k=k, max_reps=100, rep=1, p_threshold=0.9, dist=dist + 1, figsize=figsize)
+    plt.savefig("imgs/execution1.png", dpi=300)
+
+    plot_execution(w, r=1, k=k, max_reps=100, rep=100, p_threshold=0.9, dist=dist, figsize=figsize)
+    plt.savefig("imgs/execution2.png", dpi=300)
+
+    k = 3
+    plot_execution(w, r=1, k=k, max_reps=100, rep=1, p_threshold=0.9, dist=dist, figsize=figsize)
+    plt.savefig("imgs/execution3.png", dpi=300)
+
+    plot_execution(w, r=1, k=k, max_reps=100, rep=15, p_threshold=0.9, dist=dist, figsize=figsize)
+    plt.savefig("imgs/execution4.png", dpi=300)

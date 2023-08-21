@@ -306,7 +306,6 @@ In the first iteration, with $k=4$, we discover a pair at distance 2<br/>
 :::{.fragment .bg-white}
 ```{python}
 plot_execution(w, r=1, k=k, max_reps=100, rep=10, p_threshold=0.9, dist=dist)
-plt.savefig("imgs/execution2.png", dpi=300)
 ```
 After 10 repetitions, we find a pair at distance 1<br/>
 <span class="text-white">.</span>
@@ -314,7 +313,6 @@ After 10 repetitions, we find a pair at distance 1<br/>
 :::{.fragment .bg-white}
 ```{python}
 plot_execution(w, r=1, k=k, max_reps=100, rep=100, p_threshold=0.9, dist=dist)
-plt.savefig("imgs/execution3.png", dpi=300)
 ```
 After 100 repetitions we did not find a better pair,<br/> and the success probability 
 is about 0.85
@@ -324,7 +322,6 @@ is about 0.85
 ```{python}
 k=3
 plot_execution(w, r=1, k=k, max_reps=100, rep=1, p_threshold=0.9, dist=dist)
-plt.savefig("imgs/execution4.png", dpi=300)
 ```
 We then consider shorter prefixes of the hashes, <br/>going through the 100
 repetitions again.
