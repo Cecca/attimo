@@ -13,7 +13,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"
         onload="renderMathInElement(document.body);"></script>
   </head>
-  <body class="border-4">
+  <body class="">
 
     <header class="w-full bg-red-800 p-10 text-gray-100">
       <h1 class="text-center" style="font-size: 5.5rem;">Fast and Scalable Mining of Time Series Motifs with Probabilistic Guarantees</h1>
@@ -130,7 +130,7 @@
             What if we indexed the subsequences, while accepting a small and controllable failure probability?
           </p>
           <p>
-            Each subsequence is a vector \(\mathbb{R}^w\) with
+            Each subsequence is a vector \(\in\mathbb{R}^w\) with
             the \(z\)-normalized Euclidean distance.
           </p>
 
@@ -185,7 +185,8 @@
       <div class="flex flex-col gap-5">
         <section class="card">
           <h1>4. Algorithm</h1>
-          <div class="border-2 border-slate-200 p-6 mb-10">
+          <div class="mb-10">
+          <!-- <div class="border-2 border-slate-200 p-6 mb-10"> -->
             <p class="font-bold">Parameters</p>
             <ol>
               <li>\(\delta\): target failure probability</li>

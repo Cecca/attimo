@@ -1,3 +1,9 @@
+pdf:
+  npx electron-pdf -p '{"height": 46.8, "width": 33.1}' --margins 1 http://localhost:9999 VLDB23-poster.pdf
+
+install-electron-pdf:
+  npm install electron-pdf
+
 tailwind:
   npx tailwindcss -i styles.in.css -o styles.css --watch
 
