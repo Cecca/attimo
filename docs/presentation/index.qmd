@@ -466,12 +466,31 @@ Thanks to Eamonn Keogh and Nathan Romanelli for providing and discussing this da
 _Fast and Scalable Mining of Time Series Motifs with Probabilistic Guarantees._
 Proc. VLDB Endow. 15(13): 3841-3853 (2022)
 
+::::{.columns}
+:::{.column}
 <center>
 https://github.com/Cecca/attimo
 
 ![](imgs/qr-attimo-repo.png)
 </center>
-
+:::
+:::{.column}
+<br/>
+<br/>
+```{python}
+#| echo: true
+import pyattimo
+ts = pyattimo.load_dataset("ecg", prefix=1000000)
+motifs = pyattimo.MotifsIterator(
+    ts, 
+    w=1000, 
+    max_k=100
+)
+m = next(motifs)
+print(m)
+```
+:::
+::::
 
 ## Appendix
 
