@@ -13,11 +13,13 @@ from numpy.lib.stride_tricks import sliding_window_view
 def plot_ts(ts, w=None, highlight=[]):
     plt.figure(figsize=(12, 2))
     plt.plot(ts)
+    old_lim = plt.gca().get_ylim()
     for pos in highlight:
         assert w is not None
         plt.gca().add_patch(Rectangle((pos, ts.min()), w, ts.max(),
                                       facecolor='lightgrey'))
         plt.plot(np.arange(pos, pos+w), ts[pos:pos+w], c="red")
+    plt.gca().set_ylim(old_lim)
     plt.axis('off')
     plt.tight_layout()
 
@@ -70,11 +72,11 @@ def plot_cp(w, r, ks=[1]):
     plt.ylabel("Collision probability")
     if len(ks) > 1:
         plt.legend()
-    plt.gca().set_aspect('auto')
+    # plt.gca().set_aspect('auto')
     plt.tight_layout()
 
 
-def plot_success_p(w, r, k, ls=[10], p_threshold=None, dist=None, text=False):
+def plot_success_p(w, r, k, ls=[10], p_threshold=None, dist=None, text=False, title=None):
     dists = np.arange(1000) / 100
     plt.figure(figsize=(6, 4))
     for L in ls:
@@ -105,6 +107,8 @@ def plot_success_p(w, r, k, ls=[10], p_threshold=None, dist=None, text=False):
             ha="right", va="bottom")
         plt.axhline(success, xmin=0, xmax=10,
                     color="gray", linestyle=":")
+    if title is not None:
+        plt.title(title)
     plt.gca().set_aspect('auto')
     plt.tight_layout()
 
@@ -224,7 +228,7 @@ def plot_hashes(prj, seed, r, k, size=4):
                 plt.axline(p, slope=-1/m, c="lightgray",
                            clip_path=clipper)
 
-    plt.scatter(prj[:, 0], prj[:, 1], s=16, c=hashes, cmap="tab10")
+    plt.scatter(prj[:, 0], prj[:, 1], s=16, c=hashes, cmap="tab20")
 
     plt.axis('off')
     plt.gca().set_xlim((-0.7, 0.7))

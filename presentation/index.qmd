@@ -62,7 +62,7 @@ prj = MinMaxScaler(feature_range=(-0.5, 0.5)).fit_transform(prj)
 
 ## Top-$k$ motifs {.center}
 
-Consider all pairs of subsequences of length $w$ of a given time series.
+Consider all pairs of (non-overlapping) subsequences of length $w$ of a given time series.
 The first $k$ by increasing distance are the top-$k$ motifs.
 
 ## State of the art: Matrix Profile
@@ -115,7 +115,7 @@ SoCC19
 - Curse of dimensionality: indices such as R-trees degrade to linear scans
 :::
 
-##
+## {.center}
 
 To address these challenges, we will use an approach based on
 Locality Sensitive Hashing (LSH)
@@ -154,6 +154,9 @@ d(x, y) = \sqrt{\sum_{i\in[1,w]} \left(
 \right)^2
 }
 $$
+In this example we have a window length $w = 640$, <br />
+hence we have
+vectors in $\mathbb{R}^{640}$
 :::
 
 ## {.smaller}
@@ -183,8 +186,9 @@ $$
 :::
 
 :::{.fragment .absolute bottom="20%" left="54%" fragment-index=1}
-The key point is that we only compute the distance of
-subsequences falling into the same bucket.
+The key point is that we only compute the distance 
+of
+subsequences falling <br/>into the same bucket.
 :::
 
 :::{.fragment .absolute bottom=0 left="54%" fragment-index=2}
@@ -225,7 +229,7 @@ plt.savefig("imgs/steam-cp-kmany-l1.png", dpi=300)
 :::{.absolute top="0%" fragment-index=1}
 ```{python}
 #| layout-ncol: 2
-for seed in [1234, 243,256,23562,235,2]:
+for seed in [1234, 243,256,3562,235,1]:
     plot_hashes(prj, k=2, r=0.25, seed=seed, size=2)
     plt.savefig(f"imgs/steam-hashes-k2-{seed}.png", dpi=300)
 ```
@@ -238,18 +242,20 @@ And to increase the _recall_ of the index we repeat $L$ times.
 
 :::{.absolute bottom=0 left="54%" fragment-index=2}
 ```{python}
-plot_success_p(w, 1, k=2, ls=[1, 10, 100])
+plot_success_p(w, 1, k=2, ls=[1, 10, 100], title="For k=2")
 plt.savefig("imgs/steam-sp.png", dpi=300)
 ```
 :::
 
 
-## Locality sensitive hashing
+## Locality sensitive hashing {.smaller}
 
-#### Correctness
+### Correctness
 
 :::{.incremental}
 - Repeating the hashing procedure several times we will see close pairs of subsequences at least once.
+
+- We maintain a priority queue of the top pairs seen across repetitions.
 
 - By performing enough repetitions, we can ensure that it is _unlikely_ that we missed pairs that are closer than the current top-$k$ pairs.
 
@@ -272,8 +278,8 @@ plt.savefig("imgs/steam-sp.png", dpi=300)
 
 ## {.center}
 
-- $L$ maximum number of repetitions,
-- $K$ maximum number of concatenations.
+- $L_{max}$ maximum number of repetitions,
+- $K_{max}$ maximum number of concatenations (e.g. 4).
 
 ::::{.columns}
 :::{.column .fragment}
@@ -297,22 +303,25 @@ bucket.
 ```{python}
 k=4
 dist = 1
-plot_execution(w, r=1, k=k, max_reps=100, rep=1, p_threshold=0.9, dist=dist + 1)
-plt.savefig("imgs/execution1.png", dpi=300)
+prevs = []
+plot_execution(w, r=1, k=k, max_reps=100, rep=1, p_threshold=0.9, dist=dist + 1, prevs=prevs)
+prevs.append((k, 1))
 ```
 In the first iteration, with $k=4$, we discover a pair at distance 2<br/>
 <span class="text-white">.</span>
 :::
 :::{.fragment .bg-white}
 ```{python}
-plot_execution(w, r=1, k=k, max_reps=100, rep=10, p_threshold=0.9, dist=dist)
+plot_execution(w, r=1, k=k, max_reps=100, rep=10, p_threshold=0.9, dist=dist, prevs=prevs)
+prevs.append((k, 10))
 ```
 After 10 repetitions, we find a pair at distance 1<br/>
 <span class="text-white">.</span>
 :::
 :::{.fragment .bg-white}
 ```{python}
-plot_execution(w, r=1, k=k, max_reps=100, rep=100, p_threshold=0.9, dist=dist)
+plot_execution(w, r=1, k=k, max_reps=100, rep=100, p_threshold=0.9, dist=dist, prevs=prevs)
+prevs.append((k, 100))
 ```
 After 100 repetitions we did not find a better pair,<br/> and the success probability 
 is about 0.85
@@ -321,15 +330,16 @@ is about 0.85
 :::{.fragment .bg-white}
 ```{python}
 k=3
-plot_execution(w, r=1, k=k, max_reps=100, rep=1, p_threshold=0.9, dist=dist)
+plot_execution(w, r=1, k=k, max_reps=100, rep=1, p_threshold=0.9, dist=dist, prevs=prevs)
+prevs.append((k, 1))
 ```
 We then consider shorter prefixes of the hashes, <br/>going through the 100
 repetitions again.
 :::
 :::{.fragment .bg-white}
 ```{python}
-plot_execution(w, r=1, k=k, max_reps=100, rep=15, p_threshold=0.9, dist=dist)
-plt.savefig("imgs/execution5.png", dpi=300)
+plot_execution(w, r=1, k=k, max_reps=100, rep=15, p_threshold=0.9, dist=dist, prevs=prevs)
+prevs.append((k, 15))
 ```
 After 15 repetitions, we observe that the<br/> success probability is above our
 target, and thus return.
@@ -372,7 +382,7 @@ The important thing is that Theorem #thm-motif is dependent on the distribution 
 ## Optimizations
 
 - Use a trie data-structure to re-use computations across iterations at different $k$ values
-- Compute dot producs for hash values in the frequency domain (also done in the first versions of the Matrix Profile)
+- Compute dot producs for hash values in the frequency domain (also done in some implementations of the Matrix Profile)
 - Compute fewer hash values using _tensoring_
 
 
@@ -437,18 +447,18 @@ Thanks to Eamonn Keogh and Nathan Romanelli for providing and discussing this da
 
 ![Synthetic data, planted motifs with different relative contrasts. `SCAMP-gpu` only has one line since it is data-independent.](imgs/scalability_n.png){width="100%"}
 
-## Practical takeaways {.smaller}
+## Practical takeaways
 
-
+:::{.incremental}
 - `Attimo` only provides information about the top motif(s),
   whereas the Matrix Profile provides other informtaion.
 
 - For shorter time series, or if the relative contrast is very small, use the
   Matrix Profile.
 
-- For time series of a few millions and above, with a not-to-small relative
+- For time series of a few million values and above, with a not-to-small relative
   contrast, try `Attimo`
-
+:::
 
 ## References {.smaller}
 
@@ -520,7 +530,7 @@ plt.show()
 - In black are the distances of the top-10 motifs extracted from the matrix
   profile.
 - In red the distance of a pair of subsequences neither of which is the nearest
-  neighbor of the other.
+  neighbor of the other, and not overlapping with higher-ranked motifs.
 - The matrix profile holds the distances and indices of the 1-nearest neighbor
   of each subsequence, but top-k motifs would require the k-nearest neighbors
   to be maintained in the matrix profile.
