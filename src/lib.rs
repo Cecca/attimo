@@ -1,6 +1,5 @@
 #![feature(allocator_api)]
 #![feature(is_sorted)]
-#![feature(map_first_last)]
 #![feature(string_remove_matches)]
 #![feature(int_roundings)]
 

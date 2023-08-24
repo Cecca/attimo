@@ -73,7 +73,7 @@ impl Motif {
         z
     }
 
-    #[args(show = "false")]
+    #[pyo3(signature = (show = false))]
     fn plot(&self, show: bool) -> Result<(), PyErr> {
         // Downsample the original data, if needed
         let downsampled_len = 100000;
@@ -88,12 +88,12 @@ impl Motif {
         };
         Python::with_gil(|py| {
             let locals = PyDict::new(py);
-            locals.set_item("motif", PyCell::new(py, self.clone()).unwrap());
-            locals.set_item("timeseries", timeseries);
-            locals.set_item("a", a);
-            locals.set_item("b", b);
-            locals.set_item("show", show);
-            locals.set_item("distance", self.distance);
+            locals.set_item("motif", PyCell::new(py, self.clone()).unwrap())?;
+            locals.set_item("timeseries", timeseries)?;
+            locals.set_item("a", a)?;
+            locals.set_item("b", b)?;
+            locals.set_item("show", show)?;
+            locals.set_item("distance", self.distance)?;
             py.run(PLOT_SCRIPT, None, Some(locals))
         })
     }
@@ -111,7 +111,7 @@ struct MotifsIterator {
 #[pymethods]
 impl MotifsIterator {
     #[new]
-    #[args(seed = "1234", delta = "0.05", repetitions = "1000")]
+    #[pyo3(signature=(ts, w, max_k = 100, repetitions=1000, delta = 0.05, seed = 1234))]
     fn new(
         ts: Vec<f64>,
         w: usize,
@@ -148,7 +148,8 @@ impl MotifsIterator {
     }
 }
 
-#[pyfunction(prefix = "None")]
+#[pyfunction]
+#[pyo3(signature =(dataset, prefix = None))]
 fn load_dataset(dataset: &str, prefix: Option<usize>) -> anyhow::Result<Vec<f64>> {
     use std::path::PathBuf;
 
