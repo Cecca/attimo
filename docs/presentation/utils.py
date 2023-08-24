@@ -12,13 +12,15 @@ from numpy.lib.stride_tricks import sliding_window_view
 
 def plot_ts(ts, w=None, highlight=[]):
     plt.figure(figsize=(12, 2))
-    plt.plot(ts)
+    color = "black" if len(highlight) == 0 else "lightgray"
+    plt.plot(ts, c=color)
     old_lim = plt.gca().get_ylim()
-    for pos in highlight:
+    colors = ["forestgreen", "steelblue", "orange"]
+    for pos, color in zip(highlight, colors):
         assert w is not None
         plt.gca().add_patch(Rectangle((pos, ts.min()), w, ts.max(),
                                       facecolor='lightgrey'))
-        plt.plot(np.arange(pos, pos+w), ts[pos:pos+w], c="red")
+        plt.plot(np.arange(pos, pos+w), ts[pos:pos+w], c=color)
     plt.gca().set_ylim(old_lim)
     plt.axis('off')
     plt.tight_layout()
@@ -74,6 +76,17 @@ def plot_cp(w, r, ks=[1]):
         plt.legend()
     # plt.gca().set_aspect('auto')
     plt.tight_layout()
+
+
+def plot_success_by_reps(w, r, k, dist, max_reps):
+    reps = np.arange(max_reps)
+    plt.figure(figsize=(6, 4))
+    probs = cp_pstable(dist, w, r)**k
+    success = 1 - (1 - probs)**reps
+    plt.plot(reps, success)
+    plt.xlabel("Number of repetitions")
+    plt.ylabel("Success probability")
+    plt.title("For fixed k and candidate distance")
 
 
 def plot_success_p(w, r, k, ls=[10], p_threshold=None, dist=None, text=False, title=None):
@@ -203,7 +216,7 @@ def hash_many(x, k, r, seed):
     return hash_values, a_vals, b_vals
 
 
-def plot_hashes(prj, seed, r, k, size=4):
+def plot_hashes(prj, seed, r, k, size=4, title=None):
     plt.figure(figsize=(size, size))
     radius = 1.1 * \
         np.linalg.norm(prj[np.argmax(np.linalg.norm(prj, axis=1)), :])
@@ -230,6 +243,9 @@ def plot_hashes(prj, seed, r, k, size=4):
 
     plt.scatter(prj[:, 0], prj[:, 1], s=16, c=hashes, cmap="tab20")
 
+    if title is not None:
+        plt.title(title)
+
     plt.axis('off')
     plt.gca().set_xlim((-0.7, 0.7))
     plt.gca().set_ylim((-0.7, 0.7))
@@ -238,7 +254,21 @@ def plot_hashes(prj, seed, r, k, size=4):
     plt.tight_layout()
     plt.tight_layout()
 
-if __name__ == "__main__":
+
+def plot_eucl(ts, w, i, j, ci, cj):
+    from matplotlib import collections  as mc
+    plt.figure(figsize=(6,1.5))
+    a = ts[i:i+w]
+    b = ts[j:j+w]
+    lines = zip(enumerate(a),enumerate(b))
+    lc = mc.LineCollection(lines, colors="lightgray")
+    plt.gca().add_collection(lc)
+    plt.plot(a, c=ci)
+    plt.plot(b, c=cj)
+    plt.tight_layout()
+
+
+def simulate_execution():
     figsize=(8,3)
     k=4
     dist = 1
@@ -259,3 +289,13 @@ if __name__ == "__main__":
 
     plot_execution(w, r=1, k=k, max_reps=100, rep=15, p_threshold=0.9, dist=dist, prevs=prevs, figsize=figsize)
     plt.savefig("imgs/execution4.png", dpi=300)
+
+
+if __name__ == "__main__":
+    # simulate_execution()
+    w = 400
+    ts = np.loadtxt("insect15.txt")
+    plot_eucl(ts, w=w, i=6974, j=8490, ci="steelblue", cj="orange")
+    plt.savefig("insect.png")
+    plot_eucl(ts, w=w, i=6974, j=200, ci="steelblue", cj="forestgreen")
+    plt.savefig("insect-far.png")

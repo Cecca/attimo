@@ -5,3 +5,14 @@
 .text-white {
   color: white;
 }
+
+.jointwork {
+  font-size: 70%;
+}
+
+.presentation-title {
+  font-weight: 200 !important;
+  font-size: 200% !important;
+  margin-bottom: 40pt !important;
+  text-align: left;
+}
