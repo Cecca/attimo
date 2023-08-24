@@ -73,7 +73,6 @@ impl Motif {
         z
     }
 
-
     #[args(show = "false")]
     fn plot(&self, show: bool) -> Result<(), PyErr> {
         // Downsample the original data, if needed
@@ -98,6 +97,10 @@ impl Motif {
             py.run(PLOT_SCRIPT, None, Some(locals))
         })
     }
+
+    fn __str__(&self) -> String {
+        format!("motif: ({}, {}) d={}", self.a, self.b, self.distance)
+    }
 }
 
 #[pyclass]
@@ -108,7 +111,7 @@ struct MotifsIterator {
 #[pymethods]
 impl MotifsIterator {
     #[new]
-    #[args(seed = "1234", delta = "0.05", repetitions = "200")]
+    #[args(seed = "1234", delta = "0.05", repetitions = "1000")]
     fn new(
         ts: Vec<f64>,
         w: usize,
@@ -138,7 +141,10 @@ impl MotifsIterator {
 
     fn __getitem__(&mut self, idx: isize) -> Motif {
         assert!(idx >= 0);
-        Motif::with_context(self.inner.get_ranked(idx as usize).clone(), self.inner.get_ts())
+        Motif::with_context(
+            self.inner.get_ranked(idx as usize).clone(),
+            self.inner.get_ts(),
+        )
     }
 }
 
