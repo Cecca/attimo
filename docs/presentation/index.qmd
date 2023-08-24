@@ -17,9 +17,6 @@ format:
 ---
 
 ```{python}
-%load_ext autoreload
-%autoreload 2
-
 import polars as pl
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -353,11 +350,10 @@ target, and thus return.
 :::{#thm-index}
 The LSH index construction takes time
 $$
-O(K \cdot \sqrt{L} n\log n)
+O(K_{max} \cdot \sqrt{L_{max}} n\log n)
 $$
 :::
 
-. . .
 
 :::{#thm-motif}
 Let $d(m_k)$ be the distance of the $k$-th motif,
