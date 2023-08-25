@@ -333,10 +333,20 @@ plot_success_p(w, 1, k=2, ls=[100], title="For τ=2 and L=100")
 
 ![](algo.png)
 
+## Auto tuning parameters 
+
+- How do we set $\tau$?
+- The wrong value might make us do too many repetitions
+
+. . .
+
+- We adopt an approach that auto tunes the parameters based on the data at hand 
+
 ## {.center}
 
 - $L_{max}$ maximum number of repetitions,
-- $K_{max}$ maximum number of concatenations (e.g. 4).
+- $K_{max}$ maximum number of concatenations (e.g. 4),
+- $\delta$ probability parameter: succeed with probability $\ge 1-\delta$.
 
 ::::{.columns}
 :::{.column .fragment}
