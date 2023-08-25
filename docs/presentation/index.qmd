@@ -1,6 +1,6 @@
 ---
-#title: Fast and Scalable Mining of Time Series Motifs with Probabilistic Guarantees
-title: Mining Time Series Motifs with Probabilistic Guarantees
+title: Fast and Scalable Mining of Time Series Motifs with Probabilistic Guarantees
+# title: Mining Time Series Motifs with Probabilistic Guarantees
 author: Matteo Ceccarello
 email: matteo.ceccarello@unipd.it
 institute: University of Padova

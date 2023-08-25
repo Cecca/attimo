@@ -12,7 +12,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 
 def plot_ts(ts, w=None, highlight=[], axis=False, colors=["forestgreen", "steelblue", "orange"]):
     plt.figure(figsize=(12, 2))
-    color = "black" if len(highlight) == 0 else "lightgray"
+    color = "black" if len(highlight) == 0 else "grey"
     plt.plot(ts, c=color)
     old_lim = plt.gca().get_ylim()
     for pos, color in zip(highlight, colors):
@@ -51,7 +51,7 @@ def plot_catalog(ts, occs, w, height=1, spacing=1, colors=plt.colormaps.get("tab
 
 def plot_in_context(ts, occs, w, colors=plt.colormaps.get("tab10").colors, labels = None, labelpos = dict()):
     plt.figure(figsize=(10, 1.5))
-    plt.plot(ts, color="gray", alpha=0.3)
+    plt.plot(ts, color="grey")
     plt.gca().axis('off')
     labeltop = ts.max() * 1.1
     for pair, c in zip(occs, colors):

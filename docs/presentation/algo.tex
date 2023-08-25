@@ -15,7 +15,7 @@
 		\Let{$m_k$}{$k$-th element in $PQ$}\;
 		\Let{$d_k$}{distance of the pair of subsequences of $m_k$}\;
 		\If{we have seen all pairs at distance $\le d_k$ with probability $\ge 1-\delta$}{
-			\Return $PQ_1, PQ_2, \dots, PQ_k$\;
+			\Return Top-$k$ elements out of $PQ$\;
 		}
 	}
 \end{algorithm}
