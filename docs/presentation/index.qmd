@@ -1,6 +1,5 @@
 ---
 title: Fast and Scalable Mining of Time Series Motifs with Probabilistic Guarantees
-# title: Mining Time Series Motifs with Probabilistic Guarantees
 author: Matteo Ceccarello
 email: matteo.ceccarello@unipd.it
 institute: University of Padova
@@ -59,7 +58,7 @@ prj = prj + np.random.normal(scale=8, size=prj.shape)
 prj = MinMaxScaler(feature_range=(-0.5, 0.5)).fit_transform(prj)
 ```
 
-## Outline
+## Outline {visibility="visible"}
 
 1. Problem definition
 2. State of the art
@@ -183,6 +182,13 @@ plot_catalog(insect, pairs_occs, w_insect, spacing=7, labels=insect_labels)
 
 :::::
 
+## Our contribution
+
+- We propose `Attimo`, a randomized algorithm for discovering the _exact_ top-$k$ motifs
+- `Attimo` auto tunes its parameters to the data distribution
+- `Attimo` allows to control the success probability, i.e. its recall
+- `Attimo` can handle time series of one billion values in just half an hour
+
 ## State of the art: Matrix Profile {.smaller}
 
 ::: {.callout .fragment}
@@ -285,7 +291,7 @@ this makes for a better _precision_ of the index.
 :::{.absolute bottom=0 left="54%" fragment-index=2}
 ```{python}
 #plot_cp(w, [0.5,1,2])
-plot_cp(w, 1, [1,2,3,4])
+plot_cp(w, 1, [1,2])
 plt.savefig("imgs/steam-cp-kmany-l1.png", dpi=300)
 ```
 :::
@@ -342,7 +348,11 @@ plot_success_p(w, 1, k=2, ls=[100], title="For τ=2 and L=100")
 
 - We adopt an approach that auto tunes the parameters based on the data at hand 
 
-## {.center}
+. . .
+
+- See the paper for details
+
+## {.center visibility="visible"}
 
 - $L_{max}$ maximum number of repetitions,
 - $K_{max}$ maximum number of concatenations (e.g. 4),
@@ -358,7 +368,7 @@ plot_success_p(w, 1, k=2, ls=[100], title="For τ=2 and L=100")
 :::
 ::::
 
-## {.smaller .center}
+## {.smaller .center visibility="visible"}
 
 In each iteration we compute the distance of all subsequences in the same
 bucket.
@@ -411,8 +421,8 @@ prevs.append((k, 15))
 After 15 repetitions, we observe that the<br/> success probability is above our
 target, and thus return.
 :::
-
 ::::
+
 ## Guarantees
 
 
@@ -453,7 +463,7 @@ pairs in expectation.
 :::
 
 
-## Optimizations
+## Optimizations {visibility="visible"}
 
 - Use a trie data-structure to re-use computations across iterations at different $k$ values
 - Compute dot producs for hash values in the frequency domain (also done in some implementations of the Matrix Profile)
@@ -495,7 +505,7 @@ $$
 
 ![Synthetic data, planted motif.](imgs/scalability_n_linear.png){width="100%"}
 
-## Practical takeaways
+## Practical takeaways {visibility="visible"}
 
 :::{.incremental}
 

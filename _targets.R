@@ -183,7 +183,7 @@ list(
                                        data_scamp, 
                                        data_scamp_gpu),
             width = 5,
-            height = 5,
+            height = 6,
             dpi = 300
         )
     ),

@@ -1208,7 +1208,7 @@ plot_motifs_10_simple <- function(data_attimo, data_scamp, data_scamp_gpu) {
     geom_text(
       aes(label=scales::number(time_s, prefix=prefix, suffix=suffix), hjust = hjust),
       position=position_dodge(0.9),
-      size = 3,
+      size = 4,
     ) +
     geom_text(
       aes(label=dataset, y=factor(1)),

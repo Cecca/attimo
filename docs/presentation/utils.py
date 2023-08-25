@@ -106,7 +106,7 @@ def plot_cp(w, r, ks=[1]):
     plt.figure(figsize=(6, 4))
     for k in ks:
         probs = cp_pstable(dists, w, r)**k
-        plt.plot(dists, probs, label=f"k={k}")
+        plt.plot(dists, probs, label=f"τ={k}")
     plt.xlabel("Distance")
     plt.ylabel("Collision probability")
     if len(ks) > 1:
@@ -123,7 +123,7 @@ def plot_success_by_reps(w, r, k, dist, max_reps):
     plt.plot(reps, success)
     plt.xlabel("Number of repetitions")
     plt.ylabel("Success probability")
-    plt.title("For fixed k and candidate distance")
+    plt.title("For fixed τ and candidate distance")
 
 
 def plot_success_p(w, r, k, ls=[10], p_threshold=None, dist=None, text=False, title=None):
@@ -138,7 +138,7 @@ def plot_success_p(w, r, k, ls=[10], p_threshold=None, dist=None, text=False, ti
     if len(ls) > 1:
         plt.legend()
     if text:
-        plt.title(f"k={k}, repetitions={ls[0]}")
+        plt.title(f"τ={k}, repetitions={ls[0]}")
     if p_threshold is not None:
         plt.axhline(p_threshold, xmin=0, xmax=10,
                     color="gray", linestyle=":")
