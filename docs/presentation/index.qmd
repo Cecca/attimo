@@ -348,12 +348,12 @@ plot_success_p(w, 1, k=2, ls=[100], title="For τ=2 and L=100")
 - $K_{max}$ maximum number of concatenations (e.g. 4),
 - $\delta$ probability parameter: succeed with probability $\ge 1-\delta$.
 
-::::{.columns}
-:::{.column .fragment}
+::::{.columns .fragment}
+:::{.column}
 ![Repetition 1](imgs/example-rep1.png){width="100%"}
 :::
 
-:::{.column .fragment}
+:::{.column}
 ![Repetition 2](imgs/example-rep3.png){width="100%"}
 :::
 ::::
@@ -413,6 +413,18 @@ target, and thus return.
 :::
 
 ::::
+## Guarantees
+
+
+:::{#thm-recall}
+Our algorithm finds the **exact** top-$k$ motifs each with probability $\ge 1-\delta$.
+:::
+
+::: {.fragment}
+- For $\delta=0.1$, each true motif is found with 90% probability
+- This means that we can control the _recall_ of the algorithm
+- **Tradeoff**: the higher the desired recall, the slower the discovery process
+:::
 
 
 ## Complexity {.smaller}
