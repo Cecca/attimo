@@ -141,6 +141,15 @@ list(
             dpi = 300
         )
     ),
+    tar_target(
+        img_scalability_n_linear,
+        ggsave("imgs/scalability_n_linear.png",
+            plot = plot_scalability_n_linear(data_scalability),
+            width = 5,
+            height = 3,
+            dpi = 300
+        )
+    ),
 
     # Time comparison -----------------------------------------------
     tar_target(
@@ -158,6 +167,19 @@ list(
         ggsave(
             "imgs/10-motifs.png",
             plot = plot_motifs_10_alt3(filter(data_attimo, delta == delta_val), 
+                                       data_scamp, 
+                                       data_scamp_gpu),
+            width = 5,
+            height = 5,
+            dpi = 300
+        )
+    ),
+    # Figure motifs 10, simplified -----------------------------------------------
+    tar_target(
+        img_motifs_10_simple,
+        ggsave(
+            "imgs/10-motifs-simple.png",
+            plot = plot_motifs_10_simple(filter(data_attimo, delta == delta_val), 
                                        data_scamp, 
                                        data_scamp_gpu),
             width = 5,

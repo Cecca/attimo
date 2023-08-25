@@ -1167,6 +1167,78 @@ plot_motifs_10_alt2 <- function(data_attimo, data_scamp, data_scamp_gpu, data_me
     bars
 }
 
+plot_motifs_10_simple <- function(data_attimo, data_scamp, data_scamp_gpu) {
+  scamp_thresh <- 3000
+  pdata <- data_attimo %>%
+    filter(motifs == 10) %>%
+    filter((repetitions == 400) | (dataset == "Seismic") | (dataset == "Whales")) %>%
+    group_by(dataset, window) %>%
+    slice_min(time_s) %>%
+    ungroup() %>%
+    select(dataset, algorithm, window, time_s) %>%
+    bind_rows(select(data_scamp_gpu, dataset, window, time_s) %>% mutate(algorithm = "SCAMP")) %>%
+    inner_join(dataset_info()) %>%
+    mutate(
+      ptime_s = if_else(time_s > scamp_thresh, scamp_thresh, time_s),
+      hjust = if_else(time_s > scamp_thresh, 1, 0),
+      suffix = if_else(time_s > scamp_thresh, " s) →", " s"),
+      prefix = if_else(time_s > scamp_thresh, "(", "")
+    ) %>%
+    mutate(dataset = fct_reorder(dataset, n)) %>%
+    mutate(group = if_else(dataset %in% c("Whales", "Seismic"), "Large", "Small")) %>%
+    arrange(dataset)
+
+  times <- seq(2202, scamp_thresh)
+  gradient = tibble(
+    ptime_s = times,
+    alpha = seq(0, 1, length.out = length(times))
+  ) |> arrange(desc(ptime_s))
+  print(gradient)
+
+  ggplot(pdata, aes(y=factor(0), x=ptime_s, fill=algorithm)) +
+    geom_col(position="dodge") +
+    geom_segment(
+      aes(x=ptime_s, xend=ptime_s, y=-Inf, yend=Inf, alpha=alpha), 
+      inherit.aes=F, 
+      data=gradient, 
+      color="white",
+      linewidth = 0.1
+    ) +
+    geom_vline(xintercept=seq(200, 3000, by=200), color="white") +
+    geom_text(
+      aes(label=scales::number(time_s, prefix=prefix, suffix=suffix), hjust = hjust),
+      position=position_dodge(0.9),
+      size = 3,
+    ) +
+    geom_text(
+      aes(label=dataset, y=factor(1)),
+      x = 0,
+      hjust = 0
+    ) +
+    facet_wrap(
+      vars(dataset), ncol = 1, scales = "fixed", 
+      strip.position = "left"
+    ) +
+    scale_alpha_identity() +
+    scale_x_continuous(limits = c(0, scamp_thresh)) +
+    scale_fill_manual(values=c(
+      attimo = "#f78a36",
+      SCAMP = "gray"
+    )) + 
+    labs(x = "Time (s)") +
+    theme_paper() +
+    theme(
+        axis.line.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        strip.text = element_blank(),
+        panel.spacing = unit(2, "mm"),
+        legend.position = c(0.8, 0.8)
+    )
+    
+}
+
 plot_motifs_10_alt3 <- function(data_attimo, data_scamp, data_scamp_gpu) {
     scamp_thresh <- 2300
     textsize <- 4
@@ -1352,6 +1424,36 @@ plot_distributions <- function(data_measures, data_distances) {
         theme_paper() +
         theme(
             strip.text = element_text(hjust = 0)
+        )
+}
+
+plot_scalability_n_linear <- function(data_scalability) {
+    data_scalability <- data_scalability %>% 
+        filter(as.integer(log2(n)) == log2(n))
+    attimo <- data_scalability %>% filter(algorithm == "attimo") %>% filter(difficulty=="difficult")
+    baseline <- data_scalability %>% filter(algorithm != "attimo")
+    labels <- baseline %>%
+        filter(n == max(n))
+
+    ggplot(attimo, aes(n, time_s, color=algorithm)) +
+        geom_point(data=baseline, stat='summary') +
+        geom_line(data=baseline, stat='summary') +
+        geom_point() +
+        geom_line() +
+        scale_y_continuous(
+            labels = scales::number_format(accuracy=1), 
+            trans='identity') +
+        scale_x_continuous(trans='identity') +
+        scale_color_manual(values = c("#e49444", "gray10")) +
+        labs(
+            x = "Size",
+            y = "Total time (s)",
+            color = "",
+            linetype = ""
+        ) +
+        theme_paper() +
+        theme(
+            legend.position = c(0.2, 0.8)
         )
 }
 

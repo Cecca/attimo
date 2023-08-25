@@ -1,9 +1,8 @@
 ---
 #title: Fast and Scalable Mining of Time Series Motifs with Probabilistic Guarantees
 title: Mining Time Series Motifs with Probabilistic Guarantees
-author: 
-  name: Matteo Ceccarello
-  email: matteo.ceccarello@unipd.it
+author: Matteo Ceccarello
+email: matteo.ceccarello@unipd.it
 institute: University of Padova
 jointwork: Johann Gamper (U. Bolzano)
 format: 
@@ -14,6 +13,8 @@ format:
     slide-number: true
     template-partials:
       - title-slide.html
+revealjs-plugins:
+  - pointer
 ---
 
 ```{python}
@@ -26,6 +27,16 @@ from numpy.lib.stride_tricks import sliding_window_view
 from utils import *
 
 w_insect = 400
+insect_labels = {
+    6974: 'a',
+    8490: 'b',
+    886: 'c',
+    2808: 'd',
+    592: 'e',
+    2085: 'f',
+    50: 'g',
+    4050: 'h'
+}
 insect = np.loadtxt("insect15.txt")
 
 w = 640
@@ -56,36 +67,30 @@ prj = MinMaxScaler(feature_range=(-0.5, 0.5)).fit_transform(prj)
 4. Our algorithm
 5. Experimental results
 
-## Motivation
-
-<!-- TODO: Write motivation -->
-
-## Subsequences {.smaller}
-
-<!-- TODO: Introduce the Euclidean distance between subsequences -->
+## Timeseries and subsequences {.smaller}
 
 ::::{.r-stack}
 :::{}
 ```{python}
-plot_ts(insect)
+plot_ts(insect, axis=True)
 ```
 :::
 
 :::{.fragment fragment-index=1}
 ```{python}
-plot_ts(insect, w=w_insect, highlight=[200])
+plot_ts(insect, w=w_insect, highlight=[200], axis=True)
 ```
 :::
 
 :::{.fragment fragment-index=2}
 ```{python}
-plot_ts(insect, w=w_insect, highlight=[200, 6974])
+plot_ts(insect, w=w_insect, highlight=[200, 6974], axis=True)
 ```
 :::
 
 :::{.fragment fragment-index=3}
 ```{python}
-plot_ts(insect, w=w_insect, highlight=[200, 6974, 8490])
+plot_ts(insect, w=w_insect, highlight=[200, 6974, 8490], axis=True)
 ```
 :::
 ::::
@@ -113,51 +118,91 @@ plot_eucl(insect, w=w_insect, i=6974, j=8490, ci="steelblue", cj="orange")
 - The Euclidean distance measures the _similarity_ between subsequences
 - Subsequences can be seen as points in a $w$ dimensional space
 
-## Top-$k$ motifs {.center}
-
-<!-- TODO: Introduce the problem definition, with figures -->
-
-## {.center}
-
-![](imgs/steamgen-with-window.png)
-
-## {.center}
-
-![](imgs/steamgen-with-motifs.png)
-
-
-## Top-$k$ motifs {.center}
-
-Consider all pairs of (non-overlapping) subsequences of length $w$ of a given time series.
-The first $k$ by increasing distance are the top-$k$ motifs.
-
-## State of the art: Matrix Profile
+## {.smaller}
 
 <center>
-![](imgs/steamgen-with-matrix-profile.png){width="80%"}
+```{python}
+plot_ts(insect, w=w_insect, highlight=[6974, 8490], axis=True, colors=["steelblue", "orange"])
+```
 </center>
 
-::: aside
-Zimmerman et al.
-_Scaling Time Series Motif Discovery with GPUs to Break a Quintillion Pairwise Comparisons a Day and Beyond._
-SoCC19
+This timeseries is from an experiment recording the behavior of a _Circulifer tenellus_ insect.
+In particular, the subsequences below are associated with a particular behavior while feeding.
+
+<center>
+```{python}
+plot_eucl(insect, w=w_insect, i=6974, j=8490, ci="steelblue", cj="orange")
+```
+</center>
+
+
+:::{.aside}
+Example taken from
+Mueen et al. _Exact Discovery of Time Series Motifs._ **SDM** 2009
 :::
+
+## Top-$k$ motifs
+
+:::::{.columns}
+
+::::{.column width="70%"}
+
+```{python}
+pairs_occs = [
+  (6974, 8490),
+  (886, 2808),
+  (592, 2085)
+  #(50, 4050)
+]
+plot_in_context(
+  insect[:10000],
+    pairs_occs,
+    w_insect,
+    labels = insect_labels,
+    labelpos = {
+        886: insect.min(),
+        2808: insect.min(),
+    })
+```
+
+:::{#def-problem}
+Given a time series $T$ and a length
+$w$, the top-$k$ motifs are the $k$ pairs of subsequences of $T$ of length $w$
+with smallest distance, such that no two subsequences in any pair
+overlap with each other.
+:::
+
+::::
+
+::::{.column width="30%"}
+
+```{python}
+plot_catalog(insect, pairs_occs, w_insect, spacing=7, labels=insect_labels)
+```
+::::
+
+:::::
 
 ## State of the art: Matrix Profile {.smaller}
 
+::: {.callout .fragment}
+### Algorithm
 - For each subsequence, find the nearest neighbor
-- Find the pair at minimum distance
+- Find the subsequence with the closest nearest neighbor
+:::
 
-. . .
-
+::: {.callout .fragment}
+### Pros
 - Leverage the fact that consecutive subsequences share a lot of structure
 - Parallelize with many GPUs
-
-. . .
-
-- Still, it's a $\Omega(n^2)$ algorithm
-
 - Finds motifs out of 1 billion long time series in one day, using 5 GPUs 
+:::
+
+::: {.callout .fragment}
+### Cons
+- it's a $\Omega(n^2)$ algorithm, for timeseries of length $n$
+:::
+
 
 ::: aside
 Zimmerman et al.
@@ -170,7 +215,6 @@ SoCC19
 ### Goal
 
 - Find the top motifs without computing all-pairs-distances
-- We need an index
 
 :::{.fragment}
 
@@ -181,50 +225,10 @@ SoCC19
 - Curse of dimensionality: indices such as R-trees degrade to linear scans
 :::
 
-## {.center}
+## Locality Sensitive Hashing {.smaller}
 
-To address these challenges, we will use an approach based on
-Locality Sensitive Hashing (LSH)
-
-## {.smaller}
-
-:::{.absolute top=0}
-```{python}
-plot_ts(steam)
-```
-:::
-
-
-:::{.fragment .absolute top=0 fragment-index=1}
-```{python}
-plot_ts(steam, w=w, highlight=[i, j])
-plt.savefig("imgs/steam-highlight.png", dpi=300)
-```
-:::
-
-:::{.fragment .absolute top="30%" fragment-index=1}
-```{python}
-plot_projection_circle(prj, highlight=[0, 1])
-```
-:::
-
-:::{.fragment .absolute top="40%" right=0 fragment-index=2}
-We consider the
-z-normalized Euclidean distance
-$$
-d(x, y) = \sqrt{\sum_{i\in[1,w]} \left( 
-  \frac{x_i - \bar{x}}{\sigma_x}
-  -
-  \frac{y_i - \bar{y}}{\sigma_y}
-\right)^2
-}
-$$
-In this example we have a window length $w = 640$, <br />
-hence we have
-vectors in $\mathbb{R}^{640}$
-:::
-
-## {.smaller}
+Subsequences of length $w$ are points in $R^w$,
+<br/>with Euclidean distance.
 
 :::{.absolute top="20%"}
 ```{python}
@@ -239,8 +243,7 @@ plt.savefig("imgs/steam-hashes-k1-l1.png", dpi=300)
 ```
 :::
 
-:::{.absolute top=10 left="54%"}
-Locality Sensitive Hash function:
+:::{.fragment .fade-in-then-out .absolute top="20%" left="54%" fragment-index=1}
 
 - choose $r \in \mathbb{R}^+$
 - sample $\vec{a} \sim \mathcal{N}(0,1)^w$, $b \sim \mathcal{U}(0,r)$
@@ -248,15 +251,13 @@ Locality Sensitive Hash function:
 $$
 h(\vec{x}) = \left\lfloor\frac{\vec{a} \cdot \vec{x} + b}{r}\right\rfloor
 $$
-:::
 
-:::{.fragment .absolute bottom="20%" left="54%" fragment-index=1}
 The key point is that we only compute the distance 
 of
 subsequences falling <br/>into the same bucket.
 :::
 
-:::{.fragment .absolute bottom=0 left="54%" fragment-index=2}
+:::{.fragment .absolute top="25%" left="54%" fragment-index=2}
 ```{python}
 plot_cp(w, 1)
 plt.savefig("imgs/steam-cp-k1-l1.png", dpi=300)
@@ -273,9 +274,9 @@ plt.savefig("imgs/steam-hashes-k2-l1.png", dpi=300)
 :::
 
 :::{.absolute top=10 left="54%"}
-To lower the collision probability we concatenate $k$ hash functions
+To lower the collision probability we concatenate $\tau$ hash functions
 $$
-\hat{h}(\vec{x}) = \langle h_1(\vec{x}), \dots, h_k(\vec{x}) \rangle
+\hat{h}(\vec{x}) = \langle h_1(\vec{x}), \dots, h_\tau(\vec{x}) \rangle
 $$
 this makes for a better _precision_ of the index.
 :::
@@ -307,38 +308,30 @@ And to increase the _recall_ of the index we repeat $L$ times.
 
 :::{.absolute bottom=0 left="54%" fragment-index=2}
 ```{python}
-plot_success_p(w, 1, k=2, ls=[1, 10, 100], title="For k=2")
+plot_success_p(w, 1, k=2, ls=[1, 10, 100], title="For τ=2")
 plt.savefig("imgs/steam-sp.png", dpi=300)
 ```
 :::
 
+## Computing the success probability {.smaller}
 
-## A simple algorithm {.smaller}
-
-1. Build a priority queue to hold candidate motifs
-
-2. Fix $K$
-
-3. Repeat:
-  1. Sample $K$ hash functions, hash all the points, and compute the distances of pairs in the same bucket
-  2. Let $d_k$ be the distance of the $k$-th motif
-  3. If the probability of having seen all pairs <br /> at distance $\ge d_k$ is at least $1-\delta$,<br/> then **return**.
-
-:::{.absolute bottom=0 left="54%" .fragment}
-```{python}
-#plot_success_p(w, 1, k=2, ls=[1, 10, 100], title="For fixed k")
-plot_success_by_reps(w, 1, k=2, dist=1, max_reps=50)
-```
+::::{.columns}
+:::{.column}
+- Consider a distance $d$
+- Assume to have done $L$ LSH repetitions with $\tau$ concatenations
+- We can compute the probability of having seen at least once all pairs at distance $d$
 :::
 
-## Dealing with parameters
+:::{.column}
+```{python}
+plot_success_p(w, 1, k=2, ls=[100], title="For τ=2 and L=100")
+```
+:::
+::::
 
-- How to fix $K$?
-- The wrong choice could force us to run too many repetitions
+## A simple algorithm
 
-. . .
-
-- We adopt an approach that auto-tunes parameters based on the data
+![](algo.png)
 
 ## {.center}
 
@@ -437,10 +430,6 @@ $$
 pairs in expectation.
 :::
 
-::: notes
-The important thing is that Theorem #thm-motif is dependent on the distribution of distances: if we look at a lot of pairs that is because the distribution of data is difficult.
-:::
-
 
 ## Optimizations
 
@@ -475,14 +464,14 @@ $$
 ::::
 
 ::::{.column .fragment}
-![](imgs/10-motifs.png){width="100%"}
+![](imgs/10-motifs-simple.png){width="100%"}
 ::::
 
 :::::
 
 ## Scalability {.smaller}
 
-![Synthetic data, planted motifs with different relative contrasts. `SCAMP-gpu` only has one line since it is data-independent.](imgs/scalability_n.png){width="100%"}
+![Synthetic data, planted motif.](imgs/scalability_n_linear.png){width="100%"}
 
 ## Practical takeaways
 
@@ -512,8 +501,7 @@ https://github.com/Cecca/attimo
 :::{.column}
 <br/>
 <br/>
-```{python}
-#| echo: true
+```{.python}
 import pyattimo
 ts = pyattimo.load_dataset("ecg", prefix=1000000)
 motifs = pyattimo.MotifsIterator(
@@ -521,7 +509,6 @@ motifs = pyattimo.MotifsIterator(
     w=1000
 )
 m = next(motifs)
-print(m)
 ```
 :::
 ::::
@@ -530,13 +517,13 @@ print(m)
   `matteo.ceccarello@unipd.it`
 </center>
 
-## Appendix
+## Appendix {visibility="uncounted"}
 
-## Influence of the maximum number of repetitions
+## Influence of the maximum number of repetitions {visibility="uncounted"}
 
 ![Running for top-10 motifs, for different number of repetitions.](imgs/repetitions.png)
 
-## Difficult datasets {.smaller}
+## Difficult datasets {.smaller visibility="uncounted"}
 
 Data from LIGO:
 
@@ -563,7 +550,7 @@ Thanks to Eamonn Keogh and Nathan Romanelli for providing and discussing this da
 :::
 
 
-## `freezer` and the 7-th motif {.smaller}
+## `freezer` and the 7-th motif {.smaller visibility="uncounted"}
 
 7M points, window 5000
 
@@ -619,7 +606,7 @@ plt.show()
   of each subsequence, but top-k motifs would require the k-nearest neighbors
   to be maintained in the matrix profile.
 
-## Top-k and k-NN {.smaller}
+## Top-k and k-NN {.smaller visibility="uncounted"}
 
 ::::{.columns}
 :::{.column}
@@ -628,8 +615,8 @@ plt.show()
 points = np.array([
   (0,0),
   (2,0),
-  (0.3, 0.3),
-  (2-0.3, 0.3)
+  (0.8, 0.3),
+  (2-0.8, 0.3)
 ])
 shapes = [
   "o", "o",

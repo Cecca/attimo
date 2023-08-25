@@ -1,0 +1,22 @@
+\documentclass{standalone}
+
+\usepackage{algorithm2e}
+
+\newcommand{\Let}[2]{#1 $\leftarrow$ #2}
+
+\begin{document}
+\begin{algorithm}[H]
+	\KwIn{Number of concatenations $\tau$, success parameter $\delta$}
+	\BlankLine
+	\Let{$PQ$}{priority queue to hold candidate motifs}\;
+	\For{$L \leftarrow 1, 2, 3, \dots$}{
+		Sample $\tau$ hash functions and hash all the subsequences\;
+		Insert in $PQ$ all pairs with the same hash, ranked by their distance\;
+		\Let{$m_k$}{$k$-th element in $PQ$}\;
+		\Let{$d_k$}{distance of the pair of subsequences of $m_k$}\;
+		\If{we have seen all pairs at distance $\le d_k$ with probability $\ge 1-\delta$}{
+			\Return $PQ_1, PQ_2, \dots, PQ_k$\;
+		}
+	}
+\end{algorithm}
+\end{document}

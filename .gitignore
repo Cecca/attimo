@@ -30,3 +30,9 @@ poster/node_modules
 docs/poster/node_modules
 docs/presentation/__pycache__
 docs/presentation/ecg.csv.gz
+docs/presentation/index.ipynb
+docs/presentation/algo.aux
+docs/presentation/algo.fdb_latexmk
+docs/presentation/algo.fls
+docs/presentation/algo.svg
+docs/presentation/algo.synctex.gz

@@ -10,21 +10,58 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 
 
-def plot_ts(ts, w=None, highlight=[]):
+def plot_ts(ts, w=None, highlight=[], axis=False, colors=["forestgreen", "steelblue", "orange"]):
     plt.figure(figsize=(12, 2))
     color = "black" if len(highlight) == 0 else "lightgray"
     plt.plot(ts, c=color)
     old_lim = plt.gca().get_ylim()
-    colors = ["forestgreen", "steelblue", "orange"]
     for pos, color in zip(highlight, colors):
         assert w is not None
         plt.gca().add_patch(Rectangle((pos, ts.min()), w, ts.max(),
                                       facecolor='lightgrey'))
         plt.plot(np.arange(pos, pos+w), ts[pos:pos+w], c=color)
     plt.gca().set_ylim(old_lim)
-    plt.axis('off')
+    if not axis:
+        plt.axis('off')
+    plt.xlabel("time")
     plt.tight_layout()
 
+
+def plot_catalog(ts, occs, w, height=1, spacing=1, colors=plt.colormaps.get("tab10").colors, labels=None):
+    plt.figure(figsize=(3, height*2*len(occs)))
+    ax = plt.gca()
+    offset = 0
+    for pair, c in zip(occs, colors):
+        xline = w * 1.24
+        xtext = w * 1.3
+        plt.plot([xline, xline], [-offset, -offset - spacing], linewidth=0.5, color="black")
+        i, j = pair
+        d = zeucl(ts[i:i+w], ts[j:j+w])
+        plt.text(xtext, -offset - spacing/2, "{:.3}".format(d), size=13, va='center')
+        for i in pair[0:2]:
+            vals = scale(ts[i:i+w])
+            ax.plot(vals - offset, color=c)
+            if labels is not None:
+                lab = labels.get(i, "?")
+                plt.text(int(len(vals)*1.1), -offset, lab, size=16, va="center")
+            #offset += (vals.max() - vals.min()) * spacing
+            offset += spacing
+            ax.axis("off")
+
+
+def plot_in_context(ts, occs, w, colors=plt.colormaps.get("tab10").colors, labels = None, labelpos = dict()):
+    plt.figure(figsize=(10, 1.5))
+    plt.plot(ts, color="gray", alpha=0.3)
+    plt.gca().axis('off')
+    labeltop = ts.max() * 1.1
+    for pair, c in zip(occs, colors):
+        for i in pair[0:2]:
+            idx = np.arange(i, i+w)
+            plt.plot(idx, ts[idx], color=c)
+            if labels is not None:
+                pos = labelpos.get(i, labeltop)
+                lab = labels.get(i, "?")
+                plt.text(i + w/2, pos, lab, size=16, ha='center')
 
 def scale(ys):
     return (ys - ys.mean()) / ys.std()
