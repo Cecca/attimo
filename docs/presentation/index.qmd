@@ -348,14 +348,13 @@ plot_success_p(w, 1, k=2, ls=[100], title="For τ=2 and L=100")
 
 - We adopt an approach that auto tunes the parameters based on the data at hand 
 
-. . .
-
-- See the paper for details
+<!-- . . . -->
+<!-- - See the paper for details -->
 
 ## {.center visibility="visible"}
 
 - $L_{max}$ maximum number of repetitions,
-- $K_{max}$ maximum number of concatenations (e.g. 4),
+- $\tau_{max}$ maximum number of concatenations (e.g. 4),
 - $\delta$ probability parameter: succeed with probability $\ge 1-\delta$.
 
 ::::{.columns .fragment}
@@ -368,7 +367,7 @@ plot_success_p(w, 1, k=2, ls=[100], title="For τ=2 and L=100")
 :::
 ::::
 
-## {.smaller .center visibility="visible"}
+## {.smaller .center visibility="hidden"}
 
 In each iteration we compute the distance of all subsequences in the same
 bucket.
@@ -442,28 +441,28 @@ Our algorithm finds the **exact** top-$k$ motifs each with probability $\ge 1-\d
 :::{#thm-index}
 The LSH index construction takes time
 $$
-O(K_{max} \cdot \sqrt{L_{max}} n\log n)
+O(\tau_{max} \cdot \sqrt{L_{max}} n\log n)
 $$
 :::
 
 
 :::{#thm-motif}
 Let $d(m_k)$ be the distance of the $k$-th motif,
-and $i'\le K$, $j' \le L$ be the parameters used
+and $i'\le \tau_{max}$, $j' \le L_{max}$ be the parameters used
 by the optimal LSH algorithm.
 Then, the algorithm considers
 $$
 O\left(
 j'\sum_{m\in T^w\times T^w} p(d(m))^{i'}
 +
-(L-j')\sum_{m\in T^w\times T^w} p(d(m))^{i'+1}
+(L_{max}-j')\sum_{m\in T^w\times T^w} p(d(m))^{i'+1}
 \right)
 $$
 pairs in expectation.
 :::
 
 
-## Optimizations {visibility="visible"}
+## Optimizations {visibility="hidden"}
 
 - Use a trie data-structure to re-use computations across iterations at different $k$ values
 - Compute dot producs for hash values in the frequency domain (also done in some implementations of the Matrix Profile)
@@ -491,7 +490,7 @@ Find the top-10 motifs.
 
 Relative Contrast measures difficulty: higher is easier.
 $$
-RC = \frac{d_{avg}}{d_{m_k}}
+RC = \frac{d_{avg}}{d_{motif}}
 $$
 ::::
 
@@ -551,7 +550,7 @@ m = next(motifs)
 
 ## Appendix {visibility="uncounted"}
 
-## Influence of the maximum number of repetitions {visibility="uncounted"}
+## Influence of $L_{max}$ {visibility="uncounted"}
 
 ![Running for top-10 motifs, for different number of repetitions.](imgs/repetitions.png)
 
