@@ -58,7 +58,7 @@ prj = prj + np.random.normal(scale=8, size=prj.shape)
 prj = MinMaxScaler(feature_range=(-0.5, 0.5)).fit_transform(prj)
 ```
 
-## Outline {visibility="visible"}
+## Outline {visibility="hidden"}
 
 1. Problem definition
 2. State of the art
@@ -441,7 +441,7 @@ Our algorithm finds the **exact** top-$k$ motifs each with probability $\ge 1-\d
 :::{#thm-index}
 The LSH index construction takes time
 $$
-O(\tau_{max} \cdot \sqrt{L_{max}} n\log n)
+O(\tau_{max} \cdot \sqrt{L_{max}}\; n\log n)
 $$
 :::
 
@@ -513,6 +513,8 @@ $$
 
 - For time series of a few million values and above, with a not-to-small relative
   contrast, try `Attimo`
+
+- `Attimo` gives you control over the recall, and adapts to the data distribution
 :::
 
 ## References {.smaller}
