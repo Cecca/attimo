@@ -39,11 +39,7 @@ use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
 use std::ops::Range;
 use std::time::Duration;
-use std::{
-    cell::{UnsafeCell},
-    sync::Arc,
-    time::Instant,
-};
+use std::{cell::UnsafeCell, sync::Arc, time::Instant};
 
 //// ## Hash values
 //// We consider hash values made of 8-bit words. So we have to make sure, setting the
@@ -245,8 +241,8 @@ impl HashCollection {
         let l = &self.left(i, repetition);
         let r = &self.right(i, repetition);
         for h in 0..usize::div_ceil(prefix, 2) {
-            hv[2*h] = l[h];
-            hv[2*h+1] = r[h];
+            hv[2 * h] = l[h];
+            hv[2 * h + 1] = r[h];
         }
         HashValue(xxhash_rust::xxh32::xxh32(&hv[..prefix], 1234))
     }
@@ -436,6 +432,12 @@ impl Hasher {
     ) -> f64 {
         let timer = Instant::now();
 
+        // Determine a good first guess
+        let n = ts.num_subsequences();
+        let subsequence_norm = (ts.w as f64).sqrt();
+        let expected_max_dotp = subsequence_norm * (2.0 * (n as f64).ln()).sqrt();
+        let mut r = expected_max_dotp / 128.0;
+
         let mut probe_column = Vec::new();
         let mut probe_buckets = Vec::new();
 
@@ -443,7 +445,6 @@ impl Hasher {
         let mut probed_pairs = 0usize;
 
         let mut kth_upper_bound = None;
-        let mut r = 1.0;
         loop {
             // println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
@@ -478,7 +479,7 @@ impl Hasher {
                                             elapsed: None,
                                             idx_a: a_idx,
                                             idx_b: b_idx,
-                                            discovered: timer.elapsed()
+                                            discovered: timer.elapsed(),
                                         });
                                     }
                                     if topk.k_th().is_some() {

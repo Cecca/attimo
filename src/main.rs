@@ -2,7 +2,7 @@ use anyhow::Result;
 use argh::FromArgs;
 use attimo::allocator::{self, allocated, CountingAllocator};
 use attimo::load::*;
-use attimo::motifs::{motifs, Motif};
+use attimo::motifs::{motifs, Motif, MotifsEnumerator};
 use attimo::timeseries::*;
 use slog::*;
 use slog_scope::GlobalLoggerGuard;
@@ -47,6 +47,10 @@ struct Config {
     #[argh(switch)]
     /// wether meand and std computations should be at the best precision, at the expense of running time
     pub precise: bool,
+
+    #[argh(switch)]
+    /// use the enumerator
+    pub enumerator: bool,
 
     #[argh(option, default = "default_log_path()")]
     /// the file in which to store the detailed execution log
@@ -104,14 +108,30 @@ fn main() -> Result<()> {
         "time_s" => input_elapsed.as_secs_f64()
     );
 
-    let motifs = motifs(
-        &ts,
-        config.motifs,
-        config.repetitions,
-        config.failure_probability,
-        config.seed,
-        total_timer
-    );
+    let motifs: Vec<Motif> = if config.enumerator {
+        let enumerator = MotifsEnumerator::new(
+            Arc::new(ts),
+            config.motifs,
+            config.repetitions,
+            config.failure_probability,
+            config.seed,
+        );
+        enumerator
+            .map(|m| {
+                println!("Motif {:?}", m);
+                m
+            })
+            .collect()
+    } else {
+        motifs(
+            &ts,
+            config.motifs,
+            config.repetitions,
+            config.failure_probability,
+            config.seed,
+            total_timer,
+        )
+    };
 
     monitor_flag.store(false, std::sync::atomic::Ordering::SeqCst);
     monitor.join().unwrap();
