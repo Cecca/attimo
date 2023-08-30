@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use crate::timeseries::*;
 
 #[cfg(test)]
@@ -20,11 +18,6 @@ pub fn eucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
         s += d * d;
     }
     s.sqrt()
-}
-
-thread_local! {
-    static BUFFER_I: RefCell<Vec<f64>> = RefCell::new(Vec::new());
-    static BUFFER_J: RefCell<Vec<f64>> = RefCell::new(Vec::new());
 }
 
 pub fn zeucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
