@@ -367,7 +367,7 @@ plot_success_p(w, 1, k=2, ls=[100], title="For τ=2 and L=100")
 :::
 ::::
 
-## {.smaller .center visibility="hidden"}
+## {.smaller .center visibility="visible"}
 
 In each iteration we compute the distance of all subsequences in the same
 bucket.
