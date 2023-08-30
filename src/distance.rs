@@ -71,7 +71,7 @@ pub fn zdot(a: &[f64], ma: f64, sda: f64, b: &[f64], mb: f64, sdb: f64) -> f64 {
     if sda == 0.0 || sdb == 0.0 {
         return f64::NAN;
     }
-    use packed_simd::f64x8;
+    use std::simd::f64x8;
     let ac = a.chunks_exact(8);
     let bc = b.chunks_exact(8);
     let rem = ac
@@ -83,17 +83,19 @@ pub fn zdot(a: &[f64], ma: f64, sda: f64, b: &[f64], mb: f64, sdb: f64) -> f64 {
     let ma = f64x8::splat(ma);
     let mb = f64x8::splat(mb);
     let part = ac
-        .map(f64x8::from_slice_unaligned)
-        .zip(bc.map(f64x8::from_slice_unaligned))
+        .map(f64x8::from_slice)
+        .zip(bc.map(f64x8::from_slice))
         .map(|(a, b)| (a - ma) * (b - mb))
         .sum::<f64x8>()
-        .sum() as f64;
+        .as_array()
+        .iter()
+        .sum::<f64>();
     (part + rem) / (sda * sdb)
 }
 
 #[inline]
 pub fn dot(a: &[f64], b: &[f64]) -> f64 {
-    use packed_simd::f64x8;
+    use std::simd::f64x8;
     let ac = a.chunks_exact(8);
     let bc = b.chunks_exact(8);
     let rem = ac
@@ -103,11 +105,13 @@ pub fn dot(a: &[f64], b: &[f64]) -> f64 {
         .map(|(a, b)| a * b)
         .sum::<f64>() as f64;
     let part = ac
-        .map(f64x8::from_slice_unaligned)
-        .zip(bc.map(f64x8::from_slice_unaligned))
+        .map(f64x8::from_slice)
+        .zip(bc.map(f64x8::from_slice))
         .map(|(a, b)| a * b)
         .sum::<f64x8>()
-        .sum() as f64;
+        .as_array()
+        .iter()
+        .sum::<f64>();
     part + rem
 }
 

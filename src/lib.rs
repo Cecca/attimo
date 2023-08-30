@@ -1,6 +1,7 @@
 #![feature(allocator_api)]
 #![feature(is_sorted)]
 #![feature(string_remove_matches)]
+#![feature(portable_simd)]
 #![feature(int_roundings)]
 
 pub mod allocator;

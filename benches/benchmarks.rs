@@ -7,8 +7,8 @@ use attimo::timeseries::FFTData;
 use attimo::{lsh::*, timeseries::WindowedTimeseries};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use rand::{Rng, SeedableRng};
-use rand_distr::{Uniform};
-use rand_xoshiro::{Xoroshiro128Plus};
+use rand_distr::Uniform;
+use rand_xoshiro::Xoroshiro128Plus;
 
 pub fn bench_construct_ts(c: &mut Criterion) {
     use rand::prelude::*;
@@ -326,14 +326,13 @@ pub fn bench_first_collision(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    bench_sliding_dot_product,
-    bench_construct_ts,
-    bench_hash_ts,
+    // bench_sliding_dot_product,
+    // bench_construct_ts,
+    // bench_hash_ts,
     // bench_sort_usize,
     // bench_sort_u8,
-    bench_sort_hashes,
-    bench_zdot,
-    bench_first_collision,
-    bench_zeucl
+    // bench_sort_hashes,
+    bench_zdot // bench_first_collision,
+               // bench_zeucl
 );
 criterion_main!(benches);
