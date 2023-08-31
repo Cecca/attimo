@@ -584,10 +584,7 @@ pub struct MotifsEnumerator {
     repetitions: usize,
     delta: f64,
     exclusion_zone: usize,
-    hasher: Arc<Hasher>,
-    pools: Arc<HashCollection>,
-    column_buffer: Vec<(HashValue, u32)>,
-    buckets: Vec<Range<usize>>,
+    tables: LSHTables,
     tl_top: ThreadLocal<RefCell<TopK>>,
     /// the current repetition
     rep: usize,
@@ -608,23 +605,16 @@ impl MotifsEnumerator {
         let start = Instant::now();
         let exclusion_zone = ts.w;
         let fft_data = FFTData::new(&ts);
-
         let hasher_width = Hasher::estimate_width(&ts, &fft_data, max_k, None, seed);
         info!("Computed hasher width"; "hasher_width" => hasher_width);
 
         info!("hash computation"; "tag" => "phase");
-        let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
-        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
-        let pools = Arc::new(pools);
+        let tables = LSHTables::from_ts(&ts, repetitions, hasher_width, &fft_data, seed);
         drop(fft_data);
 
         let topk = TopK::new(max_k, exclusion_zone);
 
         info!("tries exploration"; "tag" => "phase");
-        // This vector holds the (sorted) hashed subsequences, and their index
-        let column_buffer = Vec::new();
-        // This vector holds the boundaries between buckets. We reuse the allocations
-        let buckets = Vec::new();
         let tl_top = ThreadLocal::new();
 
         Self {
@@ -637,10 +627,7 @@ impl MotifsEnumerator {
             repetitions,
             delta,
             exclusion_zone,
-            hasher,
-            pools,
-            column_buffer,
-            buckets,
+            tables,
             tl_top,
             rep: 0,
             depth: K,
@@ -687,7 +674,7 @@ impl MotifsEnumerator {
     //// Find the level for which the given distance has a good probability of being
     //// found withing the allowed number of repetitions
     fn level_for_distance(&self, d: f64, mut prefix: usize, delta: f64) -> usize {
-        let p = self.hasher.collision_probability_at(d);
+        let p = self.tables.collision_probability_at(d);
         let initial = prefix as usize;
         while prefix > 0 {
             for rep in 0..self.repetitions {
@@ -719,92 +706,40 @@ impl MotifsEnumerator {
             assert!(self.depth > 0);
             assert!(self.rep < self.repetitions);
 
-            // Set up buckets for the current repetition
-            self.pools.group_subsequences(
-                self.depth,
-                self.rep,
-                self.exclusion_zone,
-                &mut self.column_buffer,
-                &mut self.buckets,
-            );
-            let n_buckets = self.buckets.len();
-            let chunk_size = std::cmp::max(1, n_buckets / (4 * rayon::current_num_threads()));
+            eprintln!("Repetition {} at depth {}", self.rep, self.depth);
+            // Set up tables for the current repetition
+            self.tables.shorten_prefix(self.depth);
 
             // counters for profiling
             let rep_cnt_dists = AtomicUsize::new(0);
-            let spurious_collisions_cnt = AtomicUsize::new(0);
             let rep_candidate_pairs = AtomicUsize::new(0);
 
-            (0..n_buckets / chunk_size)
-                .into_par_iter()
-                .for_each(|chunk_i| {
-                    // let tl_top = tl_top.get_or(|| RefCell::new(TopK::new(topk, exclusion_zone)));
-                    let tl_top = self.tl_top.get_or(|| RefCell::new(self.topk.clone()));
+            // TODO: do num_threads repetitions in parallel
 
-                    // counters
-                    let mut cands = 0;
-                    let mut dists = 0;
-                    let mut spurious = 0;
+            // counters
+            let mut cands = 0;
+            let mut dists = 0;
+            let tl_top = self.tl_top.get_or(|| RefCell::new(self.topk.clone()));
+            self.tables[self.rep].for_each_collision(self.exclusion_zone, |a_idx, b_idx| {
+                cands += 1;
 
-                    for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
-                        let bucket = &self.column_buffer[self.buckets[i].clone()];
+                let d = zeucl(&self.ts, a_idx, b_idx);
+                if d.is_finite() {
+                    dists += 1;
 
-                        for (_, a_idx) in bucket.iter() {
-                            let a_idx = *a_idx as usize;
-                            // let a_already_checked = rep_bounds[a_idx].clone();
-                            // let a_hash_idx = hash_range.start + a_offset;
-                            for (_, b_idx) in bucket.iter() {
-                                let b_idx = *b_idx as usize;
-                                //// Here we handle trivial matches: we don't consider a pair if the difference between
-                                //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
-                                if a_idx + self.exclusion_zone < b_idx {
-                                    cands += 1;
-
-                                    //// We only process the pair if this is the first repetition in which
-                                    //// they collide. We get this information from the pool of bits
-                                    //// from which hash values for all repetitions are extracted.
-                                    if let Some(first_colliding_repetition) =
-                                        self.pools.first_collision(a_idx, b_idx, self.depth)
-                                    {
-                                        //// This is the first collision in this iteration, _and_ the pair didn't collide
-                                        //// at a deeper level.
-                                        if first_colliding_repetition == self.rep
-                                            && self
-                                                .previous_depth
-                                                .map(|d| {
-                                                    self.pools
-                                                        .first_collision(a_idx, b_idx, d)
-                                                        .is_none()
-                                                })
-                                                .unwrap_or(true)
-                                        {
-                                            //// After computing the distance between the two subsequences,
-                                            //// we try to insert the pair in the top data structure
-                                            let d = zeucl(&self.ts, a_idx, b_idx);
-                                            if d.is_finite() {
-                                                dists += 1;
-
-                                                let m = Motif {
-                                                    idx_a: a_idx as usize,
-                                                    idx_b: b_idx as usize,
-                                                    distance: d,
-                                                    elapsed: None,
-                                                    discovered: self.start.elapsed(),
-                                                };
-                                                tl_top.borrow_mut().insert(m);
-                                            }
-                                        }
-                                    } else {
-                                        spurious += 1;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    rep_candidate_pairs.fetch_add(cands, Ordering::SeqCst);
-                    rep_cnt_dists.fetch_add(dists, Ordering::SeqCst);
-                    spurious_collisions_cnt.fetch_add(spurious, Ordering::SeqCst);
-                });
+                    let m = Motif {
+                        idx_a: a_idx as usize,
+                        idx_b: b_idx as usize,
+                        distance: d,
+                        elapsed: None,
+                        discovered: self.start.elapsed(),
+                    };
+                    tl_top.borrow_mut().insert(m);
+                }
+            });
+            eprintln!("Candidates evaluated {}", cands);
+            rep_candidate_pairs.fetch_add(cands, Ordering::SeqCst);
+            rep_cnt_dists.fetch_add(dists, Ordering::SeqCst);
 
             // Add to the output all the new top pairs that have been found
             let mut tmp_top = TopK::new(self.max_k, self.exclusion_zone);
@@ -816,16 +751,15 @@ impl MotifsEnumerator {
             // Confirm the pairs that can be confirmed in this iteration
             let elapsed = self.start.elapsed();
             let depth = self.depth;
-            let previous_depth = self.previous_depth;
             let rep = self.rep;
-            let repetitions = self.repetitions;
             let delta = self.delta;
-            let hasher = Arc::clone(&self.hasher);
+            let tables = &self.tables;
             let mut buf = Vec::new();
             self.topk.for_each(|m| {
                 if m.elapsed.is_none() {
-                    let p = hasher.collision_probability_at(m.distance);
-                    if Self::stopping_condition(p, depth, previous_depth, rep, repetitions, delta) {
+                    let fp = tables.failure_probability(m.distance, rep, depth);
+                    eprintln!("Failure probability at {}: {}", m.distance, fp);
+                    if fp <= delta {
                         m.elapsed.replace(elapsed);
                         buf.push(m.clone());
                     }

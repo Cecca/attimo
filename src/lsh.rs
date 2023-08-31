@@ -30,7 +30,7 @@ use crate::motifs::Motif;
 use crate::{alloc_cnt, allocator::*};
 // TODO Remove this dependency
 use crate::sort::*;
-use crate::timeseries::{FFTData, WindowedTimeseries};
+use crate::timeseries::{FFTData, PrettyBytes, WindowedTimeseries};
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -249,7 +249,7 @@ impl HashCollection {
     }
 
     #[cfg(test)]
-    pub fn extended_hash_value(&self, i: usize, repetition: usize) -> [u8; 32] {
+    pub fn extended_hash_value(&self, i: usize, repetition: usize) -> [u8; K] {
         let mut output = [0; K];
         let l = &self.left(i, repetition);
         let r = &self.right(i, repetition);
@@ -627,7 +627,7 @@ impl Hasher {
     }
 }
 
-struct Table {
+pub struct Table {
     hashes: Vec<HashString>,
     indices: Vec<usize>,
     /// The table is navigable by considering groups all the elements with hashes that share this
@@ -672,7 +672,10 @@ impl Table {
     }
 
     pub fn shorten_prefix(&mut self, new_prefix: usize) {
-        assert!(new_prefix < self.prefix_length);
+        assert!(new_prefix <= self.prefix_length);
+        if new_prefix == self.prefix_length {
+            return;
+        }
 
         assert_eq!(self.breakpoints[0], 0);
         assert_eq!(*self.breakpoints.last().unwrap(), self.hashes.len());
@@ -796,134 +799,6 @@ impl Table {
     }
 }
 
-/// A collection of segments of lexicograpyically sorted elements, with the invariant
-/// that all elements in the same range have the same prefix of the given number of bits.
-pub struct TableSegments<'table> {
-    table: &'table Table,
-    prefix_length: usize,
-    /// The breakpoints between one segment and the other
-    breakpoints: Vec<usize>,
-}
-
-impl<'table> TableSegments<'table> {
-    fn new(table: &'table Table) -> Self {
-        let prefix_length = 32;
-        let mut breakpoints = Vec::new();
-
-        let mut b = 0;
-        breakpoints.push(b);
-        while b < table.hashes.len() {
-            let needle = &table.hashes[b];
-            b += table.hashes[b..].partition_point(|h| h == needle);
-            breakpoints.push(b);
-        }
-        assert_eq!(b, table.hashes.len());
-
-        Self {
-            table,
-            prefix_length,
-            breakpoints,
-        }
-    }
-
-    pub fn for_each_segment<F: FnMut(&[usize])>(&self, mut f: F) {
-        let mut b_start = 0;
-
-        while b_start < self.breakpoints.len() - 1 {
-            let mut b_end = b_start + 1;
-            while b_end < self.breakpoints.len() - 1
-                && self.breakpoints[b_end] < self.table.hashes.len()
-                && self.table.hashes[self.breakpoints[b_end]].prefix(self.prefix_length)
-                    == self.table.hashes[self.breakpoints[b_start]].prefix(self.prefix_length)
-            {
-                b_end += 1;
-            }
-            let start = self.breakpoints[b_start];
-            let end = self.breakpoints[b_end];
-            #[cfg(test)]
-            {
-                for a in start..end {
-                    assert_eq!(
-                        self.table.hashes[a].prefix(self.prefix_length),
-                        self.table.hashes[start].prefix(self.prefix_length)
-                    );
-                }
-            }
-
-            f(&self.table.indices[start..end]);
-            b_start = b_end;
-        }
-    }
-
-    pub fn for_each_neighboring_segments<F: FnMut(&[usize], &[usize])>(&self, mut f: F) {
-        let mut b_start = 0;
-
-        while b_start < self.breakpoints.len() - 1 {
-            let mut b_end = b_start + 1;
-            while b_end < self.breakpoints.len() - 1
-                && self.breakpoints[b_end] < self.table.hashes.len()
-                && self.table.hashes[self.breakpoints[b_end]].prefix(self.prefix_length)
-                    == self.table.hashes[self.breakpoints[b_start]].prefix(self.prefix_length)
-            {
-                b_end += 1;
-            }
-
-            let breaks = &self.breakpoints[b_start..=b_end];
-            for i in 0..(breaks.len() - 1) {
-                for j in (i + 1)..(breaks.len() - 1) {
-                    let range_a = breaks[i]..breaks[i + 1];
-                    let range_b = breaks[j]..breaks[j + 1];
-                    #[cfg(test)]
-                    {
-                        for a in range_a.clone() {
-                            for b in range_b.clone() {
-                                assert_eq!(
-                                    self.table.hashes[a].prefix(self.prefix_length),
-                                    self.table.hashes[b].prefix(self.prefix_length)
-                                );
-                            }
-                        }
-                    }
-
-                    f(&self.table.indices[range_a], &self.table.indices[range_b]);
-                }
-            }
-            b_start = b_end;
-        }
-    }
-
-    pub fn shorten_prefix(&mut self, new_prefix: usize) {
-        assert!(new_prefix < self.prefix_length);
-
-        assert_eq!(self.breakpoints[0], 0);
-        assert_eq!(*self.breakpoints.last().unwrap(), self.table.hashes.len());
-
-        let prefix_length = self.prefix_length;
-        let mut last_hash = &self.table.hashes[0];
-
-        let hashes = &self.table.hashes;
-
-        // do cleanup of breakpoints already sharing the (now old) prefix
-        self.breakpoints.retain(|b| {
-            if *b == 0 || *b == hashes.len() {
-                // keep the first and the last
-                return true;
-            }
-            let keep = (hashes[*b].prefix(prefix_length)) != (last_hash.prefix(prefix_length));
-            last_hash = &hashes[*b];
-            keep
-        });
-
-        // only *now* set the prefix length to the requested one.
-        // This leaves multiple segments with the same prefix, allowing
-        // to avoid visiting the same pairs over and over again.
-        self.prefix_length = new_prefix;
-
-        assert_eq!(self.breakpoints[0], 0);
-        assert_eq!(*self.breakpoints.last().unwrap(), self.table.hashes.len());
-    }
-}
-
 struct LSHTablesBuilder<'ts> {
     ts: &'ts WindowedTimeseries,
     width: f64,
@@ -959,14 +834,13 @@ impl<'ts> LSHTablesBuilder<'ts> {
         }
     }
 
-    fn build(mut self) -> LSHTables {
+    fn build(mut self, fft_data: &FFTData) -> LSHTables {
         let n = self.ts.num_subsequences();
         let ts = &self.ts;
-        let fft_data = FFTData::new(ts);
 
-        let hashers = self.hashers.chunks_exact(K_HALF);
+        let hashers = self.hashers.par_chunks_exact(K_HALF);
         assert!(hashers.remainder().is_empty());
-        let half_hashes = self.half_hashes.chunks_exact_mut(K_HALF * n);
+        let half_hashes = self.half_hashes.par_chunks_exact_mut(K_HALF * n);
         eprintln!("Compute half-width hashes");
         let start = Instant::now();
         half_hashes.zip(hashers).for_each(|(hashes, hashers)| {
@@ -983,7 +857,11 @@ impl<'ts> LSHTablesBuilder<'ts> {
         // let mut tables = Vec::with_capacity(self.repetitions);
 
         let scratch = ThreadLocal::new();
-        eprintln!("setup sorted tables");
+        let needed_memory = K * self.repetitions * n;
+        eprintln!(
+            "setup sorted tables (required {})",
+            PrettyBytes(needed_memory)
+        );
 
         let start = Instant::now();
         let tables = (0..self.repetitions)
@@ -1029,14 +907,15 @@ pub struct LSHTables {
 }
 
 impl LSHTables {
-    pub fn from_ts<R: Rng>(
+    pub fn from_ts(
         ts: &WindowedTimeseries,
         repetitions: usize,
         width: f64,
+        fft_data: &FFTData,
         seed: u64,
     ) -> Self {
         let builder = LSHTablesBuilder::new(ts, ts.w, repetitions, width, seed);
-        builder.build()
+        builder.build(fft_data)
     }
 
     /// The collision probability of a single hash function at the given z-normalized Euclidean
@@ -1054,27 +933,27 @@ impl LSHTables {
         &self,
         zeucl_dist: f64,
         reps: usize,
-        bits: usize,
+        hash_prefix: usize,
     ) -> f64 {
         let p = self.collision_probability_at(zeucl_dist);
 
-        let cur_failure = (1.0 - p.powi(bits as i32)).powi(reps as i32 + 1);
+        let cur_failure = (1.0 - p.powi(hash_prefix as i32)).powi(reps as i32 + 1);
         let prev_failure =
-            (1.0 - p.powi(bits as i32 + 1)).powi((self.repetitions - reps + 1) as i32);
+            (1.0 - p.powi(hash_prefix as i32 + 1)).powi((self.repetitions - reps + 1) as i32);
         return cur_failure * prev_failure;
     }
 
-    pub fn failure_probability(&self, dist: f64, reps: usize, bits: usize) -> f64 {
+    pub fn failure_probability(&self, dist: f64, reps: usize, hash_prefix: usize) -> f64 {
         let p = self.collision_probability_at(dist);
 
         // TODO: precompute all these numbers
-        let cur_left_bits = (bits as f64 / 2.0).floor() as i32;
-        let cur_right_bits = (bits as f64 / 2.0).ceil() as i32;
-        assert_eq!(cur_left_bits + cur_right_bits, bits as i32);
+        let cur_left_bits = (hash_prefix as f64 / 2.0).floor() as i32;
+        let cur_right_bits = (hash_prefix as f64 / 2.0).ceil() as i32;
+        assert_eq!(cur_left_bits + cur_right_bits, hash_prefix as i32);
 
-        let prev_left_bits = ((bits + 1) as f64 / 2.0).floor() as i32;
-        let prev_right_bits = ((bits + 1) as f64 / 2.0).ceil() as i32;
-        assert_eq!(prev_left_bits + prev_right_bits, bits as i32 + 1);
+        let prev_left_bits = ((hash_prefix + 1) as f64 / 2.0).floor() as i32;
+        let prev_right_bits = ((hash_prefix + 1) as f64 / 2.0).ceil() as i32;
+        assert_eq!(prev_left_bits + prev_right_bits, hash_prefix as i32 + 1);
         assert!(prev_left_bits >= cur_left_bits);
         assert!(prev_right_bits >= cur_right_bits);
 
@@ -1102,6 +981,19 @@ impl LSHTables {
             * (1.0 - collide_low_left_prev * collide_low_right_prev)
             * (1.0 - collide_up_left_prev * collide_low_right_prev)
             * (1.0 - collide_low_left_prev * collide_up_right_prev)
+    }
+
+    pub fn shorten_prefix(&mut self, new_prefix: usize) {
+        for table in self.tables.iter_mut() {
+            table.shorten_prefix(new_prefix);
+        }
+    }
+}
+
+impl std::ops::Index<usize> for LSHTables {
+    type Output = Table;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.tables[index]
     }
 }
 
