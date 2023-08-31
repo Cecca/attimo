@@ -18,9 +18,9 @@ use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::ops::Range;
-use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use thread_local::ThreadLocal;
@@ -468,7 +468,7 @@ fn explore_tries(
                                                     idx_b: b_idx as usize,
                                                     distance: d,
                                                     elapsed: None,
-                                                    discovered: start.elapsed()
+                                                    discovered: start.elapsed(),
                                                 };
                                                 tl_top.borrow_mut().insert(m);
                                             }
@@ -789,7 +789,7 @@ impl MotifsEnumerator {
                                                     idx_b: b_idx as usize,
                                                     distance: d,
                                                     elapsed: None,
-                                                    discovered: self.start.elapsed()
+                                                    discovered: self.start.elapsed(),
                                                 };
                                                 tl_top.borrow_mut().insert(m);
                                             }

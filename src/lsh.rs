@@ -37,9 +37,11 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
+use std::cell::RefCell;
 use std::ops::Range;
 use std::time::Duration;
 use std::{cell::UnsafeCell, sync::Arc, time::Instant};
+use thread_local::ThreadLocal;
 
 //// ## Hash values
 //// We consider hash values made of 8-bit words. So we have to make sure, setting the
@@ -54,6 +56,25 @@ use std::{cell::UnsafeCell, sync::Arc, time::Instant};
 pub const K: usize = 32;
 pub const K_HALF: usize = K / 2;
 
+/// A string of hash values
+#[derive(PartialEq, PartialOrd, Eq, Ord, Clone)]
+pub struct HashString([u8; K]);
+impl HashString {
+    fn prefix(&self, l: usize) -> &[u8] {
+        &self.0[..l]
+    }
+    fn new(left: &[u8], right: &[u8]) -> Self {
+        assert_eq!(left.len(), K_HALF);
+        assert_eq!(right.len(), K_HALF);
+        let mut h = [0u8; K];
+        for i in 0..K_HALF {
+            h[2 * i] = left[i];
+            h[2 * i + 1] = right[i];
+        }
+        Self(h)
+    }
+}
+
 //// That said, here is the definition of a hash value, with several
 //// utility implementations following.
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Default)]
@@ -66,6 +87,17 @@ impl GetByte for HashValue {
     #[inline(always)]
     fn get_byte(&self, i: usize) -> u8 {
         (self.0 >> (8 * (std::mem::size_of::<u32>() - i - 1)) & 0xFF) as u8
+    }
+}
+
+fn get_minimal_index_pair(idx: usize) -> (usize, usize) {
+    let sqrt = (idx as f64).sqrt() as usize;
+    if idx == sqrt * sqrt + 2 * sqrt {
+        (sqrt, sqrt)
+    } else if idx >= sqrt * sqrt + sqrt {
+        (sqrt, idx - (sqrt * sqrt + sqrt))
+    } else {
+        (idx - sqrt * sqrt, sqrt)
     }
 }
 
@@ -367,6 +399,55 @@ impl HashCollection {
     }
 }
 
+#[derive(Clone)]
+pub struct EuclHasher {
+    pub dimension: usize,
+    /// The quantization width
+    width: f64,
+    projection_direction: Vec<f64>,
+    shift: f64,
+}
+
+impl EuclHasher {
+    pub fn new<R: Rng>(dimension: usize, width: f64, rng: &mut R) -> Self {
+        let normal = Normal::new(0.0, 1.0).expect("problem instantiating normal distribution");
+        let uniform = Uniform::new(0.0, width);
+        let projection_direction = rng.sample_iter(normal).take(dimension).collect();
+        let shift = rng.sample(uniform);
+
+        Self {
+            dimension,
+            width,
+            projection_direction,
+            shift,
+        }
+    }
+
+    pub fn hash_all<F: FnMut(usize, f64)>(
+        &self,
+        ts: &WindowedTimeseries,
+        fft_data: &FFTData,
+        mut callback: F,
+    ) -> usize {
+        let shift = self.shift;
+        let mut oob = 0; // count how many out of bounds we have
+        ts.znormalized_sliding_dot_product_for_each(
+            fft_data,
+            &self.projection_direction,
+            |i, mut h| {
+                h = (h + shift) / self.width;
+                //// Count if the value is out of bounds to be repre
+                if h.abs() > 128.0 {
+                    oob += 1;
+                    h = h.signum() * 127.0;
+                }
+                callback(i, h);
+            },
+        );
+        oob
+    }
+}
+
 /// Data structure to do LSH of subsequences.
 #[derive(Clone)]
 pub struct Hasher {
@@ -543,6 +624,484 @@ impl Hasher {
             callback(i, h);
         });
         oob
+    }
+}
+
+struct Table {
+    hashes: Vec<HashString>,
+    indices: Vec<usize>,
+    /// The table is navigable by considering groups all the elements with hashes that share this
+    /// prefix length.
+    prefix_length: usize,
+    /// The breakpoints between one segment of same-prefix elements and the other
+    breakpoints: Vec<usize>,
+}
+
+impl Table {
+    fn new<I: IntoIterator<Item = (HashString, usize)>>(
+        n: usize,
+        iter_elements: I,
+        scratch: &mut Vec<(HashString, usize)>,
+    ) -> Self {
+        scratch.clear();
+        scratch.reserve_exact(n);
+        for pair in iter_elements {
+            scratch.push(pair);
+        }
+        scratch.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let (hashes, indices): (Vec<HashString>, Vec<usize>) = scratch.drain(..).unzip();
+        debug_assert!(hashes.is_sorted());
+
+        let prefix_length = K;
+        let mut breakpoints = Vec::new();
+
+        let mut b = 0;
+        breakpoints.push(b);
+        while b < hashes.len() {
+            let needle = &hashes[b];
+            b += hashes[b..].partition_point(|h| h == needle);
+            breakpoints.push(b);
+        }
+
+        Self {
+            hashes,
+            indices,
+            prefix_length,
+            breakpoints,
+        }
+    }
+
+    pub fn shorten_prefix(&mut self, new_prefix: usize) {
+        assert!(new_prefix < self.prefix_length);
+
+        assert_eq!(self.breakpoints[0], 0);
+        assert_eq!(*self.breakpoints.last().unwrap(), self.hashes.len());
+
+        let prefix_length = self.prefix_length;
+        let mut last_hash = &self.hashes[0];
+
+        let hashes = &self.hashes;
+
+        // do cleanup of breakpoints already sharing the (now old) prefix
+        self.breakpoints.retain(|b| {
+            if *b == 0 || *b == hashes.len() {
+                // keep the first and the last
+                return true;
+            }
+            let keep = (hashes[*b].prefix(prefix_length)) != (last_hash.prefix(prefix_length));
+            last_hash = &hashes[*b];
+            keep
+        });
+
+        // only *now* set the prefix length to the requested one.
+        // This leaves multiple segments with the same prefix, allowing
+        // to avoid visiting the same pairs over and over again.
+        self.prefix_length = new_prefix;
+
+        assert_eq!(self.breakpoints[0], 0);
+        assert_eq!(*self.breakpoints.last().unwrap(), self.hashes.len());
+    }
+
+    fn for_each_segment<F: FnMut(&[usize])>(&self, mut f: F) {
+        let mut b_start = 0;
+
+        while b_start < self.breakpoints.len() - 1 {
+            let mut b_end = b_start + 1;
+            while b_end < self.breakpoints.len() - 1
+                && self.breakpoints[b_end] < self.hashes.len()
+                && self.hashes[self.breakpoints[b_end]].prefix(self.prefix_length)
+                    == self.hashes[self.breakpoints[b_start]].prefix(self.prefix_length)
+            {
+                b_end += 1;
+            }
+            let start = self.breakpoints[b_start];
+            let end = self.breakpoints[b_end];
+            #[cfg(test)]
+            {
+                for a in start..end {
+                    assert_eq!(
+                        self.hashes[a].prefix(self.prefix_length),
+                        self.hashes[start].prefix(self.prefix_length)
+                    );
+                }
+            }
+
+            f(&self.indices[start..end]);
+            b_start = b_end;
+        }
+    }
+
+    fn for_each_neighboring_segments<F: FnMut(&[usize], &[usize])>(&self, mut f: F) {
+        let mut b_start = 0;
+
+        while b_start < self.breakpoints.len() - 1 {
+            let mut b_end = b_start + 1;
+            while b_end < self.breakpoints.len() - 1
+                && self.breakpoints[b_end] < self.hashes.len()
+                && self.hashes[self.breakpoints[b_end]].prefix(self.prefix_length)
+                    == self.hashes[self.breakpoints[b_start]].prefix(self.prefix_length)
+            {
+                b_end += 1;
+            }
+
+            let breaks = &self.breakpoints[b_start..=b_end];
+            for i in 0..(breaks.len() - 1) {
+                for j in (i + 1)..(breaks.len() - 1) {
+                    let range_a = breaks[i]..breaks[i + 1];
+                    let range_b = breaks[j]..breaks[j + 1];
+                    #[cfg(test)]
+                    {
+                        for a in range_a.clone() {
+                            for b in range_b.clone() {
+                                assert_eq!(
+                                    self.hashes[a].prefix(self.prefix_length),
+                                    self.hashes[b].prefix(self.prefix_length)
+                                );
+                            }
+                        }
+                    }
+
+                    f(&self.indices[range_a], &self.indices[range_b]);
+                }
+            }
+            b_start = b_end;
+        }
+    }
+
+    pub fn for_each_collision<F: FnMut(usize, usize)>(&self, exclusion_zone: usize, mut f: F) {
+        if self.prefix_length == K {
+            // We are at the deepest level of the tries
+            self.for_each_segment(|segment| {
+                for ii in 0..segment.len() {
+                    let i = segment[ii];
+                    for jj in (ii + 1)..segment.len() {
+                        let j = segment[jj];
+                        if i.max(j) - i.min(j) >= exclusion_zone {
+                            f(i.min(j), i.max(j));
+                        }
+                    }
+                }
+            })
+        } else {
+            self.for_each_neighboring_segments(|seg1, seg2| {
+                for i in seg1 {
+                    for j in seg2 {
+                        if i.max(j) - i.min(j) >= exclusion_zone {
+                            f(*i.min(j), *i.max(j));
+                        }
+                    }
+                }
+            })
+        }
+    }
+}
+
+/// A collection of segments of lexicograpyically sorted elements, with the invariant
+/// that all elements in the same range have the same prefix of the given number of bits.
+pub struct TableSegments<'table> {
+    table: &'table Table,
+    prefix_length: usize,
+    /// The breakpoints between one segment and the other
+    breakpoints: Vec<usize>,
+}
+
+impl<'table> TableSegments<'table> {
+    fn new(table: &'table Table) -> Self {
+        let prefix_length = 32;
+        let mut breakpoints = Vec::new();
+
+        let mut b = 0;
+        breakpoints.push(b);
+        while b < table.hashes.len() {
+            let needle = &table.hashes[b];
+            b += table.hashes[b..].partition_point(|h| h == needle);
+            breakpoints.push(b);
+        }
+        assert_eq!(b, table.hashes.len());
+
+        Self {
+            table,
+            prefix_length,
+            breakpoints,
+        }
+    }
+
+    pub fn for_each_segment<F: FnMut(&[usize])>(&self, mut f: F) {
+        let mut b_start = 0;
+
+        while b_start < self.breakpoints.len() - 1 {
+            let mut b_end = b_start + 1;
+            while b_end < self.breakpoints.len() - 1
+                && self.breakpoints[b_end] < self.table.hashes.len()
+                && self.table.hashes[self.breakpoints[b_end]].prefix(self.prefix_length)
+                    == self.table.hashes[self.breakpoints[b_start]].prefix(self.prefix_length)
+            {
+                b_end += 1;
+            }
+            let start = self.breakpoints[b_start];
+            let end = self.breakpoints[b_end];
+            #[cfg(test)]
+            {
+                for a in start..end {
+                    assert_eq!(
+                        self.table.hashes[a].prefix(self.prefix_length),
+                        self.table.hashes[start].prefix(self.prefix_length)
+                    );
+                }
+            }
+
+            f(&self.table.indices[start..end]);
+            b_start = b_end;
+        }
+    }
+
+    pub fn for_each_neighboring_segments<F: FnMut(&[usize], &[usize])>(&self, mut f: F) {
+        let mut b_start = 0;
+
+        while b_start < self.breakpoints.len() - 1 {
+            let mut b_end = b_start + 1;
+            while b_end < self.breakpoints.len() - 1
+                && self.breakpoints[b_end] < self.table.hashes.len()
+                && self.table.hashes[self.breakpoints[b_end]].prefix(self.prefix_length)
+                    == self.table.hashes[self.breakpoints[b_start]].prefix(self.prefix_length)
+            {
+                b_end += 1;
+            }
+
+            let breaks = &self.breakpoints[b_start..=b_end];
+            for i in 0..(breaks.len() - 1) {
+                for j in (i + 1)..(breaks.len() - 1) {
+                    let range_a = breaks[i]..breaks[i + 1];
+                    let range_b = breaks[j]..breaks[j + 1];
+                    #[cfg(test)]
+                    {
+                        for a in range_a.clone() {
+                            for b in range_b.clone() {
+                                assert_eq!(
+                                    self.table.hashes[a].prefix(self.prefix_length),
+                                    self.table.hashes[b].prefix(self.prefix_length)
+                                );
+                            }
+                        }
+                    }
+
+                    f(&self.table.indices[range_a], &self.table.indices[range_b]);
+                }
+            }
+            b_start = b_end;
+        }
+    }
+
+    pub fn shorten_prefix(&mut self, new_prefix: usize) {
+        assert!(new_prefix < self.prefix_length);
+
+        assert_eq!(self.breakpoints[0], 0);
+        assert_eq!(*self.breakpoints.last().unwrap(), self.table.hashes.len());
+
+        let prefix_length = self.prefix_length;
+        let mut last_hash = &self.table.hashes[0];
+
+        let hashes = &self.table.hashes;
+
+        // do cleanup of breakpoints already sharing the (now old) prefix
+        self.breakpoints.retain(|b| {
+            if *b == 0 || *b == hashes.len() {
+                // keep the first and the last
+                return true;
+            }
+            let keep = (hashes[*b].prefix(prefix_length)) != (last_hash.prefix(prefix_length));
+            last_hash = &hashes[*b];
+            keep
+        });
+
+        // only *now* set the prefix length to the requested one.
+        // This leaves multiple segments with the same prefix, allowing
+        // to avoid visiting the same pairs over and over again.
+        self.prefix_length = new_prefix;
+
+        assert_eq!(self.breakpoints[0], 0);
+        assert_eq!(*self.breakpoints.last().unwrap(), self.table.hashes.len());
+    }
+}
+
+struct LSHTablesBuilder<'ts> {
+    ts: &'ts WindowedTimeseries,
+    width: f64,
+    repetitions: usize,
+    tensor_reps: usize,
+    hashers: Vec<EuclHasher>,
+    half_hashes: Vec<u8>,
+}
+
+impl<'ts> LSHTablesBuilder<'ts> {
+    fn new(
+        ts: &'ts WindowedTimeseries,
+        dimension: usize,
+        repetitions: usize,
+        width: f64,
+        seed: u64,
+    ) -> Self {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let n = ts.num_subsequences();
+        let tensor_reps = (repetitions as f64).sqrt().ceil() as usize;
+        let hashers = (0..tensor_reps * K)
+            .map(|_| EuclHasher::new(dimension, width, &mut rng))
+            .collect();
+        let half_hashes = vec![0u8; K * tensor_reps * n];
+        eprintln!("Allocated hashers and space");
+        Self {
+            ts,
+            width,
+            repetitions,
+            tensor_reps,
+            hashers,
+            half_hashes,
+        }
+    }
+
+    fn build(mut self) -> LSHTables {
+        let n = self.ts.num_subsequences();
+        let ts = &self.ts;
+        let fft_data = FFTData::new(ts);
+
+        let hashers = self.hashers.chunks_exact(K_HALF);
+        assert!(hashers.remainder().is_empty());
+        let half_hashes = self.half_hashes.chunks_exact_mut(K_HALF * n);
+        eprintln!("Compute half-width hashes");
+        let start = Instant::now();
+        half_hashes.zip(hashers).for_each(|(hashes, hashers)| {
+            for (k, h) in hashers.iter().enumerate() {
+                h.hash_all(ts, &fft_data, |i, hash| {
+                    let offset = i * K_HALF + k;
+                    hashes[offset] = ((hash as i64 & 0xFFi64) as i8) as u8;
+                });
+            }
+        });
+        let end = Instant::now();
+        eprintln!("elapsed: {:?}", end - start);
+
+        // let mut tables = Vec::with_capacity(self.repetitions);
+
+        let scratch = ThreadLocal::new();
+        eprintln!("setup sorted tables");
+
+        let start = Instant::now();
+        let tables = (0..self.repetitions)
+            .into_par_iter()
+            .map(|r| {
+                let mut scratch = scratch
+                    .get_or(|| RefCell::new(Vec::with_capacity(n)))
+                    .borrow_mut();
+                let (l_idx, r_idx) = get_minimal_index_pair(r);
+                let chunk_size = n * K_HALF;
+                let l_hashes = &self.half_hashes[l_idx * chunk_size..(l_idx + 1) * chunk_size];
+                let r_hashes = &self.half_hashes[r_idx * chunk_size..(r_idx + 1) * chunk_size];
+
+                let table = Table::new(
+                    n,
+                    (0..n).map(|i| {
+                        let h = HashString::new(&l_hashes[i..i + K_HALF], &r_hashes[i..i + K_HALF]);
+                        (h, i)
+                    }),
+                    &mut scratch,
+                );
+
+                table
+            })
+            .collect();
+        let end = Instant::now();
+        eprintln!("elapsed: {:?}", end - start);
+
+        LSHTables {
+            tensor_repetitions: self.tensor_reps,
+            repetitions: self.repetitions,
+            tables,
+            width: self.width,
+        }
+    }
+}
+
+pub struct LSHTables {
+    width: f64,
+    repetitions: usize,
+    tensor_repetitions: usize,
+    tables: Vec<Table>,
+}
+
+impl LSHTables {
+    pub fn from_ts<R: Rng>(
+        ts: &WindowedTimeseries,
+        repetitions: usize,
+        width: f64,
+        seed: u64,
+    ) -> Self {
+        let builder = LSHTablesBuilder::new(ts, ts.w, repetitions, width, seed);
+        builder.build()
+    }
+
+    /// The collision probability of a single hash function at the given z-normalized Euclidean
+    /// distance
+    pub fn collision_probability_at(&self, d: f64) -> f64 {
+        let r = self.width;
+        let normal = NormalDistr::new(0.0, 1.0).unwrap();
+        1.0 - 2.0 * normal.cdf(-r / d)
+            - (2.0 / ((std::f64::consts::PI * 2.0).sqrt() * (r / d)))
+                * (1.0 - (-r * r / (2.0 * d * d)).exp())
+    }
+
+    /// What would be the failure probability if iterations were independent
+    pub fn independent_failure_probability(
+        &self,
+        zeucl_dist: f64,
+        reps: usize,
+        bits: usize,
+    ) -> f64 {
+        let p = self.collision_probability_at(zeucl_dist);
+
+        let cur_failure = (1.0 - p.powi(bits as i32)).powi(reps as i32 + 1);
+        let prev_failure =
+            (1.0 - p.powi(bits as i32 + 1)).powi((self.repetitions - reps + 1) as i32);
+        return cur_failure * prev_failure;
+    }
+
+    pub fn failure_probability(&self, dist: f64, reps: usize, bits: usize) -> f64 {
+        let p = self.collision_probability_at(dist);
+
+        // TODO: precompute all these numbers
+        let cur_left_bits = (bits as f64 / 2.0).floor() as i32;
+        let cur_right_bits = (bits as f64 / 2.0).ceil() as i32;
+        assert_eq!(cur_left_bits + cur_right_bits, bits as i32);
+
+        let prev_left_bits = ((bits + 1) as f64 / 2.0).floor() as i32;
+        let prev_right_bits = ((bits + 1) as f64 / 2.0).ceil() as i32;
+        assert_eq!(prev_left_bits + prev_right_bits, bits as i32 + 1);
+        assert!(prev_left_bits >= cur_left_bits);
+        assert!(prev_right_bits >= cur_right_bits);
+
+        let up_treps = (reps as f64 + 1.0).sqrt().floor() as i32;
+        let low_treps = self.tensor_repetitions as i32 - up_treps;
+
+        // Probabilities of *not* colliding on a *single* repetition with a given number of bits
+        let cur_left_fail = 1.0 - p.powi(cur_left_bits);
+        let cur_right_fail = 1.0 - p.powi(cur_right_bits);
+
+        let prev_left_fail = 1.0 - p.powi(prev_left_bits);
+        let prev_right_fail = 1.0 - p.powi(prev_right_bits);
+
+        // Probabilities of collising in *at least* on repetition
+        let collide_up_left_cur = 1.0 - cur_left_fail.powi(up_treps);
+        let collide_up_right_cur = 1.0 - cur_right_fail.powi(up_treps);
+
+        let collide_up_left_prev = 1.0 - prev_left_fail.powi(up_treps);
+        let collide_up_right_prev = 1.0 - prev_right_fail.powi(up_treps);
+
+        let collide_low_left_prev = 1.0 - prev_left_fail.powi(low_treps);
+        let collide_low_right_prev = 1.0 - prev_right_fail.powi(low_treps);
+
+        (1.0 - collide_up_left_cur * collide_up_right_cur)
+            * (1.0 - collide_low_left_prev * collide_low_right_prev)
+            * (1.0 - collide_up_left_prev * collide_low_right_prev)
+            * (1.0 - collide_low_left_prev * collide_up_right_prev)
     }
 }
 
