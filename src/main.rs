@@ -118,7 +118,7 @@ fn main() -> Result<()> {
         );
         enumerator
             .map(|m| {
-                println!("Motif {:?}", m);
+                println!("Confirm {:?}", m);
                 m
             })
             .collect()

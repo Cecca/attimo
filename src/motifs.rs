@@ -18,9 +18,9 @@ use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::ops::Range;
-use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use thread_local::ThreadLocal;
@@ -468,7 +468,7 @@ fn explore_tries(
                                                     idx_b: b_idx as usize,
                                                     distance: d,
                                                     elapsed: None,
-                                                    discovered: start.elapsed()
+                                                    discovered: start.elapsed(),
                                                 };
                                                 tl_top.borrow_mut().insert(m);
                                             }
@@ -595,6 +595,8 @@ pub struct MotifsEnumerator {
     depth: usize,
     /// the previous depth
     previous_depth: Option<usize>,
+    /// the progress bar
+    pbar: ProgressBar,
 }
 
 impl MotifsEnumerator {
@@ -645,7 +647,19 @@ impl MotifsEnumerator {
             rep: 0,
             depth: K,
             previous_depth: None,
+            pbar: Self::build_progress_bar(K, repetitions),
         }
+    }
+
+    fn build_progress_bar(depth: usize, repetitions: usize) -> ProgressBar {
+        let pbar = ProgressBar::new(repetitions as u64);
+        pbar.set_draw_rate(1);
+        pbar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
+        );
+        pbar.set_message(format!("depth {}", depth));
+        pbar
     }
 
     pub fn get_ts(&self) -> Arc<WindowedTimeseries> {
@@ -711,6 +725,7 @@ impl MotifsEnumerator {
 
         // check we already returned all we could
         if self.topk.num_confirmed() == self.max_k {
+            self.pbar.finish_and_clear();
             return None;
         }
 
@@ -789,7 +804,7 @@ impl MotifsEnumerator {
                                                     idx_b: b_idx as usize,
                                                     distance: d,
                                                     elapsed: None,
-                                                    discovered: self.start.elapsed()
+                                                    discovered: self.start.elapsed(),
                                                 };
                                                 tl_top.borrow_mut().insert(m);
                                             }
@@ -833,6 +848,8 @@ impl MotifsEnumerator {
             });
             self.to_return.extend(buf.drain(..).map(|m| Reverse(m)));
 
+            self.pbar.inc(1);
+
             // set up next repetition
             self.rep += 1;
             if self.rep >= self.repetitions {
@@ -849,6 +866,7 @@ impl MotifsEnumerator {
                 } else {
                     self.depth -= 1;
                 }
+                self.pbar = Self::build_progress_bar(self.depth, self.repetitions);
                 assert!(self
                     .previous_depth
                     .map(|prev| self.depth < prev)
