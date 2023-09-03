@@ -2,7 +2,7 @@ use anyhow::Result;
 use argh::FromArgs;
 use attimo::allocator::{self, allocated, CountingAllocator};
 use attimo::load::*;
-use attimo::motifs::{motifs, Motif, MotifsEnumerator};
+use attimo::motifs::{motifs, Motif};
 use attimo::timeseries::*;
 use slog::*;
 use slog_scope::GlobalLoggerGuard;
@@ -48,10 +48,6 @@ struct Config {
     /// wether meand and std computations should be at the best precision, at the expense of running time
     pub precise: bool,
 
-    #[argh(switch)]
-    /// use the enumerator
-    pub enumerator: bool,
-
     #[argh(option, default = "default_log_path()")]
     /// the file in which to store the detailed execution log
     pub log_path: String,
@@ -74,6 +70,7 @@ fn default_log_path() -> String {
 }
 
 fn main() -> Result<()> {
+    debug_assert!(false, "This executable should be run in release mode");
     let total_timer = Instant::now();
     if std::env::args().filter(|arg| arg == "--version").count() == 1 {
         println!("{}", VERSION);
@@ -108,30 +105,13 @@ fn main() -> Result<()> {
         "time_s" => input_elapsed.as_secs_f64()
     );
 
-    let motifs: Vec<Motif> = if config.enumerator {
-        let enumerator = MotifsEnumerator::new(
-            Arc::new(ts),
-            config.motifs,
-            config.repetitions,
-            config.failure_probability,
-            config.seed,
-        );
-        enumerator
-            .map(|m| {
-                println!("Confirm {:?}", m);
-                m
-            })
-            .collect()
-    } else {
-        motifs(
-            &ts,
-            config.motifs,
-            config.repetitions,
-            config.failure_probability,
-            config.seed,
-            total_timer,
-        )
-    };
+    let motifs: Vec<Motif> = motifs(
+        Arc::new(ts),
+        config.motifs,
+        config.repetitions,
+        config.failure_probability,
+        config.seed,
+    );
 
     monitor_flag.store(false, std::sync::atomic::Ordering::SeqCst);
     monitor.join().unwrap();
