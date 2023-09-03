@@ -121,7 +121,7 @@ impl MotifsIterator {
         seed: u64,
     ) -> Self {
         let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
-        let inner = MotifsEnumerator::new(ts, max_k, repetitions, delta, seed);
+        let inner = MotifsEnumerator::new(ts, max_k, repetitions, delta, seed, false);
         Self { inner }
     }
 
@@ -131,7 +131,7 @@ impl MotifsIterator {
 
     fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<Motif> {
         slf.inner
-            .next_motif()
+            .next()
             .map(|m| Motif::with_context(m, slf.inner.get_ts()))
     }
 

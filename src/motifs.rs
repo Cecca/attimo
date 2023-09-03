@@ -264,7 +264,7 @@ pub fn motifs(
 ) -> Vec<Motif> {
     let mut enumerator = MotifsEnumerator::new(ts, topk, repetitions, delta, seed, true);
     let mut res = Vec::new();
-    while let Some(m) = enumerator.next_motif() {
+    while let Some(m) = enumerator.next() {
         eprintln!("Confirm {:?}", m);
         res.push(m);
     }
@@ -447,7 +447,7 @@ impl MotifsEnumerator {
     }
 
     /// Return the next motif, or `None` if we already returned `max_k` motifs
-    pub fn next_motif(&mut self) -> Option<Motif> {
+    pub fn next(&mut self) -> Option<Motif> {
         // First, try to empty the buffer of motifs to return, if any
         if let Some(motif) = self.to_return.pop() {
             self.returned.push(motif.0.clone());
@@ -626,7 +626,7 @@ impl Iterator for MotifsEnumerator {
     type Item = Motif;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_motif()
+        self.next()
     }
 }
 
