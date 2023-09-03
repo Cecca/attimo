@@ -1,36 +1,6 @@
-//// # Locality Sensitive Hashing
-////
-//// The purpose of Locality Sensitive Hashing (LSH for short) is to speed up nearest neighbor
-//// queries, resulting in potentially sublinear query times. The technique can also be used
-//// for similarity joins, like we do in this work.
-////
-//// The intuition is simple: for a given distance function between points (which in our case
-//// is the z-normalized Euclidean distance between subsequences), we choose a _family_ of hash
-//// functions. From this family we sample an appropriate number of functions (more on this later).
-//// For a given subsequence of our time series, each of the sampled functions will output a
-//// _hash value_, whose domain depends on the family of hash functions.
-////
-//// A LSH scheme for the Euclidean distance is
-//// described in [this paper](http://theory.csail.mit.edu/~mirrokni/pstable.ps).
-//// The idea is rather simple: for each input vector (in our case the subsequences of the input time
-//// series) we compute the inner product with a random vector, whose components are distributed
-//// according to the p-stable distribution associated with the distance. For the Euclidean
-//// distance such distribution is the Standard Normal. The result is then bucketed into bins whose
-//// width is a parameter of the algorithm (we shall later see how to estimate this parameter automatically).
-////
-//// The nice property of this approach, when used with time series, is that for a given random vector
-//// we can compute all the dot products with every subsequence of the time series in one go using the
-//// same trick of [MASS](https://www.cs.unm.edu/~mueen/FastestSimilaitySearch.html).
-//// The idea is to use the [cyclic convolution theorem](http://www.dei.unipd.it/~geppo/DA2/DOCS/FFT.pdf)
-//// to perform the dot products by means of element-wise multiplication in the frequency domain.
-//// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
-//// we save a factor `w` in the complexity, where `w` is the motif length.
-
 use crate::motifs::Motif;
-use crate::{alloc_cnt, allocator::*};
-// TODO Remove this dependency
-use crate::sort::*;
 use crate::timeseries::{FFTData, PrettyBytes, WindowedTimeseries};
+use crate::{alloc_cnt, allocator::*};
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -43,16 +13,6 @@ use std::time::Duration;
 use std::{cell::UnsafeCell, sync::Arc, time::Instant};
 use thread_local::ThreadLocal;
 
-//// ## Hash values
-//// We consider hash values made of 8-bit words. So we have to make sure, setting the
-//// `width` parameter, that the values are in the range `[-128, 127]`.
-//// More on the estimation of the `width` parameter down below.
-
-//// We only consider concatenations of hash values of a fixed length, defined in this
-//// constant `K`. The reason is that this way we can inline the hash values when allocated into a
-//// vector, rather than falling back to vector of vectors. Removing this dereference allows for
-//// a rather large speed up.
-//// Also, it is one fewer parameter for the user to set.
 pub const K: usize = 32;
 pub const K_HALF: usize = K / 2;
 
@@ -75,21 +35,22 @@ impl HashString {
     }
 }
 
-//// That said, here is the definition of a hash value, with several
-//// utility implementations following.
+#[deprecated]
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Default)]
 pub struct HashValue(pub u32);
 
-impl GetByte for HashValue {
-    fn num_bytes(&self) -> usize {
-        4
-    }
-    #[inline(always)]
-    fn get_byte(&self, i: usize) -> u8 {
-        (self.0 >> (8 * (std::mem::size_of::<u32>() - i - 1)) & 0xFF) as u8
-    }
-}
+// impl GetByte for HashValue {
+//     fn num_bytes(&self) -> usize {
+//         4
+//     }
+//     #[inline(always)]
+//     fn get_byte(&self, i: usize) -> u8 {
+//         (self.0 >> (8 * (std::mem::size_of::<u32>() - i - 1)) & 0xFF) as u8
+//     }
+// }
 
+// FIXME: use this function to convert the repetition
+// to the pair of tensored repetitions
 fn get_minimal_index_pair(idx: usize) -> (usize, usize) {
     let sqrt = (idx as f64).sqrt() as usize;
     if idx == sqrt * sqrt + 2 * sqrt {
@@ -102,7 +63,7 @@ fn get_minimal_index_pair(idx: usize) -> (usize, usize) {
 }
 
 //// ## Collections of hash values
-
+////
 //// A key part of the algorithm is the ability to process hash values related to different subsequence
 //// in bulk. In particular, we want to be able to access all the hash values associated to one particular repetition,
 //// so that all subsequences sharing a common prefix of a given length can be accessed together.
@@ -117,11 +78,11 @@ fn get_minimal_index_pair(idx: usize) -> (usize, usize) {
 ////
 //// **TODO**: maybe give more details on the tensoring approach.
 
-//// This data structure is taken from [this StackOverflow answer](https://stackoverflow.com/questions/65178245/how-do-i-write-to-a-mutable-slice-from-multiple-threads-at-arbitrary-indexes-wit).
-//// It is simply a wrapper around a mutable slice, providing (unsafe) concurrent mutable
-//// access to its elements, without the need for synchronization primitives.
-//// We use it only in one place, when building the hash pools, when accesses to the arrays
-//// are by construction non-overlapping.
+/// This data structure is taken from [this StackOverflow answer](https://stackoverflow.com/questions/65178245/how-do-i-write-to-a-mutable-slice-from-multiple-threads-at-arbitrary-indexes-wit).
+/// It is simply a wrapper around a mutable slice, providing (unsafe) concurrent mutable
+/// access to its elements, without the need for synchronization primitives.
+/// We use it only in one place, when building the hash pools, when accesses to the arrays
+/// are by construction non-overlapping.
 #[derive(Copy, Clone)]
 pub struct UnsafeSlice<'a, T> {
     slice: &'a [UnsafeCell<T>],
@@ -236,19 +197,92 @@ impl HashCollection {
         }
     }
 
+    /// Computes, for each repetition, the vectors of sorted ids by
+    /// hash code, one per repetition.
+    fn all_sorted_ids(&self) -> Vec<HashSortedIds> {
+        (0..self.hasher.repetitions)
+            .map(|repetition| self.sorted_ids(repetition))
+            .collect()
+    }
+
+    /// Return the vector of the IDs of subsequences, sorted by
+    /// the lexycographic order of their corresponding full-hashes in
+    /// the given `repetition`.
+    fn sorted_ids(&self, repetition: usize) -> HashSortedIds {
+        let mut ids: Vec<usize> = (0usize..self.n_subsequences).collect();
+        ids.sort_unstable_by(|i, j| {
+            self.extended_hash_value(*i, repetition)
+                .cmp(&self.extended_hash_value(*j, repetition))
+        });
+        let mut breakpoints = vec![Breakpoint::Cur(0)];
+        while breakpoints.last().unwrap().as_usize() < ids.len() {
+            let b =
+                self.next_breakpoint(repetition, &ids, breakpoints.last().unwrap().as_usize(), K);
+            breakpoints.push(Breakpoint::Cur(b));
+        }
+        assert_eq!(breakpoints.last(), Some(&Breakpoint::Cur(ids.len())));
+
+        HashSortedIds {
+            ids,
+            repetition,
+            prefix_length: K,
+            breakpoints,
+        }
+    }
+
+    /// Considering the hash values of the given `repetition`,
+    /// in the order specified by `ids` starting from `start` (which
+    /// is thus an index into `ids`), returns the index in `ids` of
+    /// the first subsequence whose hash has a `prefix` different than
+    /// the `start`ing one.
+    pub fn next_breakpoint(
+        &self,
+        repetition: usize,
+        ids: &[usize],
+        start: usize,
+        prefix: usize,
+    ) -> usize {
+        // Exponential search for the end
+        let mut offset = 1;
+        let mut end = start + offset;
+        while end < ids.len() {
+            if !self.hash_prefix_eq(ids[start], ids[end], repetition, prefix) {
+                break;
+            }
+            offset *= 2;
+            end = (ids.len() - 1).min(start + offset);
+        }
+        // Binary search in the range we just identified
+        let breakpoint = start
+            + ids[start..end]
+                .partition_point(|i| self.hash_prefix_eq(ids[start], ids[*i], repetition, prefix));
+        breakpoint
+    }
+
+    /// Get the `left` (from tensoring) hash values for subsequence `i` in `repetition`.
     pub fn left(&self, i: usize, repetition: usize) -> &[u8] {
         let trep = repetition % self.hasher.tensor_repetitions;
         let idx = K * self.n_subsequences * trep + i * K;
         &self.pools[idx..idx + K_HALF]
     }
 
+    /// Get the `right` (from tensoring) hash values for subsequence `i` in `repetition`.
     pub fn right(&self, i: usize, repetition: usize) -> &[u8] {
         let trep = repetition / self.hasher.tensor_repetitions;
         let idx = K * self.n_subsequences * trep + i * K + K_HALF;
         &self.pools[idx..idx + K_HALF]
     }
 
-    #[cfg(test)]
+    pub fn hash_prefix_eq(&self, i: usize, j: usize, repetition: usize, prefix: usize) -> bool {
+        let prefix_left = ((prefix as f64) / 2.0).ceil() as usize;
+        let prefix_right = ((prefix as f64) / 2.0).floor() as usize;
+        let i_left = &self.left(i, repetition)[..prefix_left];
+        let i_right = &self.right(i, repetition)[..prefix_right];
+        let j_left = &self.left(j, repetition)[..prefix_left];
+        let j_right = &self.right(j, repetition)[..prefix_right];
+        i_left == j_left && i_right == j_right
+    }
+
     pub fn extended_hash_value(&self, i: usize, repetition: usize) -> [u8; K] {
         let mut output = [0; K];
         let l = &self.left(i, repetition);
@@ -624,6 +658,183 @@ impl Hasher {
             callback(i, h);
         });
         oob
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+enum Breakpoint {
+    /// A breakpoint at the current prefix length
+    Cur(usize),
+    /// A breakpoint at the the previous prefix length
+    Prev(usize),
+}
+impl Breakpoint {
+    fn is_prev(&self) -> bool {
+        match self {
+            Self::Cur(_) => false,
+            Self::Prev(_) => true,
+        }
+    }
+    fn as_usize(&self) -> usize {
+        match self {
+            Self::Cur(b) => *b,
+            Self::Prev(b) => *b,
+        }
+    }
+}
+
+/// Provides additional functionality to `Vec<usize>` when
+/// the elements are interpreted as subsequence indices, sorted
+/// by the lexycographic order of their corresponding hash
+/// values in some repetition.
+pub struct HashSortedIds {
+    ids: Vec<usize>,
+    repetition: usize,
+    /// The vector is navigable by considering groups all the elements
+    /// with hashes that share this prefix length.
+    prefix_length: usize,
+    /// The breakpoints between one segment of same-prefix elements and the other,
+    /// where the prefix length is dictated by `prefix_length`.
+    breakpoints: Vec<Breakpoint>,
+}
+
+impl HashSortedIds {
+    pub fn shorten_prefix(&mut self, hashes: &HashCollection, new_prefix: usize) {
+        assert!(new_prefix <= self.prefix_length);
+        if new_prefix == self.prefix_length {
+            return;
+        }
+
+        assert_eq!(self.breakpoints[0].as_usize(), 0);
+        assert_eq!(self.breakpoints.last().unwrap().as_usize(), self.ids.len());
+
+        let repetition = self.repetition;
+        let prefix_length = self.prefix_length;
+        let mut last_breakpoint = Breakpoint::Cur(0);
+        let ids = &self.ids;
+
+        // do cleanup of breakpoints already sharing the (now old) prefix
+        self.breakpoints.retain_mut(|b| {
+            if b.as_usize() == 0 || b.as_usize() == ids.len() {
+                // keep the first and the last
+                return true;
+            }
+            let eq_old = hashes.hash_prefix_eq(
+                ids[last_breakpoint.as_usize()],
+                ids[b.as_usize()],
+                repetition,
+                prefix_length,
+            );
+            if hashes.hash_prefix_eq(
+                ids[last_breakpoint.as_usize()],
+                ids[b.as_usize()],
+                repetition,
+                new_prefix,
+            ) {
+                // the hashes are equal in the new prefix
+                *b = Breakpoint::Cur(b.as_usize())
+            } else {
+                *b = Breakpoint::Prev(b.as_usize())
+            }
+            last_breakpoint = *b;
+            eq_old
+        });
+
+        // only *now* set the prefix length to the requested one.
+        // This leaves multiple segments with the same prefix, allowing
+        // to avoid visiting the same pairs over and over again.
+        self.prefix_length = new_prefix;
+
+        assert_eq!(self.breakpoints[0].as_usize(), 0);
+        assert_eq!(self.breakpoints.last().unwrap().as_usize(), self.ids.len());
+    }
+
+    fn for_each_segment<F: FnMut(&[usize])>(&self, mut f: F) {
+        let mut b_start = 0;
+
+        while b_start < self.breakpoints.len() - 1 {
+            let mut b_end = b_start + 1;
+            while b_end < self.breakpoints.len() - 1
+                && self.breakpoints[b_end].as_usize() < self.ids.len()
+                && self.breakpoints[b_end].is_prev()
+            {
+                b_end += 1;
+            }
+            let start = self.breakpoints[b_start].as_usize();
+            let end = self.breakpoints[b_end].as_usize();
+            // #[cfg(test)]
+            // {
+            //     for a in start..end {
+            //         assert!(hashes.hash_prefix_eq(a, start, self.repetition, prefix_length));
+            //     }
+            // }
+
+            f(&self.ids[start..end]);
+            b_start = b_end;
+        }
+    }
+
+    fn for_each_neighboring_segments<F: FnMut(&[usize], &[usize])>(&self, mut f: F) {
+        let mut b_start = 0;
+
+        while b_start < self.breakpoints.len() - 1 {
+            let mut b_end = b_start + 1;
+            while b_end < self.breakpoints.len() - 1
+                && self.breakpoints[b_end].as_usize() < self.ids.len()
+                && self.breakpoints[b_end].is_prev()
+            {
+                b_end += 1;
+            }
+
+            let breaks = &self.breakpoints[b_start..=b_end];
+            for i in 0..(breaks.len() - 1) {
+                for j in (i + 1)..(breaks.len() - 1) {
+                    let range_a = breaks[i].as_usize()..breaks[i + 1].as_usize();
+                    let range_b = breaks[j].as_usize()..breaks[j + 1].as_usize();
+                    // #[cfg(test)]
+                    // {
+                    //     for a in range_a.clone() {
+                    //         for b in range_b.clone() {
+                    //             assert_eq!(
+                    //                 self.hashes[a].prefix(self.prefix_length),
+                    //                 self.hashes[b].prefix(self.prefix_length)
+                    //             );
+                    //         }
+                    //     }
+                    // }
+
+                    f(&self.ids[range_a], &self.ids[range_b]);
+                }
+            }
+            b_start = b_end;
+        }
+    }
+
+    pub fn for_each_collision<F: FnMut(usize, usize)>(&self, exclusion_zone: usize, mut f: F) {
+        if self.prefix_length == K {
+            // We are at the deepest level of the tries
+            self.for_each_segment(|segment| {
+                for ii in 0..segment.len() {
+                    let i = segment[ii];
+                    for jj in (ii + 1)..segment.len() {
+                        let j = segment[jj];
+                        if i.max(j) - i.min(j) >= exclusion_zone {
+                            f(i.min(j), i.max(j));
+                        }
+                    }
+                }
+            })
+        } else {
+            self.for_each_neighboring_segments(|seg1, seg2| {
+                for i in seg1 {
+                    for j in seg2 {
+                        if i.max(j) - i.min(j) >= exclusion_zone {
+                            f(*i.min(j), *i.max(j));
+                        }
+                    }
+                }
+            })
+        }
     }
 }
 
