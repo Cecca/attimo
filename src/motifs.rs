@@ -584,7 +584,8 @@ pub struct MotifsEnumerator {
     repetitions: usize,
     delta: f64,
     exclusion_zone: usize,
-    tables: LSHTables,
+    pools: Arc<HashCollection>,
+    tables: Vec<HashSortedIds>,
     tl_top: ThreadLocal<RefCell<TopK>>,
     /// the current repetition
     rep: usize,
@@ -609,7 +610,20 @@ impl MotifsEnumerator {
         info!("Computed hasher width"; "hasher_width" => hasher_width);
 
         info!("hash computation"; "tag" => "phase");
-        let tables = LSHTables::from_ts(&ts, repetitions, hasher_width, &fft_data, seed);
+        let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
+        let mem_before = allocated();
+        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
+        let pools = Arc::new(pools);
+        let pools_size = allocated() - mem_before;
+        let mem_before = allocated();
+        let tables = pools.all_sorted_ids();
+        let tables_size = allocated() - mem_before;
+        println!(
+            "[{:?}] Computed hash pools, taking {}, and sorted IDs, taking {}",
+            start.elapsed(),
+            PrettyBytes(pools_size),
+            PrettyBytes(tables_size)
+        );
         drop(fft_data);
 
         let topk = TopK::new(max_k, exclusion_zone);
@@ -627,6 +641,7 @@ impl MotifsEnumerator {
             repetitions,
             delta,
             exclusion_zone,
+            pools,
             tables,
             tl_top,
             rep: 0,
@@ -639,6 +654,7 @@ impl MotifsEnumerator {
         Arc::clone(&self.ts)
     }
 
+    #[deprecated]
     pub fn stopping_condition(
         p: f64,
         prefix: usize,
@@ -673,13 +689,10 @@ impl MotifsEnumerator {
 
     //// Find the level for which the given distance has a good probability of being
     //// found withing the allowed number of repetitions
-    fn level_for_distance(&self, d: f64, mut prefix: usize, delta: f64) -> usize {
-        let p = self.tables.collision_probability_at(d);
-        let initial = prefix as usize;
+    fn level_for_distance(&self, d: f64, mut prefix: usize) -> usize {
         while prefix > 0 {
             for rep in 0..self.repetitions {
-                if Self::stopping_condition(p, prefix, Some(initial), rep, self.repetitions, delta)
-                {
+                if self.pools.failure_probability(d, rep, prefix) < self.delta {
                     return prefix;
                 }
             }
@@ -708,7 +721,7 @@ impl MotifsEnumerator {
 
             eprintln!("Repetition {} at depth {}", self.rep, self.depth);
             // Set up tables for the current repetition
-            self.tables.shorten_prefix(self.depth);
+            self.tables[self.rep].shorten_prefix(&self.pools, self.depth);
 
             // counters for profiling
             let rep_cnt_dists = AtomicUsize::new(0);
@@ -753,11 +766,11 @@ impl MotifsEnumerator {
             let depth = self.depth;
             let rep = self.rep;
             let delta = self.delta;
-            let tables = &self.tables;
+            let pools = &self.pools;
             let mut buf = Vec::new();
             self.topk.for_each(|m| {
                 if m.elapsed.is_none() {
-                    let fp = tables.failure_probability(m.distance, rep, depth);
+                    let fp = pools.failure_probability(m.distance, rep, depth);
                     eprintln!("Failure probability at {}: {}", m.distance, fp);
                     if fp <= delta {
                         m.elapsed.replace(elapsed);
@@ -774,7 +787,7 @@ impl MotifsEnumerator {
                 self.previous_depth.replace(self.depth);
                 if let Some(first_not_confirmed) = self.topk.first_not_confirmed() {
                     let new_depth =
-                        self.level_for_distance(first_not_confirmed.distance, self.depth, delta);
+                        self.level_for_distance(first_not_confirmed.distance, self.depth);
                     if new_depth == depth {
                         self.depth -= 1;
                     } else {

@@ -197,10 +197,76 @@ impl HashCollection {
         }
     }
 
+    /// The collision probability of a single hash function at the given z-normalized Euclidean
+    /// distance
+    pub fn collision_probability_at(&self, d: f64) -> f64 {
+        let r = self.hasher.width;
+        let normal = NormalDistr::new(0.0, 1.0).unwrap();
+        1.0 - 2.0 * normal.cdf(-r / d)
+            - (2.0 / ((std::f64::consts::PI * 2.0).sqrt() * (r / d)))
+                * (1.0 - (-r * r / (2.0 * d * d)).exp())
+    }
+
+    /// What would be the failure probability if iterations were independent
+    pub fn independent_failure_probability(
+        &self,
+        zeucl_dist: f64,
+        reps: usize,
+        hash_prefix: usize,
+    ) -> f64 {
+        let p = self.collision_probability_at(zeucl_dist);
+
+        let cur_failure = (1.0 - p.powi(hash_prefix as i32)).powi(reps as i32 + 1);
+        let prev_failure = (1.0 - p.powi(hash_prefix as i32 + 1))
+            .powi((self.hasher.repetitions - reps + 1) as i32);
+        return cur_failure * prev_failure;
+    }
+
+    pub fn failure_probability(&self, dist: f64, reps: usize, hash_prefix: usize) -> f64 {
+        let p = self.collision_probability_at(dist);
+
+        // TODO: precompute all these numbers
+        let cur_left_bits = (hash_prefix as f64 / 2.0).floor() as i32;
+        let cur_right_bits = (hash_prefix as f64 / 2.0).ceil() as i32;
+        assert_eq!(cur_left_bits + cur_right_bits, hash_prefix as i32);
+
+        let prev_left_bits = ((hash_prefix + 1) as f64 / 2.0).floor() as i32;
+        let prev_right_bits = ((hash_prefix + 1) as f64 / 2.0).ceil() as i32;
+        assert_eq!(prev_left_bits + prev_right_bits, hash_prefix as i32 + 1);
+        assert!(prev_left_bits >= cur_left_bits);
+        assert!(prev_right_bits >= cur_right_bits);
+
+        let up_treps = (reps as f64 + 1.0).sqrt().floor() as i32;
+        let low_treps = self.hasher.tensor_repetitions as i32 - up_treps;
+
+        // Probabilities of *not* colliding on a *single* repetition with a given number of bits
+        let cur_left_fail = 1.0 - p.powi(cur_left_bits);
+        let cur_right_fail = 1.0 - p.powi(cur_right_bits);
+
+        let prev_left_fail = 1.0 - p.powi(prev_left_bits);
+        let prev_right_fail = 1.0 - p.powi(prev_right_bits);
+
+        // Probabilities of collising in *at least* on repetition
+        let collide_up_left_cur = 1.0 - cur_left_fail.powi(up_treps);
+        let collide_up_right_cur = 1.0 - cur_right_fail.powi(up_treps);
+
+        let collide_up_left_prev = 1.0 - prev_left_fail.powi(up_treps);
+        let collide_up_right_prev = 1.0 - prev_right_fail.powi(up_treps);
+
+        let collide_low_left_prev = 1.0 - prev_left_fail.powi(low_treps);
+        let collide_low_right_prev = 1.0 - prev_right_fail.powi(low_treps);
+
+        (1.0 - collide_up_left_cur * collide_up_right_cur)
+            * (1.0 - collide_low_left_prev * collide_low_right_prev)
+            * (1.0 - collide_up_left_prev * collide_low_right_prev)
+            * (1.0 - collide_low_left_prev * collide_up_right_prev)
+    }
+
     /// Computes, for each repetition, the vectors of sorted ids by
     /// hash code, one per repetition.
-    fn all_sorted_ids(&self) -> Vec<HashSortedIds> {
+    pub fn all_sorted_ids(&self) -> Vec<HashSortedIds> {
         (0..self.hasher.repetitions)
+            .into_par_iter()
             .map(|repetition| self.sorted_ids(repetition))
             .collect()
     }
@@ -209,6 +275,7 @@ impl HashCollection {
     /// the lexycographic order of their corresponding full-hashes in
     /// the given `repetition`.
     fn sorted_ids(&self, repetition: usize) -> HashSortedIds {
+        eprintln!("Computing sorted ids for repetition {}", repetition);
         let mut ids: Vec<usize> = (0usize..self.n_subsequences).collect();
         ids.sort_unstable_by(|i, j| {
             self.extended_hash_value(*i, repetition)
@@ -243,19 +310,28 @@ impl HashCollection {
         prefix: usize,
     ) -> usize {
         // Exponential search for the end
-        let mut offset = 1;
-        let mut end = start + offset;
-        while end < ids.len() {
-            if !self.hash_prefix_eq(ids[start], ids[end], repetition, prefix) {
+        // let mut offset = 1;
+        // let mut end = start + offset;
+        // while end < ids.len() {
+        //     if !self.hash_prefix_eq(ids[start], ids[end], repetition, prefix) {
+        //         break;
+        //     }
+        //     offset *= 2;
+        //     end = (ids.len() - 1).min(start + offset);
+        // }
+        // dbg!(start..end);
+        // Binary search in the range we just identified
+        // let breakpoint = start
+        //     + ids[start..]
+        //         .partition_point(|i| self.hash_prefix_eq(ids[start], ids[*i], repetition, prefix));
+        let mut breakpoint = start + 1;
+        while breakpoint < ids.len() {
+            if !self.hash_prefix_eq(start, breakpoint, repetition, prefix) {
                 break;
             }
-            offset *= 2;
-            end = (ids.len() - 1).min(start + offset);
+            breakpoint += 1;
         }
-        // Binary search in the range we just identified
-        let breakpoint = start
-            + ids[start..end]
-                .partition_point(|i| self.hash_prefix_eq(ids[start], ids[*i], repetition, prefix));
+        assert!(breakpoint > start);
         breakpoint
     }
 
