@@ -5,8 +5,6 @@
 //// The data structure used for the task is adaptive to the data, and is configured
 //// to respect the limits of the system in terms of memory.
 
-use crate::alloc_cnt;
-use crate::allocator::allocated;
 use crate::distance::*;
 use crate::lsh::*;
 use crate::timeseries::*;
@@ -266,7 +264,7 @@ pub fn motifs(
     delta: f64,
     seed: u64,
 ) -> Vec<Motif> {
-    let enumerator = MotifsEnumerator::new(ts, topk, repetitions, delta, seed);
+    let enumerator = MotifsEnumerator::new(ts, topk, repetitions, delta, seed, true);
     enumerator
         .map(|m| {
             println!("Confirm {:?}", m);
@@ -299,7 +297,7 @@ pub struct MotifsEnumerator {
     /// the previous depth
     previous_depth: Option<usize>,
     /// the progress bar
-    pbar: ProgressBar,
+    pbar: Option<ProgressBar>,
 }
 
 impl MotifsEnumerator {
@@ -309,6 +307,7 @@ impl MotifsEnumerator {
         repetitions: usize,
         delta: f64,
         seed: u64,
+        show_progress: bool,
     ) -> Self {
         let start = Instant::now();
         let exclusion_zone = ts.w;
@@ -332,6 +331,12 @@ impl MotifsEnumerator {
         let buckets = Vec::new();
         let tl_top = ThreadLocal::new();
 
+        let pbar = if show_progress {
+            Some(Self::build_progress_bar(K, repetitions))
+        } else {
+            None
+        };
+
         Self {
             start,
             ts,
@@ -350,7 +355,7 @@ impl MotifsEnumerator {
             rep: 0,
             depth: K,
             previous_depth: None,
-            pbar: Self::build_progress_bar(K, repetitions),
+            pbar,
         }
     }
 
@@ -428,7 +433,7 @@ impl MotifsEnumerator {
 
         // check we already returned all we could
         if self.topk.num_confirmed() == self.max_k {
-            self.pbar.finish_and_clear();
+            self.pbar.as_ref().map(|pbar| pbar.finish_and_clear());
             return None;
         }
 
@@ -551,7 +556,7 @@ impl MotifsEnumerator {
             });
             self.to_return.extend(buf.drain(..).map(|m| Reverse(m)));
 
-            self.pbar.inc(1);
+            self.pbar.as_ref().map(|pbar| pbar.inc(1));
 
             // set up next repetition
             self.rep += 1;
@@ -569,7 +574,9 @@ impl MotifsEnumerator {
                 } else {
                     self.depth -= 1;
                 }
-                self.pbar = Self::build_progress_bar(self.depth, self.repetitions);
+                if self.pbar.is_some() {
+                    self.pbar = Some(Self::build_progress_bar(self.depth, self.repetitions));
+                }
                 assert!(self
                     .previous_depth
                     .map(|prev| self.depth < prev)
@@ -726,7 +733,7 @@ mod test {
         let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", None).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
 
-        let motifs: Vec<Motif> = MotifsEnumerator::new(ts, 10, 800, 0.01, 12435).collect();
+        let motifs: Vec<Motif> = MotifsEnumerator::new(ts, 10, 800, 0.01, 12435, false).collect();
 
         for (a, b, dist) in top10 {
             // look for this in the motifs, allowing up to w displacement
