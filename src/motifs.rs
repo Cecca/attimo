@@ -16,8 +16,6 @@ use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::ops::Range;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -264,16 +262,38 @@ pub fn motifs(
     delta: f64,
     seed: u64,
 ) -> Vec<Motif> {
-    let enumerator = MotifsEnumerator::new(ts, topk, repetitions, delta, seed, true);
-    enumerator
-        .map(|m| {
-            println!("Confirm {:?}", m);
-            m
-        })
-        .collect()
+    let mut enumerator = MotifsEnumerator::new(ts, topk, repetitions, delta, seed, true);
+    let mut res = Vec::new();
+    while let Some(m) = enumerator.next_motif() {
+        eprintln!("Confirm {:?}", m);
+        res.push(m);
+    }
+    eprintln!("{:?}", enumerator.exec_stats);
+    res
 }
 
-// FIXME: Collect statistics
+#[derive(Debug, Default, Copy, Clone)]
+pub struct Stats {
+    pub distances: u64,
+    pub candidates: u64,
+}
+impl Stats {
+    #[inline]
+    pub fn inc_dists(&mut self) {
+        self.distances += 1;
+    }
+    #[inline]
+    pub fn inc_cands(&mut self) {
+        self.candidates += 1;
+    }
+    pub fn merge(&self, other: &Self) -> Self {
+        Self {
+            distances: self.distances + other.distances,
+            candidates: self.candidates + other.candidates,
+        }
+    }
+}
+
 pub struct MotifsEnumerator {
     start: Instant,
     ts: Arc<WindowedTimeseries>,
@@ -298,6 +318,8 @@ pub struct MotifsEnumerator {
     previous_depth: Option<usize>,
     /// the progress bar
     pbar: Option<ProgressBar>,
+    /// the execution statistics
+    exec_stats: Stats,
 }
 
 impl MotifsEnumerator {
@@ -356,6 +378,7 @@ impl MotifsEnumerator {
             depth: K,
             previous_depth: None,
             pbar,
+            exec_stats: Stats::default(),
         }
     }
 
@@ -454,20 +477,14 @@ impl MotifsEnumerator {
             let chunk_size = std::cmp::max(1, n_buckets / (4 * rayon::current_num_threads()));
 
             // counters for profiling
-            let rep_cnt_dists = AtomicUsize::new(0);
-            let spurious_collisions_cnt = AtomicUsize::new(0);
-            let rep_candidate_pairs = AtomicUsize::new(0);
+            let mut stats = ThreadLocal::new();
 
             (0..n_buckets / chunk_size)
                 .into_par_iter()
                 .for_each(|chunk_i| {
                     // let tl_top = tl_top.get_or(|| RefCell::new(TopK::new(topk, exclusion_zone)));
                     let tl_top = self.tl_top.get_or(|| RefCell::new(self.topk.clone()));
-
-                    // counters
-                    let mut cands = 0;
-                    let mut dists = 0;
-                    let mut spurious = 0;
+                    let mut tl_stats = stats.get_or(|| RefCell::new(Stats::default())).borrow_mut();
 
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
                         let bucket = &self.column_buffer[self.buckets[i].clone()];
@@ -481,7 +498,7 @@ impl MotifsEnumerator {
                                 //// Here we handle trivial matches: we don't consider a pair if the difference between
                                 //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
                                 if a_idx + self.exclusion_zone < b_idx {
-                                    cands += 1;
+                                    tl_stats.inc_cands();
 
                                     //// We only process the pair if this is the first repetition in which
                                     //// they collide. We get this information from the pool of bits
@@ -505,7 +522,7 @@ impl MotifsEnumerator {
                                             //// we try to insert the pair in the top data structure
                                             let d = zeucl(&self.ts, a_idx, b_idx);
                                             if d.is_finite() {
-                                                dists += 1;
+                                                tl_stats.inc_dists();
 
                                                 let m = Motif {
                                                     idx_a: a_idx as usize,
@@ -517,16 +534,11 @@ impl MotifsEnumerator {
                                                 tl_top.borrow_mut().insert(m);
                                             }
                                         }
-                                    } else {
-                                        spurious += 1;
                                     }
                                 }
                             }
                         }
                     }
-                    rep_candidate_pairs.fetch_add(cands, Ordering::SeqCst);
-                    rep_cnt_dists.fetch_add(dists, Ordering::SeqCst);
-                    spurious_collisions_cnt.fetch_add(spurious, Ordering::SeqCst);
                 });
 
             // Add to the output all the new top pairs that have been found
@@ -535,6 +547,12 @@ impl MotifsEnumerator {
                 .iter_mut()
                 .for_each(|top| tmp_top.add_all(&mut top.borrow_mut()));
             self.topk.add_all(&mut tmp_top);
+            self.exec_stats = stats
+                .iter_mut()
+                .map(|s| s.take())
+                .reduce(|a, b| a.merge(&b))
+                .unwrap()
+                .merge(&self.exec_stats);
 
             // Confirm the pairs that can be confirmed in this iteration
             let elapsed = self.start.elapsed();
