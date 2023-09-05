@@ -28,6 +28,8 @@
 
 use crate::motifs::Motif;
 use crate::{alloc_cnt, allocator::*};
+use std::convert::TryFrom;
+use std::simd::{u8x16, Simd, SimdPartialEq};
 // TODO Remove this dependency
 use crate::sort::*;
 use crate::timeseries::{FFTData, WindowedTimeseries};
@@ -37,6 +39,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
+use std::cmp::Ordering;
 use std::ops::Range;
 use std::time::Duration;
 use std::{cell::UnsafeCell, sync::Arc, time::Instant};
@@ -66,6 +69,102 @@ impl GetByte for HashValue {
     #[inline(always)]
     fn get_byte(&self, i: usize) -> u8 {
         (self.0 >> (8 * (std::mem::size_of::<u32>() - i - 1)) & 0xFF) as u8
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone, Copy)]
+pub enum Breakpoint {
+    /// The breakpoint refers to a previous prefix length
+    Previous(usize),
+    /// The breakpoint refers to the current prefix length
+    Current(usize),
+}
+
+impl Into<usize> for &Breakpoint {
+    fn into(self) -> usize {
+        match self {
+            Breakpoint::Previous(i) => *i,
+            Breakpoint::Current(i) => *i,
+        }
+    }
+}
+impl Into<usize> for Breakpoint {
+    fn into(self) -> usize {
+        match self {
+            Self::Previous(i) => i,
+            Self::Current(i) => i,
+        }
+    }
+}
+impl Breakpoint {
+    fn is_current(&self) -> bool {
+        match self {
+            Self::Current(_) => true,
+            _ => false,
+        }
+    }
+    pub fn for_each_pair<F: FnMut(usize, usize)>(
+        breakpoints: &[Breakpoint],
+        indices: &[usize],
+        exclusion_zone: usize,
+        mut fun: F,
+    ) {
+        #[cfg(test)]
+        {
+            for i in 1..breakpoints.len() {
+                let bb: usize = breakpoints[i - 1].into();
+                assert!(bb < breakpoints[i].into());
+            }
+        }
+        let mut b_i = 0;
+        while b_i < breakpoints.len() - 1 {
+            if breakpoints[b_i].is_current() && breakpoints[b_i + 1].is_current() {
+                // eprintln!("Bucket {:?} {:?}", breakpoints[b_i], breakpoints[b_i + 1]);
+                let i_i: usize = breakpoints[b_i].into();
+                let i_j: usize = breakpoints[b_i + 1].into();
+                // do all pairwise comparisons within the chunk,
+                // this chunk was not split in a previous iteration
+                for (off, i) in indices[i_i..i_j].iter().enumerate() {
+                    for j in &indices[i_i + off..i_j] {
+                        let ii = *i.min(j);
+                        let jj = *i.max(j);
+                        if jj - ii >= exclusion_zone {
+                            fun(ii, jj);
+                        }
+                    }
+                }
+                b_i += 1;
+            } else {
+                let mut b_j = b_i + 1; // the adjacent chunk
+                while !breakpoints[b_j].is_current() {
+                    eprintln!(
+                        "Bucket [{:?} {:?}] vs [{:?} {:?}]",
+                        breakpoints[b_i],
+                        breakpoints[b_i + 1],
+                        breakpoints[b_j],
+                        breakpoints[b_j + 1],
+                    );
+                    // here we do comparisons between elements that were in
+                    // different chunks in the previous runs
+                    let i_start: usize = breakpoints[b_i].into();
+                    let i_end: usize = breakpoints[b_i + 1].into();
+                    let j_start: usize = breakpoints[b_j].into();
+                    let j_end: usize = breakpoints[b_j + 1].into();
+                    for i in &indices[i_start..i_end] {
+                        for j in &indices[j_start..j_end] {
+                            let ii = *i.min(j);
+                            let jj = *i.max(j);
+                            if jj - ii >= exclusion_zone {
+                                fun(ii, jj);
+                            }
+                        }
+                    }
+
+                    b_j += 1;
+                }
+                b_i += 1;
+            }
+        }
     }
 }
 
@@ -120,6 +219,7 @@ impl<'a, T> UnsafeSlice<'a, T> {
     }
 }
 
+#[inline]
 fn get_minimal_index_pair(idx: usize) -> (usize, usize) {
     let sqrt = (idx as f64).sqrt() as usize;
     if idx == sqrt * sqrt + 2 * sqrt {
@@ -239,8 +339,9 @@ impl HashCollection {
         &self.pools[idx..idx + K_HALF]
     }
 
-    pub fn half_hashes(&self, i: usize, repetition: usize) -> (&[u8], &[u8]) {
-        let (l_trep, r_trep) = get_minimal_index_pair(repetition);
+    #[inline]
+    pub fn half_hashes(&self, i: usize, l_trep: usize, r_trep: usize) -> (&[u8], &[u8]) {
+        // let (l_trep, r_trep) = get_minimal_index_pair(repetition);
         let l_idx = K * self.n_subsequences * l_trep + i * K;
         let r_idx = K * self.n_subsequences * r_trep + i * K + K_HALF;
         let l = &self.pools[l_idx..l_idx + K_HALF];
@@ -248,10 +349,18 @@ impl HashCollection {
         (l, r)
     }
 
-    #[cfg(test)]
-    pub fn extended_hash_value(&self, i: usize, repetition: usize) -> [u8; 32] {
+    #[inline]
+    pub fn half_hashes_simd(&self, i: usize, l_trep: usize, r_trep: usize) -> (u8x16, u8x16) {
+        let l_idx = K * self.n_subsequences * l_trep + i * K;
+        let r_idx = K * self.n_subsequences * r_trep + i * K + K_HALF;
+        let l = u8x16::try_from(&self.pools[l_idx..l_idx + K_HALF]).unwrap();
+        let r = u8x16::try_from(&self.pools[r_idx..r_idx + K_HALF]).unwrap();
+        (l, r)
+    }
+
+    pub fn extended_hash_value(&self, i: usize, l_trep: usize, r_trep: usize) -> [u8; 32] {
         let mut output = [0; K];
-        let (l, r) = self.half_hashes(i, repetition);
+        let (l, r) = self.half_hashes(i, l_trep, r_trep);
         let mut h = 0;
         while h < K_HALF {
             output[2 * h] = l[h];
@@ -268,8 +377,9 @@ impl HashCollection {
     }
 
     pub fn hash_value(&self, i: usize, prefix: usize, repetition: usize) -> HashValue {
+        let (l_trep, r_trep) = get_minimal_index_pair(repetition);
         let mut hv: [u8; 32] = [0; 32];
-        let (l, r) = self.half_hashes(i, repetition);
+        let (l, r) = self.half_hashes(i, l_trep, r_trep);
         for h in 0..usize::div_ceil(prefix, 2) {
             hv[2 * h] = l[h];
             hv[2 * h + 1] = r[h];
@@ -286,8 +396,9 @@ impl HashCollection {
     pub fn first_collision_baseline(&self, i: usize, j: usize, prefix: usize) -> Option<usize> {
         (0..self.hasher.repetitions)
             .filter(|&rep| {
-                let ihash = &self.extended_hash_value(i, rep)[0..prefix];
-                let jhash = &self.extended_hash_value(j, rep)[0..prefix];
+                let (l_trep, r_trep) = get_minimal_index_pair(rep);
+                let ihash = &self.extended_hash_value(i, l_trep, r_trep)[0..prefix];
+                let jhash = &self.extended_hash_value(j, l_trep, r_trep)[0..prefix];
                 ihash == jhash
             })
             .next()
@@ -328,6 +439,105 @@ impl HashCollection {
         }
 
         get_minimal_repetition(self.hasher.repetitions, rindex?, lindex?)
+    }
+
+    #[inline]
+    pub fn eq_hashes(
+        &self,
+        l_prefix: usize,
+        r_prefix: usize,
+        l_trep: usize,
+        r_trep: usize,
+        i: usize,
+        j: usize,
+    ) -> bool {
+        let (l_i, r_i) = self.half_hashes(i, l_trep, r_trep);
+        let (l_j, r_j) = self.half_hashes(j, l_trep, r_trep);
+        l_i[..l_prefix] == l_j[..l_prefix] && r_i[..r_prefix] == r_j[..r_prefix]
+    }
+
+    #[inline]
+    pub fn cmp_hashes(
+        &self,
+        l_trep: usize,
+        r_trep: usize,
+        i: usize,
+        j: usize,
+    ) -> std::cmp::Ordering {
+        use std::simd::ToBitMask;
+        let (l_i, r_i) = self.half_hashes_simd(i, l_trep, r_trep);
+        let (l_j, r_j) = self.half_hashes_simd(j, l_trep, r_trep);
+
+        let l_eq = l_i.simd_eq(l_j);
+        let r_eq = r_i.simd_eq(r_j);
+
+        let l_ne_pos = l_eq.to_bitmask().trailing_ones() as usize;
+        let r_ne_pos = r_eq.to_bitmask().trailing_ones() as usize;
+
+        if l_ne_pos == r_ne_pos && l_ne_pos == K_HALF {
+            return Ordering::Equal;
+        }
+
+        let res = if l_ne_pos <= r_ne_pos {
+            l_i[l_ne_pos].cmp(&l_j[l_ne_pos])
+        } else {
+            r_i[r_ne_pos].cmp(&r_j[r_ne_pos])
+        };
+
+        debug_assert_eq!(
+            self.extended_hash_value(i, l_trep, r_trep)
+                .cmp(&self.extended_hash_value(j, l_trep, r_trep)),
+            res
+        );
+
+        res
+    }
+
+    /// Returns a vector of the indices of the subsequences, sorted by the
+    /// lexicographic order of the hash values of the given `repetition`
+    pub fn sorted_indices(&self, repetition: usize) -> Vec<usize> {
+        let (l_trep, r_trep) = get_minimal_index_pair(repetition);
+        let start = Instant::now();
+        eprintln!("Start sorting of indices for repetition {}", repetition);
+        let mut indices: Vec<usize> = (0..self.n_subsequences).collect();
+        indices.sort_by(|i, j| self.cmp_hashes(l_trep, r_trep, *i, *j));
+        eprintln!(
+            "Sorted indices for repetition {}: {:?}, {:?} elems/sec",
+            repetition,
+            start.elapsed(),
+            indices.len() as f64 / start.elapsed().as_secs_f64()
+        );
+        indices
+    }
+
+    pub fn breakpoints(
+        &self,
+        repetition: usize,
+        prefix: usize,
+        previous_prefix: usize,
+        indices: &[usize],
+        output: &mut Vec<Breakpoint>,
+    ) {
+        let (l_trep, r_trep) = get_minimal_index_pair(repetition);
+        let (l_prefix, r_prefix) = Self::k_pair(prefix);
+        let (l_prefix_prev, r_prefix_prev) = Self::k_pair(previous_prefix);
+
+        // TODO optimize with exponential + binary search
+        output.clear();
+        output.push(Breakpoint::Current(0));
+
+        let mut last_idx = indices[0];
+        for ii in 1..self.n_subsequences {
+            let i = indices[ii];
+            if !self.eq_hashes(l_prefix, r_prefix, l_trep, r_trep, last_idx, i) {
+                output.push(Breakpoint::Current(ii));
+            } else if !self.eq_hashes(l_prefix_prev, r_prefix_prev, l_trep, r_trep, last_idx, i) {
+                output.push(Breakpoint::Previous(ii));
+            }
+            last_idx = i;
+        }
+
+        output.push(Breakpoint::Current(indices.len()));
     }
 
     pub fn group_subsequences(

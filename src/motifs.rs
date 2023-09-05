@@ -378,6 +378,8 @@ pub struct MotifsEnumerator {
     exclusion_zone: usize,
     hasher: Arc<Hasher>,
     pools: Arc<HashCollection>,
+    indices: Vec<Vec<usize>>,
+    breakpoints: Vec<Breakpoint>,
     column_buffer: Vec<(HashValue, u32)>,
     buckets: Vec<Range<usize>>,
     /// the current repetition
@@ -412,6 +414,13 @@ impl MotifsEnumerator {
         let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
         let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
         let pools = Arc::new(pools);
+
+        let indices: Vec<Vec<usize>> = (0..repetitions)
+            .into_par_iter()
+            .map(|rep| pools.sorted_indices(rep))
+            .collect();
+        let breakpoints = Vec::new();
+
         eprintln!("Computed hash values in {:?}", start.elapsed());
         drop(fft_data);
 
@@ -438,6 +447,8 @@ impl MotifsEnumerator {
             exclusion_zone,
             hasher,
             pools,
+            indices,
+            breakpoints,
             column_buffer,
             buckets,
             rep: 0,
@@ -495,72 +506,91 @@ impl MotifsEnumerator {
         while self.to_return.is_empty() {
             assert!(self.depth > 0);
             assert!(self.rep < self.repetitions);
-
-            // Set up buckets for the current repetition
-            self.pools.group_subsequences(
-                self.depth,
-                self.rep,
-                self.exclusion_zone,
-                &mut self.column_buffer,
-                &mut self.buckets,
-            );
-            let n_buckets = self.buckets.len();
-            let chunk_size = std::cmp::max(1, n_buckets / (4 * rayon::current_num_threads()));
-
-            // counters for profiling
             let mut stats = ThreadLocal::new();
 
-            (0..n_buckets / chunk_size)
-                .into_par_iter()
-                .for_each(|chunk_i| {
+            // Set up the index breakpoints for the current repetitions
+            self.pools.breakpoints(
+                self.rep,
+                self.depth,
+                self.depth.min(K),
+                &self.indices[self.rep],
+                &mut self.breakpoints,
+            );
+
+            // Set up buckets for the current repetition
+            // self.pools.group_subsequences(
+            //     self.depth,
+            //     self.rep,
+            //     self.exclusion_zone,
+            //     &mut self.column_buffer,
+            //     &mut self.buckets,
+            // );
+            // let n_buckets = self.buckets.len();
+            // let chunk_size = std::cmp::max(1, n_buckets / (4 * rayon::current_num_threads()));
+
+            Breakpoint::for_each_pair(
+                &self.breakpoints,
+                &self.indices[self.rep],
+                self.exclusion_zone,
+                |a_idx, b_idx| {
                     let mut tl_stats = stats.get_or(|| RefCell::new(Stats::default())).borrow_mut();
+                    tl_stats.inc_cands();
+                    tl_stats.inc_dists();
+                    self.state.update(&self.ts, a_idx as usize, b_idx as usize);
+                },
+            );
 
-                    for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
-                        let bucket = &self.column_buffer[self.buckets[i].clone()];
-
-                        for (_, a_idx) in bucket.iter() {
-                            let a_idx = *a_idx as usize;
-                            // let a_already_checked = rep_bounds[a_idx].clone();
-                            // let a_hash_idx = hash_range.start + a_offset;
-                            for (_, b_idx) in bucket.iter() {
-                                let b_idx = *b_idx as usize;
-                                //// Here we handle trivial matches: we don't consider a pair if the difference between
-                                //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
-                                if a_idx + self.exclusion_zone < b_idx {
-                                    tl_stats.inc_cands();
-
-                                    //// We only process the pair if this is the first repetition in which
-                                    //// they collide. We get this information from the pool of bits
-                                    //// from which hash values for all repetitions are extracted.
-                                    // if let Some(first_colliding_repetition) =
-                                    //     self.pools.first_collision(a_idx, b_idx, self.depth)
-                                    {
-                                        //// This is the first collision in this iteration, _and_ the pair didn't collide
-                                        //// at a deeper level.
-                                        if
-                                        //first_colliding_repetition == self.rep
-                                        self
-                                            .previous_depth
-                                            .map(|d| {
-                                                self.pools
-                                                    .first_collision(a_idx, b_idx, d)
-                                                    .is_none()
-                                            })
-                                            .unwrap_or(true)
-                                        {
-                                            tl_stats.inc_dists();
-                                            self.state.update(
-                                                &self.ts,
-                                                a_idx as usize,
-                                                b_idx as usize,
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                });
+            // (0..n_buckets / chunk_size)
+            //     .into_par_iter()
+            //     .for_each(|chunk_i| {
+            //         let mut tl_stats = stats.get_or(|| RefCell::new(Stats::default())).borrow_mut();
+            //
+            //         for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
+            //             let bucket = &self.column_buffer[self.buckets[i].clone()];
+            //
+            //             for (_, a_idx) in bucket.iter() {
+            //                 let a_idx = *a_idx as usize;
+            //                 // let a_already_checked = rep_bounds[a_idx].clone();
+            //                 // let a_hash_idx = hash_range.start + a_offset;
+            //                 for (_, b_idx) in bucket.iter() {
+            //                     let b_idx = *b_idx as usize;
+            //                     //// Here we handle trivial matches: we don't consider a pair if the difference between
+            //                     //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
+            //                     if a_idx + self.exclusion_zone < b_idx {
+            //                         tl_stats.inc_cands();
+            //
+            //                         //// We only process the pair if this is the first repetition in which
+            //                         //// they collide. We get this information from the pool of bits
+            //                         //// from which hash values for all repetitions are extracted.
+            //                         // if let Some(first_colliding_repetition) =
+            //                         //     self.pools.first_collision(a_idx, b_idx, self.depth)
+            //                         {
+            //                             //// This is the first collision in this iteration, _and_ the pair didn't collide
+            //                             //// at a deeper level.
+            //                             if
+            //                             //first_colliding_repetition == self.rep
+            //                             self
+            //                                 .previous_depth
+            //                                 .map(|d| {
+            //                                     self.pools
+            //                                         .first_collision(a_idx, b_idx, d)
+            //                                         .is_none()
+            //                                 })
+            //                                 .unwrap_or(true)
+            //                             {
+            //                                 tl_stats.inc_dists();
+            //                                 self.state.update(
+            //                                     &self.ts,
+            //                                     a_idx as usize,
+            //                                     b_idx as usize,
+            //                                 );
+            //                             }
+            //                         }
+            //                     }
+            //                 }
+            //             }
+            //         }
+            //     });
 
             // Add to the output all the new top pairs that have been found
             self.exec_stats = stats
