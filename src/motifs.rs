@@ -294,11 +294,82 @@ impl Stats {
     }
 }
 
-pub struct MotifsEnumerator {
+struct PairMotifState {
+    k: usize,
+    exclusion_zone: usize,
     start: Instant,
+    tl_topk: ThreadLocal<RefCell<TopK>>,
+    topk: TopK,
+}
+
+impl PairMotifState {
+    fn new(k: usize, exclusion_zone: usize) -> Self {
+        Self {
+            k,
+            exclusion_zone,
+            start: Instant::now(),
+            tl_topk: Default::default(),
+            topk: TopK::new(k, exclusion_zone),
+        }
+    }
+
+    fn update(&self, ts: &WindowedTimeseries, a_idx: usize, b_idx: usize) {
+        let d = zeucl(ts, a_idx, b_idx);
+        if d.is_finite() {
+            let m = Motif {
+                idx_a: a_idx as usize,
+                idx_b: b_idx as usize,
+                distance: d,
+                elapsed: None,
+                discovered: self.start.elapsed(),
+            };
+            self.tl_topk
+                .get_or(|| RefCell::new(TopK::new(self.k, self.exclusion_zone)))
+                .borrow_mut()
+                .insert(m);
+        }
+    }
+
+    /// merge the thread-local topk queues
+    fn merge_threads(&mut self) {
+        let tmp = self.tl_topk.iter_mut().reduce(|a, b| {
+            a.borrow_mut().add_all(&mut b.borrow_mut());
+            a
+        });
+        if let Some(tmp) = tmp {
+            self.topk.add_all(&mut tmp.borrow_mut());
+        }
+    }
+
+    fn is_done(&mut self) -> bool {
+        self.merge_threads();
+        self.topk.num_confirmed() == self.k
+    }
+
+    fn emit<F: Fn(f64) -> bool>(&mut self, predicate: F) -> Vec<Motif> {
+        self.merge_threads();
+        let mut ret: Vec<Motif> = Vec::new();
+        let elapsed = self.start.elapsed();
+        self.topk.for_each(|m| {
+            if m.elapsed.is_none() {
+                if predicate(m.distance) {
+                    m.elapsed.replace(elapsed);
+                    ret.push(*m);
+                }
+            }
+        });
+        ret
+    }
+
+    fn next_distance(&self) -> Option<f64> {
+        self.topk.first_not_confirmed().map(|m| m.distance)
+    }
+}
+
+pub struct MotifsEnumerator {
     ts: Arc<WindowedTimeseries>,
     pub max_k: usize,
-    topk: TopK,
+    state: PairMotifState,
     to_return: BinaryHeap<Reverse<Motif>>,
     /// used to cache the motifs already discovered so that we can use the enumerator as a collection
     returned: Vec<Motif>,
@@ -309,7 +380,6 @@ pub struct MotifsEnumerator {
     pools: Arc<HashCollection>,
     column_buffer: Vec<(HashValue, u32)>,
     buckets: Vec<Range<usize>>,
-    tl_top: ThreadLocal<RefCell<TopK>>,
     /// the current repetition
     rep: usize,
     /// the current depth
@@ -345,14 +415,11 @@ impl MotifsEnumerator {
         eprintln!("Computed hash values in {:?}", start.elapsed());
         drop(fft_data);
 
-        let topk = TopK::new(max_k, exclusion_zone);
-
         info!("tries exploration"; "tag" => "phase");
         // This vector holds the (sorted) hashed subsequences, and their index
         let column_buffer = Vec::new();
         // This vector holds the boundaries between buckets. We reuse the allocations
         let buckets = Vec::new();
-        let tl_top = ThreadLocal::new();
 
         let pbar = if show_progress {
             Some(Self::build_progress_bar(K, repetitions))
@@ -361,10 +428,9 @@ impl MotifsEnumerator {
         };
 
         Self {
-            start,
             ts,
             max_k,
-            topk,
+            state: PairMotifState::new(max_k, exclusion_zone),
             to_return: BinaryHeap::new(),
             returned: Vec::new(),
             repetitions,
@@ -374,7 +440,6 @@ impl MotifsEnumerator {
             pools,
             column_buffer,
             buckets,
-            tl_top,
             rep: 0,
             depth: K,
             previous_depth: None,
@@ -421,7 +486,7 @@ impl MotifsEnumerator {
         }
 
         // check we already returned all we could
-        if self.topk.num_confirmed() == self.max_k {
+        if self.state.is_done() {
             self.pbar.as_ref().map(|pbar| pbar.finish_and_clear());
             return None;
         }
@@ -448,8 +513,6 @@ impl MotifsEnumerator {
             (0..n_buckets / chunk_size)
                 .into_par_iter()
                 .for_each(|chunk_i| {
-                    // let tl_top = tl_top.get_or(|| RefCell::new(TopK::new(topk, exclusion_zone)));
-                    let tl_top = self.tl_top.get_or(|| RefCell::new(self.topk.clone()));
                     let mut tl_stats = stats.get_or(|| RefCell::new(Stats::default())).borrow_mut();
 
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
@@ -484,21 +547,12 @@ impl MotifsEnumerator {
                                                 })
                                                 .unwrap_or(true)
                                         {
-                                            //// After computing the distance between the two subsequences,
-                                            //// we try to insert the pair in the top data structure
-                                            let d = zeucl(&self.ts, a_idx, b_idx);
-                                            if d.is_finite() {
-                                                tl_stats.inc_dists();
-
-                                                let m = Motif {
-                                                    idx_a: a_idx as usize,
-                                                    idx_b: b_idx as usize,
-                                                    distance: d,
-                                                    elapsed: None,
-                                                    discovered: self.start.elapsed(),
-                                                };
-                                                tl_top.borrow_mut().insert(m);
-                                            }
+                                            tl_stats.inc_dists();
+                                            self.state.update(
+                                                &self.ts,
+                                                a_idx as usize,
+                                                b_idx as usize,
+                                            );
                                         }
                                     }
                                 }
@@ -508,11 +562,6 @@ impl MotifsEnumerator {
                 });
 
             // Add to the output all the new top pairs that have been found
-            let mut tmp_top = TopK::new(self.max_k, self.exclusion_zone);
-            self.tl_top
-                .iter_mut()
-                .for_each(|top| tmp_top.add_all(&mut top.borrow_mut()));
-            self.topk.add_all(&mut tmp_top);
             self.exec_stats = stats
                 .iter_mut()
                 .map(|s| s.take())
@@ -521,22 +570,13 @@ impl MotifsEnumerator {
                 .merge(&self.exec_stats);
 
             // Confirm the pairs that can be confirmed in this iteration
-            let elapsed = self.start.elapsed();
             let depth = self.depth;
             let rep = self.rep;
             let delta = self.delta;
             let hasher = Arc::clone(&self.hasher);
-            let mut buf = Vec::new();
-            self.topk.for_each(|m| {
-                if m.elapsed.is_none() {
-                    // let p = hasher.collision_probability_at(m.distance);
-                    // if Self::stopping_condition(p, depth, previous_depth, rep, repetitions, delta) {
-                    if hasher.failure_probability(m.distance, rep, depth) <= delta {
-                        m.elapsed.replace(elapsed);
-                        buf.push(m.clone());
-                    }
-                }
-            });
+            let mut buf = self
+                .state
+                .emit(|d| hasher.failure_probability(d, rep, depth) <= delta);
             self.to_return.extend(buf.drain(..).map(|m| Reverse(m)));
 
             self.pbar.as_ref().map(|pbar| pbar.inc(1));
@@ -546,9 +586,8 @@ impl MotifsEnumerator {
             if self.rep >= self.repetitions {
                 self.rep = 0;
                 self.previous_depth.replace(self.depth);
-                if let Some(first_not_confirmed) = self.topk.first_not_confirmed() {
-                    let new_depth =
-                        self.level_for_distance(first_not_confirmed.distance, self.depth);
+                if let Some(distance) = self.state.next_distance() {
+                    let new_depth = self.level_for_distance(distance, self.depth);
                     if new_depth == depth {
                         self.depth -= 1;
                     } else {
@@ -617,10 +656,7 @@ mod test {
             let ts = Arc::new(WindowedTimeseries::new(ts, w, true));
 
             let motif = *motifs(ts, 1, 256, 0.001, 12435).first().unwrap();
-            println!(
-                "{} -- {} actual {} expected {}",
-                motif.idx_a, motif.idx_b, motif.distance, d
-            );
+            dbg!(motif);
             assert!((motif.idx_a as isize - a as isize).abs() < w as isize);
             assert!((motif.idx_b as isize - b as isize).abs() < w as isize);
             assert!(motif.distance <= d + 0.01);
