@@ -45,6 +45,10 @@ struct Config {
     pub seed: u64,
 
     #[argh(switch)]
+    /// profile the code while running, and save a `profile.pb` file to open with pprof
+    pub profile: bool,
+
+    #[argh(switch)]
     /// wether meand and std computations should be at the best precision, at the expense of running time
     pub precise: bool,
 
@@ -105,6 +109,18 @@ fn main() -> Result<()> {
         "time_s" => input_elapsed.as_secs_f64()
     );
 
+    let profiler = if config.profile {
+        Some(
+            pprof::ProfilerGuardBuilder::default()
+                .frequency(1000)
+                .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+                .build()
+                .unwrap(),
+        )
+    } else {
+        None
+    };
+
     let motifs: Vec<Motif> = motifs(
         Arc::new(ts),
         config.motifs,
@@ -112,6 +128,22 @@ fn main() -> Result<()> {
         config.failure_probability,
         config.seed,
     );
+
+    if let Some(profiler) = profiler {
+        use pprof::protos::Message;
+        use std::io::Write;
+        match profiler.report().build() {
+            Ok(report) => {
+                let mut file = std::fs::File::create("profile.pb").unwrap();
+                let profile = report.pprof().unwrap();
+
+                let mut content = Vec::new();
+                profile.encode(&mut content).unwrap();
+                file.write_all(&content).unwrap();
+            }
+            Err(_) => {}
+        };
+    }
 
     monitor_flag.store(false, std::sync::atomic::Ordering::SeqCst);
     monitor.join().unwrap();

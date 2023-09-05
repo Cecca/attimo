@@ -469,22 +469,20 @@ impl MotifsEnumerator {
                                     //// We only process the pair if this is the first repetition in which
                                     //// they collide. We get this information from the pool of bits
                                     //// from which hash values for all repetitions are extracted.
-                                    if true
-                                    // let Some(first_colliding_repetition) =
-                                    // self.pools.first_collision(a_idx, b_idx, self.depth)
+                                    if let Some(first_colliding_repetition) =
+                                        self.pools.first_collision(a_idx, b_idx, self.depth)
                                     {
                                         //// This is the first collision in this iteration, _and_ the pair didn't collide
                                         //// at a deeper level.
-                                        if true
-                                        // first_colliding_repetition == self.rep
-                                        // && self
-                                        //     .previous_depth
-                                        //     .map(|d| {
-                                        //         self.pools
-                                        //             .first_collision(a_idx, b_idx, d)
-                                        //             .is_none()
-                                        //     })
-                                        //     .unwrap_or(true)
+                                        if first_colliding_repetition == self.rep
+                                            && self
+                                                .previous_depth
+                                                .map(|d| {
+                                                    self.pools
+                                                        .first_collision(a_idx, b_idx, d)
+                                                        .is_none()
+                                                })
+                                                .unwrap_or(true)
                                         {
                                             //// After computing the distance between the two subsequences,
                                             //// we try to insert the pair in the top data structure

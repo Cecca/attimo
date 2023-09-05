@@ -36,3 +36,5 @@ docs/presentation/algo.fdb_latexmk
 docs/presentation/algo.fls
 docs/presentation/algo.svg
 docs/presentation/algo.synctex.gz
+profile.pb
+profile*.svg
