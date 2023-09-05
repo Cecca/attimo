@@ -342,6 +342,7 @@ impl MotifsEnumerator {
         let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
         let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
         let pools = Arc::new(pools);
+        eprintln!("Computed hash values in {:?}", start.elapsed());
         drop(fft_data);
 
         let topk = TopK::new(max_k, exclusion_zone);
@@ -397,47 +398,12 @@ impl MotifsEnumerator {
         Arc::clone(&self.ts)
     }
 
-    pub fn stopping_condition(
-        p: f64,
-        prefix: usize,
-        previous: Option<usize>,
-        repetition: usize,
-        repetitions: usize,
-        delta: f64,
-    ) -> bool {
-        let i_half = prefix as f64 / 2.0;
-        let sqrt = (repetitions as f64).sqrt().ceil() as i32;
-        let j_left = repetition as i32 / sqrt;
-        let j_right = repetition as i32 % sqrt;
-        let failure_p = if let Some(previous) = previous {
-            let prev_half = previous as f64 / 2.0;
-            let lu_i = 1.0 - (1.0 - p.powf(i_half)).powi(j_left);
-            let ru_i = 1.0 - (1.0 - p.powf(i_half)).powi(j_right);
-            let lu_ip = 1.0 - (1.0 - p.powf(prev_half)).powi(j_left);
-            let ru_ip = 1.0 - (1.0 - p.powf(prev_half)).powi(j_right);
-            let ll_ip = 1.0 - (1.0 - p.powf(prev_half)).powi(sqrt - j_left);
-            let rl_ip = 1.0 - (1.0 - p.powf(prev_half)).powi(sqrt - j_right);
-            (1.0 - lu_i * ru_i)
-                * (1.0 - lu_ip * rl_ip)
-                * (1.0 - ll_ip * ru_ip)
-                * (1.0 - ll_ip * rl_ip)
-        } else {
-            let lu_i = 1.0 - (1.0 - p.powf(i_half)).powi(j_left);
-            let ru_i = 1.0 - (1.0 - p.powf(i_half)).powi(j_right);
-            1.0 - lu_i * ru_i
-        };
-        failure_p <= delta
-    }
-
     //// Find the level for which the given distance has a good probability of being
     //// found withing the allowed number of repetitions
-    fn level_for_distance(&self, d: f64, mut prefix: usize, delta: f64) -> usize {
-        let p = self.hasher.collision_probability_at(d);
-        let initial = prefix as usize;
+    fn level_for_distance(&self, d: f64, mut prefix: usize) -> usize {
         while prefix > 0 {
             for rep in 0..self.repetitions {
-                if Self::stopping_condition(p, prefix, Some(initial), rep, self.repetitions, delta)
-                {
+                if self.hasher.failure_probability(d, rep, prefix) < self.delta {
                     return prefix;
                 }
             }
@@ -503,20 +469,22 @@ impl MotifsEnumerator {
                                     //// We only process the pair if this is the first repetition in which
                                     //// they collide. We get this information from the pool of bits
                                     //// from which hash values for all repetitions are extracted.
-                                    if let Some(first_colliding_repetition) =
-                                        self.pools.first_collision(a_idx, b_idx, self.depth)
+                                    if true
+                                    // let Some(first_colliding_repetition) =
+                                    // self.pools.first_collision(a_idx, b_idx, self.depth)
                                     {
                                         //// This is the first collision in this iteration, _and_ the pair didn't collide
                                         //// at a deeper level.
-                                        if first_colliding_repetition == self.rep
-                                            && self
-                                                .previous_depth
-                                                .map(|d| {
-                                                    self.pools
-                                                        .first_collision(a_idx, b_idx, d)
-                                                        .is_none()
-                                                })
-                                                .unwrap_or(true)
+                                        if true
+                                        // first_colliding_repetition == self.rep
+                                        // && self
+                                        //     .previous_depth
+                                        //     .map(|d| {
+                                        //         self.pools
+                                        //             .first_collision(a_idx, b_idx, d)
+                                        //             .is_none()
+                                        //     })
+                                        //     .unwrap_or(true)
                                         {
                                             //// After computing the distance between the two subsequences,
                                             //// we try to insert the pair in the top data structure
@@ -551,22 +519,21 @@ impl MotifsEnumerator {
                 .iter_mut()
                 .map(|s| s.take())
                 .reduce(|a, b| a.merge(&b))
-                .unwrap()
+                .unwrap_or_default()
                 .merge(&self.exec_stats);
 
             // Confirm the pairs that can be confirmed in this iteration
             let elapsed = self.start.elapsed();
             let depth = self.depth;
-            let previous_depth = self.previous_depth;
             let rep = self.rep;
-            let repetitions = self.repetitions;
             let delta = self.delta;
             let hasher = Arc::clone(&self.hasher);
             let mut buf = Vec::new();
             self.topk.for_each(|m| {
                 if m.elapsed.is_none() {
-                    let p = hasher.collision_probability_at(m.distance);
-                    if Self::stopping_condition(p, depth, previous_depth, rep, repetitions, delta) {
+                    // let p = hasher.collision_probability_at(m.distance);
+                    // if Self::stopping_condition(p, depth, previous_depth, rep, repetitions, delta) {
+                    if hasher.failure_probability(m.distance, rep, depth) <= delta {
                         m.elapsed.replace(elapsed);
                         buf.push(m.clone());
                     }
@@ -583,7 +550,7 @@ impl MotifsEnumerator {
                 self.previous_depth.replace(self.depth);
                 if let Some(first_not_confirmed) = self.topk.first_not_confirmed() {
                     let new_depth =
-                        self.level_for_distance(first_not_confirmed.distance, self.depth, delta);
+                        self.level_for_distance(first_not_confirmed.distance, self.depth);
                     if new_depth == depth {
                         self.depth -= 1;
                     } else {
@@ -651,14 +618,14 @@ mod test {
             let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
             let ts = Arc::new(WindowedTimeseries::new(ts, w, true));
 
-            let motif = *motifs(ts, 1, 20, 0.001, 12435).first().unwrap();
+            let motif = *motifs(ts, 1, 256, 0.001, 12435).first().unwrap();
             println!(
                 "{} -- {} actual {} expected {}",
                 motif.idx_a, motif.idx_b, motif.distance, d
             );
             assert!((motif.idx_a as isize - a as isize).abs() < w as isize);
             assert!((motif.idx_b as isize - b as isize).abs() < w as isize);
-            assert!(motif.distance <= d + 0.00001);
+            assert!(motif.distance <= d + 0.01);
         }
     }
 

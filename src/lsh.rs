@@ -120,6 +120,27 @@ impl<'a, T> UnsafeSlice<'a, T> {
     }
 }
 
+fn get_minimal_index_pair(idx: usize) -> (usize, usize) {
+    let sqrt = (idx as f64).sqrt() as usize;
+    if idx == sqrt * sqrt + 2 * sqrt {
+        (sqrt, sqrt)
+    } else if idx >= sqrt * sqrt + sqrt {
+        (sqrt, idx - (sqrt * sqrt + sqrt))
+    } else {
+        (idx - sqrt * sqrt, sqrt)
+    }
+}
+
+fn get_minimal_repetition(repetitions: usize, i: usize, j: usize) -> Option<usize> {
+    for rep in 0..repetitions {
+        let pair = get_minimal_index_pair(rep);
+        if pair == (i, j) {
+            return Some(rep);
+        }
+    }
+    None
+}
+
 //// This data structure contains all the information needed to generate the hash values for all the repeititions
 //// for all the subsequences.
 #[derive(Clone)]
@@ -204,23 +225,33 @@ impl HashCollection {
         }
     }
 
+    #[deprecated]
     pub fn left(&self, i: usize, repetition: usize) -> &[u8] {
         let trep = repetition % self.hasher.tensor_repetitions;
         let idx = K * self.n_subsequences * trep + i * K;
         &self.pools[idx..idx + K_HALF]
     }
 
+    #[deprecated]
     pub fn right(&self, i: usize, repetition: usize) -> &[u8] {
         let trep = repetition / self.hasher.tensor_repetitions;
         let idx = K * self.n_subsequences * trep + i * K + K_HALF;
         &self.pools[idx..idx + K_HALF]
     }
 
+    pub fn half_hashes(&self, i: usize, repetition: usize) -> (&[u8], &[u8]) {
+        let (l_trep, r_trep) = get_minimal_index_pair(repetition);
+        let l_idx = K * self.n_subsequences * l_trep + i * K;
+        let r_idx = K * self.n_subsequences * r_trep + i * K + K_HALF;
+        let l = &self.pools[l_idx..l_idx + K_HALF];
+        let r = &self.pools[r_idx..r_idx + K_HALF];
+        (l, r)
+    }
+
     #[cfg(test)]
     pub fn extended_hash_value(&self, i: usize, repetition: usize) -> [u8; 32] {
         let mut output = [0; K];
-        let l = &self.left(i, repetition);
-        let r = &self.right(i, repetition);
+        let (l, r) = self.half_hashes(i, repetition);
         let mut h = 0;
         while h < K_HALF {
             output[2 * h] = l[h];
@@ -238,8 +269,7 @@ impl HashCollection {
 
     pub fn hash_value(&self, i: usize, prefix: usize, repetition: usize) -> HashValue {
         let mut hv: [u8; 32] = [0; 32];
-        let l = &self.left(i, repetition);
-        let r = &self.right(i, repetition);
+        let (l, r) = self.half_hashes(i, repetition);
         for h in 0..usize::div_ceil(prefix, 2) {
             hv[2 * h] = l[h];
             hv[2 * h + 1] = r[h];
@@ -297,12 +327,7 @@ impl HashCollection {
             jidx += jump;
         }
 
-        let idx = rindex? * self.hasher.tensor_repetitions + lindex?;
-        if idx < self.hasher.repetitions {
-            Some(idx)
-        } else {
-            None
-        }
+        get_minimal_repetition(self.hasher.repetitions, rindex?, lindex?)
     }
 
     pub fn group_subsequences(
@@ -411,6 +436,46 @@ impl Hasher {
         1.0 - 2.0 * normal.cdf(-r / d)
             - (2.0 / ((std::f64::consts::PI * 2.0).sqrt() * (r / d)))
                 * (1.0 - (-r * r / (2.0 * d * d)).exp())
+    }
+
+    pub fn failure_probability(&self, zeucl_dist: f64, reps: usize, prefix: usize) -> f64 {
+        let p = self.collision_probability_at(zeucl_dist);
+
+        // TODO: precompute all these numbers
+        let cur_left_bits = (prefix as f64 / 2.0).floor() as i32;
+        let cur_right_bits = (prefix as f64 / 2.0).ceil() as i32;
+        assert_eq!(cur_left_bits + cur_right_bits, prefix as i32);
+
+        let prev_left_bits = ((prefix + 1) as f64 / 2.0).floor() as i32;
+        let prev_right_bits = ((prefix + 1) as f64 / 2.0).ceil() as i32;
+        assert_eq!(prev_left_bits + prev_right_bits, prefix as i32 + 1);
+        assert!(prev_left_bits >= cur_left_bits);
+        assert!(prev_right_bits >= cur_right_bits);
+
+        let up_treps = (reps as f64 + 1.0).sqrt().floor() as i32;
+        let low_treps = self.tensor_repetitions as i32 - up_treps;
+
+        // Probabilities of *not* colliding on a *single* repetition with a given number of bits
+        let cur_left_fail = 1.0 - p.powi(cur_left_bits);
+        let cur_right_fail = 1.0 - p.powi(cur_right_bits);
+
+        let prev_left_fail = 1.0 - p.powi(prev_left_bits);
+        let prev_right_fail = 1.0 - p.powi(prev_right_bits);
+
+        // Probabilities of collising in *at least* on repetition
+        let collide_up_left_cur = 1.0 - cur_left_fail.powi(up_treps);
+        let collide_up_right_cur = 1.0 - cur_right_fail.powi(up_treps);
+
+        let collide_up_left_prev = 1.0 - prev_left_fail.powi(up_treps);
+        let collide_up_right_prev = 1.0 - prev_right_fail.powi(up_treps);
+
+        let collide_low_left_prev = 1.0 - prev_left_fail.powi(low_treps);
+        let collide_low_right_prev = 1.0 - prev_right_fail.powi(low_treps);
+
+        (1.0 - collide_up_left_cur * collide_up_right_cur)
+            * (1.0 - collide_low_left_prev * collide_low_right_prev)
+            * (1.0 - collide_up_left_prev * collide_low_right_prev)
+            * (1.0 - collide_low_left_prev * collide_up_right_prev)
     }
 
     //// ## Estimating the width parameter
