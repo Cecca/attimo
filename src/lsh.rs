@@ -28,8 +28,8 @@
 
 use crate::motifs::Motif;
 use crate::{alloc_cnt, allocator::*};
-use std::convert::TryFrom;
-use std::simd::{u8x16, Simd, SimdPartialEq};
+use std::convert::{TryFrom, TryInto};
+use std::simd::{u8x16, u8x32, Simd, SimdPartialEq};
 // TODO Remove this dependency
 use crate::sort::*;
 use crate::timeseries::{FFTData, WindowedTimeseries};
@@ -340,12 +340,17 @@ impl HashCollection {
     }
 
     #[inline]
-    pub fn half_hashes(&self, i: usize, l_trep: usize, r_trep: usize) -> (&[u8], &[u8]) {
+    pub fn half_hashes(
+        &self,
+        i: usize,
+        l_trep: usize,
+        r_trep: usize,
+    ) -> (&[u8; K_HALF], &[u8; K_HALF]) {
         // let (l_trep, r_trep) = get_minimal_index_pair(repetition);
         let l_idx = K * self.n_subsequences * l_trep + i * K;
         let r_idx = K * self.n_subsequences * r_trep + i * K + K_HALF;
-        let l = &self.pools[l_idx..l_idx + K_HALF];
-        let r = &self.pools[r_idx..r_idx + K_HALF];
+        let l: &[u8; K_HALF] = self.pools[l_idx..l_idx + K_HALF].try_into().unwrap();
+        let r: &[u8; K_HALF] = self.pools[r_idx..r_idx + K_HALF].try_into().unwrap();
         (l, r)
     }
 
@@ -368,6 +373,18 @@ impl HashCollection {
             h += 1;
         }
         output
+    }
+
+    pub fn extended_hash_value_simd(&self, i: usize, l_trep: usize, r_trep: usize) -> u8x32 {
+        let mut output = [0; K];
+        let (l, r) = self.half_hashes(i, l_trep, r_trep);
+        let mut h = 0;
+        while h < K_HALF {
+            output[2 * h] = l[h];
+            output[2 * h + 1] = r[h];
+            h += 1;
+        }
+        output.into()
     }
 
     pub fn k_pair(k: usize) -> (usize, usize) {
@@ -497,10 +514,28 @@ impl HashCollection {
     /// lexicographic order of the hash values of the given `repetition`
     pub fn sorted_indices(&self, repetition: usize) -> Vec<usize> {
         let (l_trep, r_trep) = get_minimal_index_pair(repetition);
+        let mut scratch = Vec::with_capacity(self.n_subsequences);
+        let mut indices: Vec<usize> = Vec::with_capacity(self.n_subsequences);
+        let start = Instant::now();
+        eprintln!("Computing extended hashes for repetition {}", repetition);
+        scratch.par_extend(
+            (0..self.n_subsequences)
+                .into_par_iter()
+                .map(|i| (self.extended_hash_value_simd(i, l_trep, r_trep), i)),
+        );
+        eprintln!(
+            "Computed extended hashes for repetition {}: {:?}, {:?} elems/sec",
+            repetition,
+            start.elapsed(),
+            indices.len() as f64 / start.elapsed().as_secs_f64()
+        );
+
         let start = Instant::now();
         eprintln!("Start sorting of indices for repetition {}", repetition);
-        let mut indices: Vec<usize> = (0..self.n_subsequences).collect();
-        indices.sort_by(|i, j| self.cmp_hashes(l_trep, r_trep, *i, *j));
+        scratch.par_sort_by(|a, b| a.0.cmp(&b.0));
+        indices.extend(scratch.drain(..).map(|p| p.1));
+        // indices.extend(0..self.n_subsequences);
+        // indices.par_sort_by(|i, j| self.cmp_hashes(l_trep, r_trep, *i, *j));
         eprintln!(
             "Sorted indices for repetition {}: {:?}, {:?} elems/sec",
             repetition,

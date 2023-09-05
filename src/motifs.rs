@@ -416,7 +416,7 @@ impl MotifsEnumerator {
         let pools = Arc::new(pools);
 
         let indices: Vec<Vec<usize>> = (0..repetitions)
-            .into_par_iter()
+            .into_iter()
             .map(|rep| pools.sorted_indices(rep))
             .collect();
         let breakpoints = Vec::new();
