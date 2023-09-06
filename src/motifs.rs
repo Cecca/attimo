@@ -262,7 +262,16 @@ pub fn motifs(
     delta: f64,
     seed: u64,
 ) -> Vec<Motif> {
-    let mut enumerator = MotifsEnumerator::new(ts, topk, repetitions, delta, seed, true);
+    let exclusion_zone = ts.w;
+    let mut enumerator = MotifsEnumerator::<PairMotifState>::new(
+        ts,
+        topk,
+        repetitions,
+        delta,
+        || PairMotifState::new(topk, exclusion_zone),
+        seed,
+        true,
+    );
     let mut res = Vec::new();
     while let Some(m) = enumerator.next() {
         eprintln!("Confirm {:?}", m);
@@ -294,6 +303,18 @@ impl Stats {
     }
 }
 
+pub trait State {
+    type Output: Sync + Send + std::fmt::Debug + Clone + Ord;
+    /// update the state with the given pair of subsequences
+    fn update(&self, ts: &WindowedTimeseries, a: usize, b: usize);
+    /// are we done with the computation?
+    fn is_done(&mut self) -> bool;
+    /// emit a bunch of output, if any
+    fn emit<F: Fn(f64) -> bool>(&mut self, predicate: F) -> Vec<Self::Output>;
+    /// the next distance we are interested in looking at
+    fn next_distance(&self) -> Option<f64>;
+}
+
 struct PairMotifState {
     k: usize,
     exclusion_zone: usize,
@@ -313,6 +334,21 @@ impl PairMotifState {
         }
     }
 
+    /// merge the thread-local topk queues
+    fn merge_threads(&mut self) {
+        let tmp = self.tl_topk.iter_mut().reduce(|a, b| {
+            a.borrow_mut().add_all(&mut b.borrow_mut());
+            a
+        });
+        if let Some(tmp) = tmp {
+            self.topk.add_all(&mut tmp.borrow_mut());
+        }
+    }
+}
+
+impl State for PairMotifState {
+    type Output = Motif;
+
     fn update(&self, ts: &WindowedTimeseries, a_idx: usize, b_idx: usize) {
         let d = zeucl(ts, a_idx, b_idx);
         if d.is_finite() {
@@ -327,17 +363,6 @@ impl PairMotifState {
                 .get_or(|| RefCell::new(TopK::new(self.k, self.exclusion_zone)))
                 .borrow_mut()
                 .insert(m);
-        }
-    }
-
-    /// merge the thread-local topk queues
-    fn merge_threads(&mut self) {
-        let tmp = self.tl_topk.iter_mut().reduce(|a, b| {
-            a.borrow_mut().add_all(&mut b.borrow_mut());
-            a
-        });
-        if let Some(tmp) = tmp {
-            self.topk.add_all(&mut tmp.borrow_mut());
         }
     }
 
@@ -366,13 +391,13 @@ impl PairMotifState {
     }
 }
 
-pub struct MotifsEnumerator {
+pub struct MotifsEnumerator<S: State> {
     ts: Arc<WindowedTimeseries>,
     pub max_k: usize,
-    state: PairMotifState,
-    to_return: BinaryHeap<Reverse<Motif>>,
+    state: S,
+    to_return: BinaryHeap<Reverse<S::Output>>,
     /// used to cache the motifs already discovered so that we can use the enumerator as a collection
-    returned: Vec<Motif>,
+    returned: Vec<S::Output>,
     repetitions: usize,
     delta: f64,
     exclusion_zone: usize,
@@ -392,12 +417,13 @@ pub struct MotifsEnumerator {
     exec_stats: Stats,
 }
 
-impl MotifsEnumerator {
-    pub fn new(
+impl<S: State + Send + Sync> MotifsEnumerator<S> {
+    pub fn new<F: FnOnce() -> S>(
         ts: Arc<WindowedTimeseries>,
         max_k: usize,
         repetitions: usize,
         delta: f64,
+        init: F,
         seed: u64,
         show_progress: bool,
     ) -> Self {
@@ -430,7 +456,7 @@ impl MotifsEnumerator {
         Self {
             ts,
             max_k,
-            state: PairMotifState::new(max_k, exclusion_zone),
+            state: init(),
             to_return: BinaryHeap::new(),
             returned: Vec::new(),
             repetitions,
@@ -478,7 +504,7 @@ impl MotifsEnumerator {
     }
 
     /// Return the next motif, or `None` if we already returned `max_k` motifs
-    pub fn next(&mut self) -> Option<Motif> {
+    pub fn next(&mut self) -> Option<S::Output> {
         // First, try to empty the buffer of motifs to return, if any
         if let Some(motif) = self.to_return.pop() {
             self.returned.push(motif.0.clone());
@@ -616,7 +642,7 @@ impl MotifsEnumerator {
     }
 
     /// Gets the motif at the given rank, possibly computing it if not already discovered.
-    pub fn get_ranked(&mut self, rank: usize) -> &Motif {
+    pub fn get_ranked(&mut self, rank: usize) -> &S::Output {
         if rank >= self.max_k {
             panic!("Index out of bounds");
         }
@@ -627,7 +653,7 @@ impl MotifsEnumerator {
     }
 }
 
-impl Iterator for MotifsEnumerator {
+impl Iterator for MotifsEnumerator<PairMotifState> {
     type Item = Motif;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -753,7 +779,16 @@ mod test {
         let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", None).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
 
-        let motifs: Vec<Motif> = MotifsEnumerator::new(ts, 10, 800, 0.01, 12435, false).collect();
+        let motifs: Vec<Motif> = MotifsEnumerator::new(
+            ts,
+            10,
+            800,
+            0.01,
+            || PairMotifState::new(10, w),
+            12435,
+            false,
+        )
+        .collect();
 
         for (a, b, dist) in top10 {
             // look for this in the motifs, allowing up to w displacement
