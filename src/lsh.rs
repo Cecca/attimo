@@ -512,36 +512,21 @@ impl HashCollection {
 
     /// Returns a vector of the indices of the subsequences, sorted by the
     /// lexicographic order of the hash values of the given `repetition`
-    pub fn sorted_indices(&self, repetition: usize) -> Vec<usize> {
+    pub fn sorted_indices(
+        &self,
+        repetition: usize,
+        scratch: &mut Vec<([u8; K], usize)>,
+    ) -> Vec<usize> {
         let (l_trep, r_trep) = get_minimal_index_pair(repetition);
-        let mut scratch = Vec::with_capacity(self.n_subsequences);
+        scratch.clear();
         let mut indices: Vec<usize> = Vec::with_capacity(self.n_subsequences);
-        let start = Instant::now();
-        eprintln!("Computing extended hashes for repetition {}", repetition);
-        scratch.par_extend(
+        scratch.extend(
             (0..self.n_subsequences)
-                .into_par_iter()
-                .map(|i| (self.extended_hash_value_simd(i, l_trep, r_trep), i)),
+                .into_iter()
+                .map(|i| (self.extended_hash_value(i, l_trep, r_trep), i)),
         );
-        eprintln!(
-            "Computed extended hashes for repetition {}: {:?}, {:?} elems/sec",
-            repetition,
-            start.elapsed(),
-            indices.len() as f64 / start.elapsed().as_secs_f64()
-        );
-
-        let start = Instant::now();
-        eprintln!("Start sorting of indices for repetition {}", repetition);
-        scratch.par_sort_by(|a, b| a.0.cmp(&b.0));
+        scratch.radix_sort();
         indices.extend(scratch.drain(..).map(|p| p.1));
-        // indices.extend(0..self.n_subsequences);
-        // indices.par_sort_by(|i, j| self.cmp_hashes(l_trep, r_trep, *i, *j));
-        eprintln!(
-            "Sorted indices for repetition {}: {:?}, {:?} elems/sec",
-            repetition,
-            start.elapsed(),
-            indices.len() as f64 / start.elapsed().as_secs_f64()
-        );
         indices
     }
 

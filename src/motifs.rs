@@ -404,6 +404,7 @@ impl MotifsEnumerator {
         show_progress: bool,
     ) -> Self {
         let start = Instant::now();
+        let n = ts.num_subsequences();
         let exclusion_zone = ts.w;
         let fft_data = FFTData::new(&ts);
 
@@ -415,9 +416,17 @@ impl MotifsEnumerator {
         let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
         let pools = Arc::new(pools);
 
+        let scratch = ThreadLocal::new();
         let indices: Vec<Vec<usize>> = (0..repetitions)
-            .into_iter()
-            .map(|rep| pools.sorted_indices(rep))
+            .into_par_iter()
+            .map(|rep| {
+                pools.sorted_indices(
+                    rep,
+                    &mut scratch
+                        .get_or(|| RefCell::new(Vec::with_capacity(n)))
+                        .borrow_mut(),
+                )
+            })
             .collect();
         let breakpoints = Vec::new();
 
