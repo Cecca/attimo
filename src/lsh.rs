@@ -28,8 +28,10 @@
 
 use crate::motifs::Motif;
 use crate::{alloc_cnt, allocator::*};
+use std::cell::RefCell;
 use std::convert::{TryFrom, TryInto};
 use std::simd::{u8x16, u8x32, Simd, SimdPartialEq};
+use std::sync::RwLock;
 // TODO Remove this dependency
 use crate::sort::*;
 use crate::timeseries::{FFTData, WindowedTimeseries};
@@ -256,6 +258,9 @@ pub struct HashCollection {
     // be the index of the subsequence. We should store the left and right hashes in two separate arrays
     // to pack more data in a cache line, speeding up the
     pools: Vec<u8>,
+
+    scratch: Arc<RwLock<Vec<(HashValue, HashValue, u32)>>>,
+    ranges: Arc<RwLock<Vec<Range<usize>>>>,
 }
 
 impl HashCollection {
@@ -322,6 +327,8 @@ impl HashCollection {
             oob,
             n_subsequences: ns,
             pools,
+            scratch: Default::default(),
+            ranges: Default::default(),
         }
     }
 
@@ -590,21 +597,20 @@ impl HashCollection {
     /// for the given `prefix`. In doing so, it avoid executing the action
     /// for pairs that already collided at the `prev_prefix`, the prefix
     /// of some earlier iteration.
-    pub fn for_each_collision<F: FnMut(usize, usize)>(
+    pub fn for_each_collision<F: Fn(usize, usize) + Send + Sync>(
         &self,
         prefix: usize,
         prev_prefix: usize,
         repetition: usize,
         exclusion_zone: usize,
-        scratch: &mut Vec<(HashValue, HashValue, u32)>,
-        ranges: &mut Vec<Range<usize>>,
-        mut fun: F,
+        fun: F,
     ) {
         let (l_trep, r_trep) = get_minimal_index_pair(repetition);
         let (prefix_l, prefix_r) = Self::k_pair(prefix);
         let (prefix_l_prev, prefix_r_prev) = Self::k_pair(prev_prefix);
 
         // Setup the scratch space, which will group consecutive runs of hashes
+        let mut scratch = self.scratch.write().unwrap();
         scratch.clear();
         scratch.par_extend((0..self.n_subsequences).into_par_iter().map(|i| {
             let (h_cur, h_prev) = self.hash_value_pair(
@@ -619,65 +625,137 @@ impl HashCollection {
             (h_cur, h_prev, i as u32)
         }));
         scratch.par_sort_unstable();
+        drop(scratch);
 
         // Now find the bucket boundaries and then iterate through the buckets
+        let scratch = self.scratch.read().unwrap();
+        let mut ranges = self.ranges.write().unwrap();
+        ranges.clear();
         let mut start = 0;
         while start < scratch.len() {
             let end = start + Self::next_breakpoint(&scratch[start..], |tup| tup.0);
+            ranges.push(start..end);
+            start = end;
+        }
+        drop(ranges);
 
-            // now we need to distinguish between two cases:
-            //  - either we are in a bucket at the current prefix which is
-            //    not split into further buckets at the previous prefix
-            //  - or there are other buckets at the previous prefix splitting
-            //    the current one
-            if scratch[start].1 == scratch[end - 1].1 {
-                // In this case the bucket is not further split, because all the
-                // previous-prefix (longer) hashes are also equal.
-                // in this case we simply run through the pairs of elements
-                for i in start..end {
-                    let aa = scratch[i].2;
-                    for j in (i + 1)..end {
-                        let bb = scratch[j].2;
-                        let a = aa.min(bb) as usize;
-                        let b = aa.max(bb) as usize;
-                        if b - a >= exclusion_zone {
-                            fun(a, b);
+        self.ranges
+            .read()
+            .unwrap()
+            .par_iter()
+            .for_each(move |range| {
+                let scratch = self.scratch.read().unwrap();
+                let start = range.start;
+                let end = range.end;
+                // now we need to distinguish between two cases:
+                //  - either we are in a bucket at the current prefix which is
+                //    not split into further buckets at the previous prefix
+                //  - or there are other buckets at the previous prefix splitting
+                //    the current one
+                if scratch[range.start].1 == scratch[range.end - 1].1 {
+                    // In this case the bucket is not further split, because all the
+                    // previous-prefix (longer) hashes are also equal.
+                    // in this case we simply run through the pairs of elements
+                    for i in start..end {
+                        let aa = scratch[i].2;
+                        for j in (i + 1)..end {
+                            let bb = scratch[j].2;
+                            let a = aa.min(bb) as usize;
+                            let b = aa.max(bb) as usize;
+                            if b - a >= exclusion_zone {
+                                fun(a, b);
+                            }
                         }
                     }
-                }
-            } else {
-                // We need to find the splits of the previous iterations,
-                // in order to avoid having duplicate invocations of `fun`
-                // on the same pair
-                ranges.clear();
-                let mut prev_start = start;
-                while prev_start < end {
-                    let prev_end =
-                        prev_start + Self::next_breakpoint(&scratch[prev_start..], |tup| tup.1);
-                    ranges.push(prev_start..prev_end);
-                    prev_start = prev_end;
-                }
-                // now that we identified the boundaries, we can go through all
-                // pairs of ranges, and run the function for the pairs therein
-                for i in 0..ranges.len() {
-                    let ri = ranges[i].clone();
-                    for j in (i + 1)..ranges.len() {
-                        let rj = ranges[j].clone();
-                        for (_, _, aa) in &scratch[ri.clone()] {
-                            for (_, _, bb) in &scratch[rj.clone()] {
-                                let a = *aa.min(bb) as usize;
-                                let b = *aa.max(bb) as usize;
-                                if b - a >= exclusion_zone {
-                                    fun(a, b);
+                } else {
+                    // We need to find the splits of the previous iterations,
+                    // in order to avoid having duplicate invocations of `fun`
+                    // on the same pair
+                    let mut ranges: Vec<Range<usize>> = Vec::new();
+                    let mut prev_start = start;
+                    while prev_start < end {
+                        let prev_end =
+                            prev_start + Self::next_breakpoint(&scratch[prev_start..], |tup| tup.1);
+                        ranges.push(prev_start..prev_end);
+                        prev_start = prev_end;
+                    }
+                    // now that we identified the boundaries, we can go through all
+                    // pairs of ranges, and run the function for the pairs therein
+                    for i in 0..ranges.len() {
+                        let ri = ranges[i].clone();
+                        for j in (i + 1)..ranges.len() {
+                            let rj = ranges[j].clone();
+                            for (_, _, aa) in &scratch[ri.clone()] {
+                                for (_, _, bb) in &scratch[rj.clone()] {
+                                    let a = *aa.min(bb) as usize;
+                                    let b = *aa.max(bb) as usize;
+                                    if b - a >= exclusion_zone {
+                                        fun(a, b);
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
+            });
 
-            start = end;
-        }
+        // let mut start = 0;
+        // while start < scratch.len() {
+        //     let end = start + Self::next_breakpoint(&scratch[start..], |tup| tup.0);
+        //
+        //     // now we need to distinguish between two cases:
+        //     //  - either we are in a bucket at the current prefix which is
+        //     //    not split into further buckets at the previous prefix
+        //     //  - or there are other buckets at the previous prefix splitting
+        //     //    the current one
+        //     if scratch[start].1 == scratch[end - 1].1 {
+        //         // In this case the bucket is not further split, because all the
+        //         // previous-prefix (longer) hashes are also equal.
+        //         // in this case we simply run through the pairs of elements
+        //         for i in start..end {
+        //             let aa = scratch[i].2;
+        //             for j in (i + 1)..end {
+        //                 let bb = scratch[j].2;
+        //                 let a = aa.min(bb) as usize;
+        //                 let b = aa.max(bb) as usize;
+        //                 if b - a >= exclusion_zone {
+        //                     fun(a, b);
+        //                 }
+        //             }
+        //         }
+        //     } else {
+        //         // We need to find the splits of the previous iterations,
+        //         // in order to avoid having duplicate invocations of `fun`
+        //         // on the same pair
+        //         ranges.clear();
+        //         let mut prev_start = start;
+        //         while prev_start < end {
+        //             let prev_end =
+        //                 prev_start + Self::next_breakpoint(&scratch[prev_start..], |tup| tup.1);
+        //             ranges.push(prev_start..prev_end);
+        //             prev_start = prev_end;
+        //         }
+        //         // now that we identified the boundaries, we can go through all
+        //         // pairs of ranges, and run the function for the pairs therein
+        //         for i in 0..ranges.len() {
+        //             let ri = ranges[i].clone();
+        //             for j in (i + 1)..ranges.len() {
+        //                 let rj = ranges[j].clone();
+        //                 for (_, _, aa) in &scratch[ri.clone()] {
+        //                     for (_, _, bb) in &scratch[rj.clone()] {
+        //                         let a = *aa.min(bb) as usize;
+        //                         let b = *aa.max(bb) as usize;
+        //                         if b - a >= exclusion_zone {
+        //                             fun(a, b);
+        //                         }
+        //                     }
+        //                 }
+        //             }
+        //         }
+        //     }
+        //
+        //     start = end;
+        // }
     }
 
     fn next_breakpoint<T, K: Eq, F: Fn(&T) -> K>(arr: &[T], key: F) -> usize {
@@ -703,9 +781,9 @@ impl HashCollection {
         output.clear();
 
         let start = Instant::now();
-        buffer.par_extend(
+        buffer.extend(
             (0..ns)
-                .into_par_iter()
+                .into_iter()
                 .map(|i| (self.hash_value(i, depth, repetition), i as u32)),
         );
         let elapsed_hashes = start.elapsed();

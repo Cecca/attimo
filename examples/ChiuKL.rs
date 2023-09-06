@@ -106,11 +106,13 @@ fn projection_motifs(
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
     let start = Instant::now();
 
-    let rngs: Vec<(usize, Xoshiro256PlusPlus)> = (0..repetitions).map(|rep| {
-        rng.jump();
-        let r = rng.clone();
-        (rep, r)
-    }).collect();
+    let rngs: Vec<(usize, Xoshiro256PlusPlus)> = (0..repetitions)
+        .map(|rep| {
+            rng.jump();
+            let r = rng.clone();
+            (rep, r)
+        })
+        .collect();
 
     // benchmarking shows that BTreeMap works better than HashMap in this use case
     let mut collision_matrix = BTreeMap::new();

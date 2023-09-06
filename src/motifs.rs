@@ -378,16 +378,14 @@ pub struct MotifsEnumerator {
     exclusion_zone: usize,
     hasher: Arc<Hasher>,
     pools: Arc<HashCollection>,
-    indices: Vec<Vec<usize>>,
-    breakpoints: Vec<Breakpoint>,
-    column_buffer: Vec<(HashValue, u32)>,
-    buckets: Vec<Range<usize>>,
+    // indices: Vec<Vec<usize>>,
+    // breakpoints: Vec<Breakpoint>,
     /// the current repetition
     rep: usize,
     /// the current depth
-    depth: usize,
+    prefix: usize,
     /// the previous depth
-    previous_depth: Option<usize>,
+    previous_prefix: usize,
     /// the progress bar
     pbar: Option<ProgressBar>,
     /// the execution statistics
@@ -415,29 +413,25 @@ impl MotifsEnumerator {
         let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
         let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
         let pools = Arc::new(pools);
-
-        let scratch = ThreadLocal::new();
-        let indices: Vec<Vec<usize>> = (0..repetitions)
-            .into_par_iter()
-            .map(|rep| {
-                pools.sorted_indices(
-                    rep,
-                    &mut scratch
-                        .get_or(|| RefCell::new(Vec::with_capacity(n)))
-                        .borrow_mut(),
-                )
-            })
-            .collect();
-        let breakpoints = Vec::new();
+        //
+        // let scratch = ThreadLocal::new();
+        // let indices: Vec<Vec<usize>> = (0..repetitions)
+        //     .into_par_iter()
+        //     .map(|rep| {
+        //         pools.sorted_indices(
+        //             rep,
+        //             &mut scratch
+        //                 .get_or(|| RefCell::new(Vec::with_capacity(n)))
+        //                 .borrow_mut(),
+        //         )
+        //     })
+        //     .collect();
+        // let breakpoints = Vec::new();
 
         eprintln!("Computed hash values in {:?}", start.elapsed());
         drop(fft_data);
 
         info!("tries exploration"; "tag" => "phase");
-        // This vector holds the (sorted) hashed subsequences, and their index
-        let column_buffer = Vec::new();
-        // This vector holds the boundaries between buckets. We reuse the allocations
-        let buckets = Vec::new();
 
         let pbar = if show_progress {
             Some(Self::build_progress_bar(K, repetitions))
@@ -456,13 +450,11 @@ impl MotifsEnumerator {
             exclusion_zone,
             hasher,
             pools,
-            indices,
-            breakpoints,
-            column_buffer,
-            buckets,
+            // indices,
+            // breakpoints,
             rep: 0,
-            depth: K,
-            previous_depth: None,
+            prefix: K,
+            previous_prefix: K,
             pbar,
             exec_stats: Stats::default(),
         }
@@ -513,104 +505,36 @@ impl MotifsEnumerator {
 
         // repeat until we are able to buffer some motifs
         while self.to_return.is_empty() {
-            assert!(self.depth > 0);
+            assert!(self.prefix > 0);
             assert!(self.rep < self.repetitions);
-            let mut stats = ThreadLocal::new();
+            // let mut stats = ThreadLocal::new();
+            let ts = &self.ts;
 
-            // Set up the index breakpoints for the current repetitions
-            self.pools.breakpoints(
+            let state = &self.state;
+
+            self.pools.for_each_collision(
+                self.prefix,
+                self.previous_prefix,
                 self.rep,
-                self.depth,
-                self.depth.min(K),
-                &self.indices[self.rep],
-                &mut self.breakpoints,
-            );
-
-            // Set up buckets for the current repetition
-            // self.pools.group_subsequences(
-            //     self.depth,
-            //     self.rep,
-            //     self.exclusion_zone,
-            //     &mut self.column_buffer,
-            //     &mut self.buckets,
-            // );
-            // let n_buckets = self.buckets.len();
-            // let chunk_size = std::cmp::max(1, n_buckets / (4 * rayon::current_num_threads()));
-
-            Breakpoint::for_each_pair(
-                &self.breakpoints,
-                &self.indices[self.rep],
                 self.exclusion_zone,
                 |a_idx, b_idx| {
-                    let mut tl_stats = stats.get_or(|| RefCell::new(Stats::default())).borrow_mut();
-                    tl_stats.inc_cands();
-                    tl_stats.inc_dists();
-                    self.state.update(&self.ts, a_idx as usize, b_idx as usize);
+                    // let mut tl_stats = stats.get_or(|| RefCell::new(Stats::default())).borrow_mut();
+                    // tl_stats.inc_cands();
+                    // tl_stats.inc_dists();
+                    state.update(&ts, a_idx as usize, b_idx as usize);
                 },
             );
 
-            // (0..n_buckets / chunk_size)
-            //     .into_par_iter()
-            //     .for_each(|chunk_i| {
-            //         let mut tl_stats = stats.get_or(|| RefCell::new(Stats::default())).borrow_mut();
-            //
-            //         for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
-            //             let bucket = &self.column_buffer[self.buckets[i].clone()];
-            //
-            //             for (_, a_idx) in bucket.iter() {
-            //                 let a_idx = *a_idx as usize;
-            //                 // let a_already_checked = rep_bounds[a_idx].clone();
-            //                 // let a_hash_idx = hash_range.start + a_offset;
-            //                 for (_, b_idx) in bucket.iter() {
-            //                     let b_idx = *b_idx as usize;
-            //                     //// Here we handle trivial matches: we don't consider a pair if the difference between
-            //                     //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
-            //                     if a_idx + self.exclusion_zone < b_idx {
-            //                         tl_stats.inc_cands();
-            //
-            //                         //// We only process the pair if this is the first repetition in which
-            //                         //// they collide. We get this information from the pool of bits
-            //                         //// from which hash values for all repetitions are extracted.
-            //                         // if let Some(first_colliding_repetition) =
-            //                         //     self.pools.first_collision(a_idx, b_idx, self.depth)
-            //                         {
-            //                             //// This is the first collision in this iteration, _and_ the pair didn't collide
-            //                             //// at a deeper level.
-            //                             if
-            //                             //first_colliding_repetition == self.rep
-            //                             self
-            //                                 .previous_depth
-            //                                 .map(|d| {
-            //                                     self.pools
-            //                                         .first_collision(a_idx, b_idx, d)
-            //                                         .is_none()
-            //                                 })
-            //                                 .unwrap_or(true)
-            //                             {
-            //                                 tl_stats.inc_dists();
-            //                                 self.state.update(
-            //                                     &self.ts,
-            //                                     a_idx as usize,
-            //                                     b_idx as usize,
-            //                                 );
-            //                             }
-            //                         }
-            //                     }
-            //                 }
-            //             }
-            //         }
-            //     });
-
             // Add to the output all the new top pairs that have been found
-            self.exec_stats = stats
-                .iter_mut()
-                .map(|s| s.take())
-                .reduce(|a, b| a.merge(&b))
-                .unwrap_or_default()
-                .merge(&self.exec_stats);
+            // self.exec_stats = stats
+            //     .iter_mut()
+            //     .map(|s| s.take())
+            //     .reduce(|a, b| a.merge(&b))
+            //     .unwrap_or_default()
+            //     .merge(&self.exec_stats);
 
             // Confirm the pairs that can be confirmed in this iteration
-            let depth = self.depth;
+            let depth = self.prefix;
             let rep = self.rep;
             let delta = self.delta;
             let hasher = Arc::clone(&self.hasher);
@@ -625,24 +549,21 @@ impl MotifsEnumerator {
             self.rep += 1;
             if self.rep >= self.repetitions {
                 self.rep = 0;
-                self.previous_depth.replace(self.depth);
+                self.previous_prefix = self.prefix;
                 if let Some(distance) = self.state.next_distance() {
-                    let new_depth = self.level_for_distance(distance, self.depth);
+                    let new_depth = self.level_for_distance(distance, self.prefix);
                     if new_depth == depth {
-                        self.depth -= 1;
+                        self.prefix -= 1;
                     } else {
-                        self.depth = new_depth;
+                        self.prefix = new_depth;
                     }
                 } else {
-                    self.depth -= 1;
+                    self.prefix -= 1;
                 }
                 if self.pbar.is_some() {
-                    self.pbar = Some(Self::build_progress_bar(self.depth, self.repetitions));
+                    self.pbar = Some(Self::build_progress_bar(self.prefix, self.repetitions));
                 }
-                assert!(self
-                    .previous_depth
-                    .map(|prev| self.depth < prev)
-                    .unwrap_or(true));
+                assert!(self.previous_prefix > self.prefix);
             }
         }
 
