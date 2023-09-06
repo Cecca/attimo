@@ -18,6 +18,16 @@ impl GetByte for u8 {
     }
 }
 
+impl GetByte for u32 {
+    fn num_bytes(&self) -> usize {
+        4
+    }
+    #[inline(always)]
+    fn get_byte(&self, i: usize) -> u8 {
+        (self >> (8 * (std::mem::size_of::<u32>() - i - 1)) & 0xFF) as u8
+    }
+}
+
 impl GetByte for usize {
     fn num_bytes(&self) -> usize {
         std::mem::size_of::<usize>()

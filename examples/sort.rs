@@ -46,7 +46,7 @@ fn main() {
     let hasher = Arc::new(Hasher::new(w, 4, 2.0, 123));
     let hc = HashCollection::from_ts(&ts, &fft_data, hasher);
     let n = ts.num_subsequences();
-    let v_u32: Vec<(HashValue, usize)> = (0..n).map(|i| (hc.hash_value(i, 32, 0), i)).collect();
+    let v_u32: Vec<(u32, usize)> = (0..n).map(|i| (hc.hash_value(i, 32, 0).0, i)).collect();
     let v_arr: Vec<([u8; 32], usize)> = (0..n)
         .map(|i| (hc.extended_hash_value(i, 0, 0), i))
         .collect();
