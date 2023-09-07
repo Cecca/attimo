@@ -8,15 +8,19 @@
 use crate::distance::*;
 use crate::lsh::*;
 use crate::timeseries::*;
+use crossbeam_skiplist::{SkipMap, SkipSet};
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use rayon::prelude::*;
 use slog_scope::info;
 use std::cell::RefCell;
 use std::cmp::Reverse;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::BinaryHeap;
 use std::ops::Range;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::time::Duration;
 use std::time::Instant;
 use thread_local::ThreadLocal;
@@ -231,6 +235,108 @@ impl TopK {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
+pub struct Motiflet {
+    indices: Vec<usize>,
+    extent: f64,
+}
+impl Eq for Motiflet {}
+impl Ord for Motiflet {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.extent.partial_cmp(&other.extent).unwrap()
+    }
+}
+impl Motiflet {
+    pub fn support(&self) -> usize {
+        self.indices.len()
+    }
+    pub fn extent(&self) -> f64 {
+        self.extent
+    }
+}
+
+#[derive(PartialEq, PartialOrd)]
+struct OrdF64(f64);
+impl Eq for OrdF64 {}
+impl Ord for OrdF64 {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.partial_cmp(&other.0).unwrap()
+    }
+}
+
+struct SubsequenceNeighborhood {
+    id: usize,
+    neighbors: SkipSet<(OrdF64, usize)>,
+}
+impl SubsequenceNeighborhood {
+    fn new(id: usize) -> Self {
+        Self {
+            id,
+            neighbors: Default::default(),
+        }
+    }
+    fn len(&self) -> usize {
+        self.neighbors.len()
+    }
+    fn update(&self, dist: f64, neighbor: usize) {
+        let dist = OrdF64(dist);
+        self.neighbors.insert((dist, neighbor));
+    }
+    fn farthest_up_to(&self, k: usize, exclusion_zone: usize) -> Option<f64> {
+        let mut last_valid = self.id;
+        self.neighbors
+            .iter()
+            .filter(|entry| {
+                let (_, i) = entry.value();
+                let i = *i;
+                if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
+                    last_valid = i;
+                    true
+                } else {
+                    false
+                }
+            })
+            .take(k)
+            .map(|pair| (pair.0).0)
+            .last()
+    }
+    fn distance_at(&self, k: usize, exclusion_zone: usize) -> Option<f64> {
+        let mut last_valid = self.id;
+        self.neighbors
+            .iter()
+            .filter(|entry| {
+                let (_, i) = entry.value();
+                let i = *i;
+                if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
+                    last_valid = i;
+                    true
+                } else {
+                    false
+                }
+            })
+            .nth(k)
+            .map(|pair| (pair.0).0)
+    }
+    fn knn(&self, k: usize, exclusion_zone: usize) -> Vec<usize> {
+        let mut last_valid = self.id;
+        self.neighbors
+            .iter()
+            .filter(|entry| {
+                let (_, i) = entry.value();
+                let i = *i;
+                if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
+                    last_valid = i;
+                    true
+                } else {
+                    false
+                }
+            })
+            .take(k)
+            .map(|pair| pair.1)
+            .collect()
+    }
+}
+
 //// ## Motif finding algorithm
 
 //// At last, this is the algorithm to find the motifs.
@@ -274,6 +380,31 @@ pub fn motifs(
     );
     let mut res = Vec::new();
     while let Some(m) = enumerator.next() {
+        res.push(m);
+    }
+    eprintln!("{:?}", enumerator.exec_stats);
+    res
+}
+
+pub fn motiflets(
+    ts: Arc<WindowedTimeseries>,
+    support: usize,
+    repetitions: usize,
+    delta: f64,
+    seed: u64,
+) -> Vec<Motiflet> {
+    let exclusion_zone = ts.w;
+    let mut enumerator = MotifsEnumerator::new(
+        ts,
+        1,
+        repetitions,
+        delta,
+        || KMotifletState::new(support, exclusion_zone),
+        seed,
+        true,
+    );
+    let mut res = Vec::new();
+    while let Some(m) = enumerator.next() {
         eprintln!("Confirm {:?}", m);
         res.push(m);
     }
@@ -303,7 +434,7 @@ impl Stats {
     }
 }
 
-pub trait State {
+pub trait State: std::fmt::Debug {
     type Output: Sync + Send + std::fmt::Debug + Clone + Ord;
     /// update the state with the given pair of subsequences
     fn update(&self, ts: &WindowedTimeseries, a: usize, b: usize);
@@ -315,6 +446,7 @@ pub trait State {
     fn next_distance(&self) -> Option<f64>;
 }
 
+#[derive(Debug)]
 struct PairMotifState {
     k: usize,
     exclusion_zone: usize,
@@ -388,6 +520,98 @@ impl State for PairMotifState {
 
     fn next_distance(&self) -> Option<f64> {
         self.topk.first_not_confirmed().map(|m| m.distance)
+    }
+}
+
+pub struct KMotifletState {
+    support: usize,
+    exclusion_zone: usize,
+    done: bool,
+    neighborhoods: SkipMap<usize, SubsequenceNeighborhood>,
+}
+impl KMotifletState {
+    pub fn new(support: usize, exclusion_zone: usize) -> Self {
+        assert!(support >= 2);
+        Self {
+            support,
+            exclusion_zone,
+            done: false,
+            neighborhoods: Default::default(),
+        }
+    }
+}
+impl std::fmt::Debug for KMotifletState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let nn_entries = self
+            .neighborhoods
+            .iter()
+            .map(|entry| entry.value().len())
+            .sum::<usize>();
+        writeln!(
+            f,
+            "motiflets state: nearest neighbor entries: {}",
+            nn_entries
+        )
+    }
+}
+impl State for KMotifletState {
+    type Output = Motiflet;
+    fn update(&self, ts: &WindowedTimeseries, a: usize, b: usize) {
+        let d = zeucl(ts, a, b);
+        self.neighborhoods
+            .get_or_insert_with(a, || SubsequenceNeighborhood::new(a))
+            .value()
+            .update(d, b);
+        self.neighborhoods
+            .get_or_insert_with(b, || SubsequenceNeighborhood::new(b))
+            .value()
+            .update(d, a);
+    }
+    fn is_done(&mut self) -> bool {
+        self.done
+    }
+    fn emit<F: Fn(f64) -> bool>(&mut self, predicate: F) -> Vec<Self::Output> {
+        if self.done {
+            return Vec::new();
+        }
+
+        let res: Vec<Self::Output> = self
+            .neighborhoods
+            .iter()
+            .filter_map(|entry| {
+                let neighborhood = entry.value();
+                if let Some(d) = neighborhood.distance_at(self.support - 1, self.exclusion_zone) {
+                    if predicate(d) {
+                        let mut knn = neighborhood.knn(self.support - 1, self.exclusion_zone);
+                        knn.push(*entry.key());
+                        Some(Motiflet {
+                            indices: knn,
+                            extent: d,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .min_by_key(|motiflet| OrdF64(motiflet.extent))
+            .into_iter()
+            .collect();
+        self.done = !res.is_empty();
+        res
+    }
+    fn next_distance(&self) -> Option<f64> {
+        self.neighborhoods
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .value()
+                    .farthest_up_to(self.support - 1, self.exclusion_zone)
+                    .map(|d| OrdF64(d))
+            })
+            .min()
+            .map(|d| d.0)
     }
 }
 
@@ -614,6 +838,10 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
                 self.rep = 0;
                 self.previous_depth.replace(self.depth);
                 if let Some(distance) = self.state.next_distance() {
+                    if let Some(pbar) = &self.pbar {
+                        pbar.println(format!("next distance {:?}", distance));
+                        pbar.println(format!("{:?}", self.state));
+                    }
                     let new_depth = self.level_for_distance(distance, self.depth);
                     if new_depth == depth {
                         self.depth -= 1;

@@ -2,7 +2,7 @@ use anyhow::Result;
 use argh::FromArgs;
 use attimo::allocator::{self, allocated, CountingAllocator};
 use attimo::load::*;
-use attimo::motifs::{motifs, Motif};
+use attimo::motifs::{motiflets, motifs, Motif, Motiflet};
 use attimo::timeseries::*;
 use slog::*;
 use slog_scope::GlobalLoggerGuard;
@@ -35,6 +35,10 @@ struct Config {
     #[argh(option)]
     /// the number of repetitions to perform
     pub repetitions: usize,
+
+    #[argh(option)]
+    /// find motiflets, with the specified support
+    pub motiflets: Option<usize>,
 
     #[argh(option)]
     /// consider only the given number of points from the input
@@ -121,13 +125,25 @@ fn main() -> Result<()> {
         None
     };
 
-    let motifs: Vec<Motif> = motifs(
-        Arc::new(ts),
-        config.motifs,
-        config.repetitions,
-        config.failure_probability,
-        config.seed,
-    );
+    if let Some(support) = config.motiflets {
+        let motiflets: Vec<Motiflet> = motiflets(
+            Arc::new(ts),
+            support,
+            config.repetitions,
+            config.failure_probability,
+            config.seed,
+        );
+        eprintln!("Result: {:?}", motiflets);
+    } else {
+        let motifs: Vec<Motif> = motifs(
+            Arc::new(ts),
+            config.motifs,
+            config.repetitions,
+            config.failure_probability,
+            config.seed,
+        );
+        output_csv(&config.output, &motifs)?;
+    }
 
     if let Some(profiler) = profiler {
         use pprof::protos::Message;
@@ -147,8 +163,6 @@ fn main() -> Result<()> {
 
     monitor_flag.store(false, std::sync::atomic::Ordering::SeqCst);
     monitor.join().unwrap();
-
-    output_csv(&config.output, &motifs)?;
 
     println!("Total time {:?}", total_timer.elapsed());
 
