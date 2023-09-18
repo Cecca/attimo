@@ -250,6 +250,9 @@ impl Motiflet {
     pub fn extent(&self) -> f64 {
         self.extent
     }
+    pub fn indices(&self) -> Vec<usize> {
+        self.indices.clone()
+    }
 }
 
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
@@ -450,7 +453,7 @@ pub trait State: std::fmt::Debug {
 }
 
 #[derive(Debug)]
-struct PairMotifState {
+pub struct PairMotifState {
     k: usize,
     exclusion_zone: usize,
     start: Instant,
@@ -459,7 +462,7 @@ struct PairMotifState {
 }
 
 impl PairMotifState {
-    fn new(k: usize, exclusion_zone: usize) -> Self {
+    pub fn new(k: usize, exclusion_zone: usize) -> Self {
         Self {
             k,
             exclusion_zone,
@@ -564,10 +567,16 @@ impl std::fmt::Debug for KMotifletState {
             .iter()
             .map(|(_, v)| v.len())
             .sum::<usize>();
+        let nn_k = self
+            .neighborhoods
+            .iter()
+            .map(|(_, v)| v.len())
+            .max()
+            .unwrap_or(0);
         writeln!(
             f,
-            "motiflets state: nearest neighbor entries: {}",
-            nn_entries
+            "motiflets state: nearest neighbor entries: {} max neighbors: {}",
+            nn_entries, nn_k
         )
     }
 }
