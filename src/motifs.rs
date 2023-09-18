@@ -8,7 +8,6 @@
 use crate::distance::*;
 use crate::lsh::*;
 use crate::timeseries::*;
-use crossbeam_skiplist::{SkipMap, SkipSet};
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use rayon::prelude::*;
@@ -20,15 +19,13 @@ use std::collections::BTreeSet;
 use std::collections::BinaryHeap;
 use std::ops::Range;
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::time::Duration;
 use std::time::Instant;
 use thread_local::ThreadLocal;
+
 #[derive(Debug, PartialEq, PartialOrd)]
 struct OrderedF64(f64);
-
 impl Eq for OrderedF64 {}
-
 impl Ord for OrderedF64 {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.partial_cmp(other).unwrap()
@@ -255,10 +252,11 @@ impl Motiflet {
     }
 }
 
-#[derive(PartialEq, PartialOrd)]
+#[derive(PartialEq, PartialOrd, Clone, Copy)]
 struct OrdF64(f64);
 impl Eq for OrdF64 {}
 impl Ord for OrdF64 {
+    #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.0.partial_cmp(&other.0).unwrap()
     }
@@ -266,7 +264,7 @@ impl Ord for OrdF64 {
 
 struct SubsequenceNeighborhood {
     id: usize,
-    neighbors: SkipSet<(OrdF64, usize)>,
+    neighbors: BTreeSet<(OrdF64, usize)>,
 }
 impl SubsequenceNeighborhood {
     fn new(id: usize) -> Self {
@@ -278,16 +276,21 @@ impl SubsequenceNeighborhood {
     fn len(&self) -> usize {
         self.neighbors.len()
     }
-    fn update(&self, dist: f64, neighbor: usize) {
+    fn update(&mut self, dist: f64, neighbor: usize) {
         let dist = OrdF64(dist);
         self.neighbors.insert((dist, neighbor));
+    }
+    fn merge(&mut self, other: &Self) {
+        assert_eq!(self.id, other.id);
+        for pair in &other.neighbors {
+            self.neighbors.insert(*pair);
+        }
     }
     fn farthest_up_to(&self, k: usize, exclusion_zone: usize) -> Option<f64> {
         let mut last_valid = self.id;
         self.neighbors
             .iter()
-            .filter(|entry| {
-                let (_, i) = entry.value();
+            .filter(|(_, i)| {
                 let i = *i;
                 if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
                     last_valid = i;
@@ -304,8 +307,8 @@ impl SubsequenceNeighborhood {
         let mut last_valid = self.id;
         self.neighbors
             .iter()
-            .filter(|entry| {
-                let (_, i) = entry.value();
+            .filter(|(_, i)| {
+                // let (_, i) = entry.value();
                 let i = *i;
                 if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
                     last_valid = i;
@@ -321,8 +324,8 @@ impl SubsequenceNeighborhood {
         let mut last_valid = self.id;
         self.neighbors
             .iter()
-            .filter(|entry| {
-                let (_, i) = entry.value();
+            .filter(|(_, i)| {
+                // let (_, i) = entry.value();
                 let i = *i;
                 if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
                     last_valid = i;
@@ -527,7 +530,8 @@ pub struct KMotifletState {
     support: usize,
     exclusion_zone: usize,
     done: bool,
-    neighborhoods: SkipMap<usize, SubsequenceNeighborhood>,
+    tl_neighborhoods: ThreadLocal<RefCell<BTreeMap<usize, SubsequenceNeighborhood>>>,
+    neighborhoods: BTreeMap<usize, SubsequenceNeighborhood>,
 }
 impl KMotifletState {
     pub fn new(support: usize, exclusion_zone: usize) -> Self {
@@ -536,7 +540,20 @@ impl KMotifletState {
             support,
             exclusion_zone,
             done: false,
+            tl_neighborhoods: Default::default(),
             neighborhoods: Default::default(),
+        }
+    }
+
+    fn merge_threads(&mut self) {
+        for tl_neighs in self.tl_neighborhoods.iter_mut() {
+            for (id, neighs) in tl_neighs.borrow_mut().iter() {
+                self.neighborhoods
+                    .entry(*id)
+                    .or_insert_with(|| SubsequenceNeighborhood::new(*id))
+                    .merge(neighs);
+            }
+            tl_neighs.borrow_mut().clear();
         }
     }
 }
@@ -545,7 +562,7 @@ impl std::fmt::Debug for KMotifletState {
         let nn_entries = self
             .neighborhoods
             .iter()
-            .map(|entry| entry.value().len())
+            .map(|(_, v)| v.len())
             .sum::<usize>();
         writeln!(
             f,
@@ -558,32 +575,38 @@ impl State for KMotifletState {
     type Output = Motiflet;
     fn update(&self, ts: &WindowedTimeseries, a: usize, b: usize) {
         let d = zeucl(ts, a, b);
-        self.neighborhoods
-            .get_or_insert_with(a, || SubsequenceNeighborhood::new(a))
-            .value()
+        self.tl_neighborhoods
+            .get_or_default()
+            .borrow_mut()
+            .entry(a)
+            .or_insert_with(|| SubsequenceNeighborhood::new(a))
             .update(d, b);
-        self.neighborhoods
-            .get_or_insert_with(b, || SubsequenceNeighborhood::new(b))
-            .value()
+        self.tl_neighborhoods
+            .get_or_default()
+            .borrow_mut()
+            .entry(b)
+            .or_insert_with(|| SubsequenceNeighborhood::new(b))
             .update(d, a);
     }
     fn is_done(&mut self) -> bool {
+        self.merge_threads();
         self.done
     }
     fn emit<F: Fn(f64) -> bool>(&mut self, predicate: F) -> Vec<Self::Output> {
         if self.done {
             return Vec::new();
         }
+        self.merge_threads();
 
         let res: Vec<Self::Output> = self
             .neighborhoods
             .iter()
-            .filter_map(|entry| {
-                let neighborhood = entry.value();
+            .filter_map(|(k, neighborhood)| {
+                // let neighborhood = entry.value();
                 if let Some(d) = neighborhood.distance_at(self.support - 1, self.exclusion_zone) {
                     if predicate(d) {
                         let mut knn = neighborhood.knn(self.support - 1, self.exclusion_zone);
-                        knn.push(*entry.key());
+                        knn.push(*k);
                         Some(Motiflet {
                             indices: knn,
                             extent: d,
@@ -604,9 +627,8 @@ impl State for KMotifletState {
     fn next_distance(&self) -> Option<f64> {
         self.neighborhoods
             .iter()
-            .filter_map(|entry| {
-                entry
-                    .value()
+            .filter_map(|(_, neighborhood)| {
+                neighborhood
                     .farthest_up_to(self.support - 1, self.exclusion_zone)
                     .map(|d| OrdF64(d))
             })
