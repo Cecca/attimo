@@ -532,6 +532,7 @@ impl State for PairMotifState {
 pub struct KMotifletState {
     support: usize,
     exclusion_zone: usize,
+    current_best: Option<f64>,
     done: bool,
     tl_neighborhoods: ThreadLocal<RefCell<BTreeMap<usize, SubsequenceNeighborhood>>>,
     neighborhoods: BTreeMap<usize, SubsequenceNeighborhood>,
@@ -542,6 +543,7 @@ impl KMotifletState {
         Self {
             support,
             exclusion_zone,
+            current_best: None,
             done: false,
             tl_neighborhoods: Default::default(),
             neighborhoods: Default::default(),
@@ -584,6 +586,13 @@ impl State for KMotifletState {
     type Output = Motiflet;
     fn update(&self, ts: &WindowedTimeseries, a: usize, b: usize) {
         let d = zeucl(ts, a, b);
+        if let Some(best) = self.current_best {
+            if d > best {
+                // there's no point in keeping track of pairs that cannot
+                // beat the current candidate
+                return;
+            }
+        }
         self.tl_neighborhoods
             .get_or_default()
             .borrow_mut()
@@ -607,9 +616,30 @@ impl State for KMotifletState {
         }
         self.merge_threads();
 
+        // cleanup
+        if let Some(d) = self.next_distance() {
+            for neighs in self.neighborhoods.values_mut() {
+                neighs.neighbors.retain(|(k, _)| k.0 <= d);
+            }
+        }
+        self.current_best = self.next_distance();
+
         let res: Vec<Self::Output> = self
             .neighborhoods
             .iter()
+            .filter(|(_, neighborhood)| {
+                neighborhood
+                    .distance_at(self.support - 1, self.exclusion_zone)
+                    .is_some()
+            })
+            .min_by_key(|(_, neighborhood)| {
+                OrdF64(
+                    neighborhood
+                        .distance_at(self.support - 1, self.exclusion_zone)
+                        .unwrap(),
+                )
+            })
+            .into_iter()
             .filter_map(|(k, neighborhood)| {
                 // let neighborhood = entry.value();
                 if let Some(d) = neighborhood.distance_at(self.support - 1, self.exclusion_zone) {
@@ -627,7 +657,6 @@ impl State for KMotifletState {
                     None
                 }
             })
-            .min_by_key(|motiflet| OrdF64(motiflet.extent))
             .into_iter()
             .collect();
         self.done = !res.is_empty();
@@ -638,7 +667,7 @@ impl State for KMotifletState {
             .iter()
             .filter_map(|(_, neighborhood)| {
                 neighborhood
-                    .farthest_up_to(self.support - 1, self.exclusion_zone)
+                    .distance_at(self.support - 1, self.exclusion_zone)
                     .map(|d| OrdF64(d))
             })
             .min()
