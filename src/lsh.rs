@@ -141,21 +141,24 @@ fn get_minimal_repetition(repetitions: usize, i: usize, j: usize) -> Option<usiz
     None
 }
 
+#[test]
+fn test_index_pair_round_trip() {
+    let repetitions = 4096;
+    for rep in 0..repetitions {
+        let (i, j) = get_minimal_index_pair(rep);
+        assert_eq!(rep, get_minimal_repetition(repetitions, i, j).unwrap());
+    }
+}
+
 //// This data structure contains all the information needed to generate the hash values for all the repeititions
 //// for all the subsequences.
 #[derive(Clone)]
 pub struct HashCollection {
     pub hasher: Arc<Hasher>,
     n_subsequences: usize,
-    oob: usize,
-    // Pools are organized as three dimensional matrices, in C order.
-    // The stride in the first dimension is `K * n_subsequences`, and the stride in the
-    // second dimension is `K`. In the third dimension, the first `K_HALF` elements
-    // are the left pool, the second are the right pool
-    // TODO: More cache-friendly layout. The first index should be the repetition, the second should
-    // be the index of the subsequence. We should store the left and right hashes in two separate arrays
-    // to pack more data in a cache line, speeding up the
-    pools: Vec<u8>,
+    /// Pools of hash values, we have a vector for each tensor repetition, and each vector has an
+    /// entry for the strings of K_HALF hash values, one for the left, and one for the right pool
+    pools: Vec<Vec<([u8; K_HALF], [u8; K_HALF])>>,
 }
 
 impl HashCollection {
@@ -178,48 +181,36 @@ impl HashCollection {
     //// and a `Hasher`.
     pub fn from_ts(ts: &WindowedTimeseries, fft_data: &FFTData, hasher: Arc<Hasher>) -> Self {
         assert!(ts.num_subsequences() < u32::MAX as usize, "We use 32 bit integers as pointers into subsequences, this timeseries has too many subsequences.");
-        // println!(
-        //     "Number of tensor repetitions: {}",
-        //     hasher.tensor_repetitions
-        // );
         let ns = ts.num_subsequences();
 
-        let mut pools = alloc_cnt!("pools"; {vec![0u8; hasher.tensor_repetitions * K * ns]});
-        let nhashes = pools.len();
-        let uns_pools = UnsafeSlice::new(&mut pools);
-
         let timer = Instant::now();
-        //// Instead of doing a double nested loop over the repetitions and K, we flatten all
-        //// the iterations (which are independent) so to expose more parallelism
-        let oob = (0..(hasher.tensor_repetitions * K))
-            .into_par_iter()
-            .map(|hash_idx| {
-                let repetition = hash_idx / K;
-                let k = hash_idx % K;
 
-                let oob = hasher.hash_all(&ts, fft_data, k, repetition, |i, h| {
-                    let idx = K * ns * repetition + i * K + k;
-                    assert!(idx < nhashes);
-                    let h = ((h as i64 & 0xFFi64) as i8) as u8;
-                    //// This operation is `unsafe` but each index is accessed only once,
-                    //// so there are no data races, despite not using synchronization.
-                    unsafe { uns_pools.write(idx, h) };
-                });
-                oob
+        let pools = (0..hasher.tensor_repetitions)
+            .into_par_iter()
+            .map(|trep| {
+                let mut repdata = vec![([0u8; K_HALF], [0u8; K_HALF]); ns];
+                for k in 0..K_HALF {
+                    hasher.hash_all(&ts, fft_data, k, trep, |i, h| {
+                        let h = ((h as i64 & 0xFFi64) as i8) as u8;
+                        repdata[i].0[k] = h;
+                    });
+                    hasher.hash_all(&ts, fft_data, k + K_HALF, trep, |i, h| {
+                        let h = ((h as i64 & 0xFFi64) as i8) as u8;
+                        repdata[i].1[k] = h;
+                    });
+                }
+                repdata
             })
-            .sum::<usize>();
+            .collect();
 
         let elapsed = timer.elapsed();
         info!("tensor pool building";
             "tag" => "profiling",
-            "time_s" => elapsed.as_secs_f64(),
-            "out of bounds" => oob,
-            "total hashes" => nhashes
+            "time_s" => elapsed.as_secs_f64()
         );
 
         Self {
             hasher,
-            oob,
             n_subsequences: ns,
             pools,
         }
@@ -228,23 +219,19 @@ impl HashCollection {
     #[deprecated]
     pub fn left(&self, i: usize, repetition: usize) -> &[u8] {
         let trep = repetition % self.hasher.tensor_repetitions;
-        let idx = K * self.n_subsequences * trep + i * K;
-        &self.pools[idx..idx + K_HALF]
+        &self.pools[trep][i].0
     }
 
     #[deprecated]
     pub fn right(&self, i: usize, repetition: usize) -> &[u8] {
         let trep = repetition / self.hasher.tensor_repetitions;
-        let idx = K * self.n_subsequences * trep + i * K + K_HALF;
-        &self.pools[idx..idx + K_HALF]
+        &self.pools[trep][i].1
     }
 
     pub fn half_hashes(&self, i: usize, repetition: usize) -> (&[u8], &[u8]) {
         let (l_trep, r_trep) = get_minimal_index_pair(repetition);
-        let l_idx = K * self.n_subsequences * l_trep + i * K;
-        let r_idx = K * self.n_subsequences * r_trep + i * K + K_HALF;
-        let l = &self.pools[l_idx..l_idx + K_HALF];
-        let r = &self.pools[r_idx..r_idx + K_HALF];
+        let l = &self.pools[l_trep][i].0;
+        let r = &self.pools[r_trep][i].1;
         (l, r)
     }
 
@@ -277,11 +264,6 @@ impl HashCollection {
         HashValue(xxhash_rust::xxh32::xxh32(&hv[..prefix], 1234))
     }
 
-    pub fn fraction_oob(&self) -> f64 {
-        self.oob as f64 / self.pools.len() as f64
-    }
-
-    // TODO: Reimplement this test
     #[cfg(test)]
     pub fn first_collision_baseline(&self, i: usize, j: usize, prefix: usize) -> Option<usize> {
         (0..self.hasher.repetitions)
@@ -295,39 +277,58 @@ impl HashCollection {
 
     pub fn first_collision(&self, i: usize, j: usize, prefix: usize) -> Option<usize> {
         let (k_left, k_right) = Self::k_pair(prefix);
-        let jump = K * self.n_subsequences;
-        let mut iidx = i * K;
-        let mut jidx = j * K;
 
         let mut lindex = None;
         let mut rindex = None;
-        for rep in 0..self.hasher.tensor_repetitions {
-            let ipool = &self.pools[iidx..iidx + K];
-            let jpool = &self.pools[jidx..jidx + K];
+        for trep in 0..self.hasher.tensor_repetitions {
+            let (ipool_left, ipool_right) = &self.pools[trep][i];
+            let (jpool_left, jpool_right) = &self.pools[trep][j];
             // check left
             if lindex.is_none() {
-                let hi = &ipool[0..k_left];
-                let hj = &jpool[0..k_left];
+                let hi = &ipool_left[0..k_left];
+                let hj = &jpool_left[0..k_left];
                 if hi == hj {
-                    lindex = Some(rep);
+                    lindex = Some(trep);
                 }
             }
             // check right
             if rindex.is_none() {
-                let hi = &ipool[K_HALF..K_HALF + k_right];
-                let hj = &jpool[K_HALF..K_HALF + k_right];
+                let hi = &ipool_right[0..k_right];
+                let hj = &jpool_right[0..k_right];
                 if hi == hj {
-                    rindex = Some(rep);
+                    rindex = Some(trep);
                 }
             }
             if rindex.is_some() && lindex.is_some() {
                 break;
             }
-            iidx += jump;
-            jidx += jump;
+        }
+        let res =
+            get_minimal_repetition(self.hasher.repetitions, lindex?, rindex?).and_then(|rep| {
+                if rep > self.hasher.repetitions {
+                    None
+                } else {
+                    Some(rep)
+                }
+            });
+
+        #[cfg(test)]
+        {
+            assert_eq!(
+                res,
+                self.first_collision_baseline(i, j, prefix),
+                "\nrepetitions: {:?}\nk_left: {:?}\nk_right: {:?}\nprefix: {}\nlindex: {:?}\nrindex: {:?}\nactual minimal index pair: {:?}",
+                self.hasher.repetitions,
+                k_left,
+                k_right,
+                prefix,
+                lindex,
+                rindex,
+                get_minimal_index_pair(self.first_collision_baseline(i, j, prefix).unwrap())
+            );
         }
 
-        get_minimal_repetition(self.hasher.repetitions, rindex?, lindex?)
+        res
     }
 
     pub fn group_subsequences(
@@ -509,17 +510,11 @@ impl Hasher {
         let mut pair_probing_time = Duration::from_secs(0);
         let mut probed_pairs = 0usize;
 
-        let mut kth_upper_bound = None;
         loop {
             // println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
             let probe_collection = HashCollection::from_ts(&ts, fft_data, probe_hasher);
-            let fraction_oob = probe_collection.fraction_oob();
             let probe_collection = Arc::new(probe_collection);
-            info!(
-                "built probe collection";
-                "fraction_oob" => fraction_oob
-            );
             probe_collection.group_subsequences(K, 0, ts.w, &mut probe_column, &mut probe_buckets);
             info!("grouped subsequences");
 
@@ -564,19 +559,14 @@ impl Hasher {
                 return None;
             };
 
-            if let Some(kth) = has_collision() {
-                if fraction_oob < 0.1 {
-                    kth_upper_bound.replace(kth);
-                    break;
-                } else {
-                    r *= 2.0;
-                }
+            if let Some(_kth) = has_collision() {
+                break;
             } else {
                 r *= 2.0;
             }
             drop(probe_collection);
+            info!("width estimation"; "time_s" => timer.elapsed().as_secs_f64(), "width" => r, "tag" => "profiling");
         }
-        info!("width estimation"; "time_s" => timer.elapsed().as_secs_f64(), "width" => r, "tag" => "profiling");
 
         return r;
     }
