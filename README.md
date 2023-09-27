@@ -34,25 +34,61 @@ First, you need to install Rust on your system. The simplest way is to visit
 
     curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain nightly
 
-After that, you can just run
+### Python wrapper
+
+To install the Python wrapper, issue the following commands (preferably in a virtual environment)
+
+```
+pip install maturin
+maturin develop --release
+```
+
+### Rust CLI
+
+To install the Rust cli, you can just run
 
     cargo install --locked --force --path .
 
 At this point, you should have the `attimo` command available on your system.
 
-## Running
+## Using the Python wrapper
+
+### Motiflets
+
+There is an experimental implementation of the [k-motiflets definition](https://www.vldb.org/pvldb/vol16/p725-schafer.pdf)
+that you can use as follows
+
+```python
+import pyattimo
+
+# load a dataset, any list of numpy array of floats works fine
+# The following call loads the first 100000 points of the ECG 
+# dataset (which will be downloaded from the internet)
+ts = pyattimo.load_dataset('ecg', 100000)
+
+# Now we can find k-motiflets:
+#  - w is the window length
+#  - support is the number of subsequences in the motiflet (k in the motiflet paper)
+#  - repetitions is the number of LSH repetitions
+m = pyattimo.motiflet(ts, w=1000, support=5, repetitions=512)
+
+# The motiflet object allows to:
+#   - get the indices of the subsequences
+m.indices
+#   - get the extent of the motiflet
+m.extent
+#   - plot the motiflet, showing it in a window or returning the 
+#     plot object (default) for embedding in a notebook
+m.plot(show=False)
+#   - get the values of the i-th subsequence in the motiflet
+m.values(2) # for the second subsequence
+#   - get the z-normalized values of the i-th subsequence in the motiflet
+m.zvalues(2) # for the second subsequence
+```
+
+## Running the CLI
 
 Executing the command with no arguments shows a short help message.
-
-    ❯ attimo
-    Required positional arguments not provided:
-        path
-    Required options not provided:
-        --window
-        --motifs
-        --memory
-
-The flag `--help` gives a more comprehensive overview
 
 ## Data format
 
@@ -71,5 +107,5 @@ with one value per line:
     1.0608
 
 You can find some sample data files
-[here](https://www.dropbox.com/sh/ookuitgxqc1z1op/AACw_kkI7Xcop76UBytEIoFsa?dl=0).
+[here](https://figshare.com/articles/dataset/Datasets/20747617).
 
