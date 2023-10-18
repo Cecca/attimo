@@ -40,6 +40,7 @@ To install the Python wrapper, issue the following commands (preferably in a vir
 
 ```
 pip install maturin
+cd pyattimo
 maturin develop --release
 ```
 
