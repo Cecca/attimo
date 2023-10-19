@@ -6,6 +6,7 @@
 
 pub mod allocator;
 pub mod distance;
+pub mod knn;
 pub mod load;
 pub mod lsh;
 pub mod motifs;

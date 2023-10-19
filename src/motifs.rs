@@ -6,6 +6,7 @@
 //// to respect the limits of the system in terms of memory.
 
 use crate::distance::*;
+use crate::knn::*;
 use crate::lsh::*;
 use crate::timeseries::*;
 use indicatif::ProgressBar;
@@ -15,7 +16,6 @@ use slog_scope::info;
 use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::collections::BinaryHeap;
 use std::ops::Range;
 use std::sync::Arc;
@@ -252,94 +252,6 @@ impl Motiflet {
     }
     pub fn indices(&self) -> Vec<usize> {
         self.indices.clone()
-    }
-}
-
-#[derive(PartialEq, PartialOrd, Clone, Copy)]
-struct OrdF64(f64);
-impl Eq for OrdF64 {}
-impl Ord for OrdF64 {
-    #[inline]
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0.partial_cmp(&other.0).unwrap()
-    }
-}
-
-struct SubsequenceNeighborhood {
-    id: usize,
-    neighbors: BTreeSet<(OrdF64, usize)>,
-}
-impl SubsequenceNeighborhood {
-    fn new(id: usize) -> Self {
-        Self {
-            id,
-            neighbors: Default::default(),
-        }
-    }
-    fn len(&self) -> usize {
-        self.neighbors.len()
-    }
-    fn update(&mut self, dist: f64, neighbor: usize) {
-        let dist = OrdF64(dist);
-        self.neighbors.insert((dist, neighbor));
-    }
-    fn merge(&mut self, other: &Self) {
-        assert_eq!(self.id, other.id);
-        for pair in &other.neighbors {
-            self.neighbors.insert(*pair);
-        }
-    }
-    fn farthest_up_to(&self, k: usize, exclusion_zone: usize) -> Option<f64> {
-        let mut last_valid = self.id;
-        self.neighbors
-            .iter()
-            .filter(|(_, i)| {
-                let i = *i;
-                if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
-                    last_valid = i;
-                    true
-                } else {
-                    false
-                }
-            })
-            .take(k)
-            .map(|pair| (pair.0).0)
-            .last()
-    }
-    fn distance_at(&self, k: usize, exclusion_zone: usize) -> Option<f64> {
-        let mut last_valid = self.id;
-        self.neighbors
-            .iter()
-            .filter(|(_, i)| {
-                // let (_, i) = entry.value();
-                let i = *i;
-                if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
-                    last_valid = i;
-                    true
-                } else {
-                    false
-                }
-            })
-            .nth(k)
-            .map(|pair| (pair.0).0)
-    }
-    fn knn(&self, k: usize, exclusion_zone: usize) -> Vec<usize> {
-        let mut last_valid = self.id;
-        self.neighbors
-            .iter()
-            .filter(|(_, i)| {
-                // let (_, i) = entry.value();
-                let i = *i;
-                if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
-                    last_valid = i;
-                    true
-                } else {
-                    false
-                }
-            })
-            .take(k)
-            .map(|pair| pair.1)
-            .collect()
     }
 }
 

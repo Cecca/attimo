@@ -1,6 +1,23 @@
-publish: wheel
-    maturin upload --skip-existing target/wheels/*
+#publish: wheel
+#    maturin upload --skip-existing target/wheels/*
 
+check: maturindev
+  #!/usr/bin/env python
+  import pyattimo
+  import time
+  ts = pyattimo.load_dataset("ecg", 100000)
+  knns = pyattimo.KnnIterator(ts, 1000, k=4)
+  while True:
+      start = time.time()
+      knn = next(knns)
+      end = time.time()
+      print(knn[2])
+      if end - start > 1:
+          break
+
+
+maturindev:
+  maturin develop --release
 
 wheel:
     cd .. && cargo test
@@ -10,17 +27,10 @@ wheel:
     #just cross-wheel x86_64-apple-darwin
     just cross-wheel aarch64-unknown-linux-gnu
     just cross-wheel aarch64-unknown-linux-musl
-    #just cross-wheel aarch64-apple-darwin
+    just cross-wheel aarch64-apple-darwin
 
 # Cross compiles (linking with zig) for the given platform
 cross-wheel target:
     rustup target add {{target}}
     maturin build --release --zig --target {{target}}
-
-# Check if the target platform is installed, and install it
-# if not.
-ensure-target target:
-    rustup target list --installed | grep {{target}} || \
-        rustup target add {{target}}
-
 

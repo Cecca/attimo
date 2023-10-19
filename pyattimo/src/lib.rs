@@ -1,9 +1,8 @@
-use anyhow::Context;
+use attimo::knn::KnnIter;
 use attimo::motifs::{KMotifletState, MotifsEnumerator, PairMotifState};
 use attimo::timeseries::WindowedTimeseries;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 #[pyclass]
@@ -233,6 +232,39 @@ impl MotifsIterator {
     }
 }
 
+#[pyclass]
+struct KnnIterator {
+    k: usize,
+    exclusion_zone: usize,
+    inner: KnnIter,
+}
+
+#[pymethods]
+impl KnnIterator {
+    #[new]
+    #[pyo3(signature=(ts, w, k, repetitions=1000, delta = 0.05, seed = 1234))]
+    fn new(ts: Vec<f64>, w: usize, k: usize, repetitions: usize, delta: f64, seed: u64) -> Self {
+        let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
+        let n = ts.num_subsequences();
+        let inner = KnnIter::new(ts, k, w, repetitions, delta, seed, false);
+        Self {
+            k,
+            exclusion_zone: w,
+            inner,
+        }
+    }
+
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<(usize, Vec<usize>, Vec<f64>)> {
+        slf.inner
+            .next()
+            .map(|knn| (knn.id, knn.neighbors, knn.distances))
+    }
+}
+
 #[pyfunction]
 #[pyo3(signature=(ts, w, support = 3, repetitions=256, delta = 0.05, seed = 1234))]
 pub fn motiflet(
@@ -262,8 +294,8 @@ pub fn motiflet(
 
 #[pymodule]
 fn pyattimo(_py: Python, m: &PyModule) -> PyResult<()> {
-    // m.add_function(wrap_pyfunction!(load_dataset, m)?)?;
     m.add_function(wrap_pyfunction!(motiflet, m)?)?;
     m.add_class::<MotifsIterator>()?;
+    m.add_class::<KnnIterator>()?;
     Ok(())
 }
