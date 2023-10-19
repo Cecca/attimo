@@ -1,3 +1,5 @@
+from .pyattimo import *
+
 DATASETS = {
     "astro": "https://figshare.com/ndownloader/files/36982360",
     "ecg": "https://figshare.com/ndownloader/files/36982384",
