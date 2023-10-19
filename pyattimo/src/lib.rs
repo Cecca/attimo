@@ -240,7 +240,7 @@ struct KnnIterator {
 #[pymethods]
 impl KnnIterator {
     #[new]
-    #[pyo3(signature=(ts, w, k, repetitions=1000, delta = 0.05, seed = 1234))]
+    #[pyo3(signature=(ts, w, k, repetitions=256, delta = 0.01, seed = 1234))]
     fn new(ts: Vec<f64>, w: usize, k: usize, repetitions: usize, delta: f64, seed: u64) -> Self {
         let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
         let inner = KnnIter::new(ts, k, w, repetitions, delta, seed, false);

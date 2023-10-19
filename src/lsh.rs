@@ -511,7 +511,7 @@ impl Hasher {
         let mut probed_pairs = 0usize;
 
         loop {
-            println!("Build probe buckets with r={}", r);
+            // println!("Build probe buckets with r={}", r);
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
             let probe_collection = HashCollection::from_ts(&ts, fft_data, probe_hasher);
             let probe_collection = Arc::new(probe_collection);
