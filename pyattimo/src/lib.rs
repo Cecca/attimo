@@ -234,8 +234,6 @@ impl MotifsIterator {
 
 #[pyclass]
 struct KnnIterator {
-    k: usize,
-    exclusion_zone: usize,
     inner: KnnIter,
 }
 

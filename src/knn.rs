@@ -50,6 +50,21 @@ impl SubsequenceNeighborhood {
             self.neighbors.insert(*pair);
         }
     }
+    pub fn len_non_overlapping(&self, exclusion_zone: usize) -> usize {
+        let mut last_valid = self.id;
+        self.neighbors
+            .iter()
+            .filter(|(_, i)| {
+                let i = *i;
+                if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
+                    last_valid = i;
+                    true
+                } else {
+                    false
+                }
+            })
+            .count()
+    }
     pub fn farthest_up_to(&self, k: usize, exclusion_zone: usize) -> Option<f64> {
         let mut last_valid = self.id;
         self.neighbors
@@ -151,13 +166,27 @@ impl KnnState {
     fn merge_threads(&mut self) {
         for tl_neighs in self.tl_neighborhoods.iter_mut() {
             for (id, neighs) in tl_neighs.borrow_mut().iter() {
-                self.neighborhoods
-                    .entry(*id)
-                    .or_insert_with(|| SubsequenceNeighborhood::new(*id))
-                    .merge(neighs);
+                if !self.done[*id] {
+                    self.neighborhoods
+                        .entry(*id)
+                        .or_insert_with(|| SubsequenceNeighborhood::new(*id))
+                        .merge(neighs);
+                }
             }
             tl_neighs.borrow_mut().clear();
         }
+    }
+
+    fn next_distance(&self) -> Option<f64> {
+        self.neighborhoods
+            .iter()
+            .filter_map(|(_, neighborhood)| {
+                neighborhood
+                    .distance_at(self.k, self.exclusion_zone)
+                    .map(|d| OrdF64(d))
+            })
+            .min()
+            .map(|d| d.0)
     }
 }
 impl std::fmt::Debug for KnnState {
@@ -215,20 +244,12 @@ impl KnnState {
             .iter()
             .filter(|(_, neighborhood)| {
                 neighborhood
-                    .distance_at(self.k - 1, self.exclusion_zone)
+                    .distance_at(self.k, self.exclusion_zone)
                     .is_some()
-            })
-            .min_by_key(|(_, neighborhood)| {
-                OrdF64(
-                    neighborhood
-                        .distance_at(self.k - 1, self.exclusion_zone)
-                        .unwrap(),
-                )
             })
             .into_iter()
             .filter_map(|(id, neighborhood)| {
-                // let neighborhood = entry.value();
-                if let Some(d) = neighborhood.distance_at(self.k - 1, self.exclusion_zone) {
+                if let Some(d) = neighborhood.distance_at(self.k, self.exclusion_zone) {
                     if !self.done[*id] && predicate(d) {
                         Some(neighborhood.to_knn(self.k, self.exclusion_zone))
                     } else {
@@ -349,6 +370,18 @@ impl KnnIter {
         pbar.set_message(format!("depth {}", depth));
         pbar
     }
+
+    fn level_for_distance(&self, d: f64, mut prefix: usize) -> usize {
+        while prefix > 0 {
+            for rep in 0..self.repetitions {
+                if self.hasher.failure_probability(d, rep, prefix) < self.delta {
+                    return prefix;
+                }
+            }
+            prefix -= 1;
+        }
+        panic!("Got to prefix of length 0!");
+    }
 }
 impl Iterator for KnnIter {
     type Item = Knn;
@@ -384,21 +417,12 @@ impl Iterator for KnnIter {
 
                         for (_, a_idx) in bucket.iter() {
                             let a_idx = *a_idx as usize;
-                            // let a_already_checked = rep_bounds[a_idx].clone();
-                            // let a_hash_idx = hash_range.start + a_offset;
                             for (_, b_idx) in bucket.iter() {
                                 let b_idx = *b_idx as usize;
-                                //// Here we handle trivial matches: we don't consider a pair if the difference between
-                                //// the subsequence indexes is smaller than the exclusion zone, which is set to `w/4`.
                                 if a_idx + self.exclusion_zone < b_idx {
-                                    //// We only process the pair if this is the first repetition in which
-                                    //// they collide. We get this information from the pool of bits
-                                    //// from which hash values for all repetitions are extracted.
                                     if let Some(first_colliding_repetition) =
                                         self.pools.first_collision(a_idx, b_idx, self.depth)
                                     {
-                                        //// This is the first collision in this iteration, _and_ the pair didn't collide
-                                        //// at a deeper level.
                                         if first_colliding_repetition == self.rep
                                             && self
                                                 .previous_depth
@@ -422,7 +446,7 @@ impl Iterator for KnnIter {
                     }
                 });
 
-            // Confirm the pairs that can be confirmed in this iteration
+            // Confirm the knn that can be confirmed in this iteration
             let depth = self.depth;
             let rep = self.rep;
             let delta = self.delta;
@@ -439,8 +463,21 @@ impl Iterator for KnnIter {
             self.rep += 1;
             if self.rep >= self.repetitions {
                 self.rep = 0;
-                self.depth -= 1;
-                assert!(self.depth > 0);
+                self.previous_depth.replace(self.depth);
+                if let Some(distance) = self.state.next_distance() {
+                    if let Some(pbar) = &self.pbar {
+                        pbar.println(format!("next distance {:?}", distance));
+                        pbar.println(format!("{:?}", self.state));
+                    }
+                    let new_depth = self.level_for_distance(distance, self.depth);
+                    if new_depth == depth {
+                        self.depth -= 1;
+                    } else {
+                        self.depth = new_depth;
+                    }
+                } else {
+                    self.depth -= 1;
+                }
                 if self.pbar.is_some() {
                     self.pbar = Some(Self::build_progress_bar(self.depth, self.repetitions));
                 }

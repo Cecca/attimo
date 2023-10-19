@@ -1,22 +1,32 @@
 #publish: wheel
 #    maturin upload --skip-existing target/wheels/*
 
-check: maturindev
+check-motiflet: maturin-dev
   #!/usr/bin/env python
   import pyattimo
   import time
-  ts = pyattimo.load_dataset("ecg", 100000)
-  knns = pyattimo.KnnIterator(ts, 1000, k=4)
-  while True:
-      start = time.time()
-      knn = next(knns)
-      end = time.time()
-      print(knn[2])
-      if end - start > 1:
-          break
+  ts = pyattimo.load_dataset("ecg", 1000000)
+  m = pyattimo.motiflet(ts, 1000, support=4, delta=0.01)
+  print(m)
+
+check-knn: maturin-dev
+  #!/usr/bin/env python
+  import pyattimo
+  import time
+  ts = pyattimo.load_dataset("ecg", 1000000)
+  knns = pyattimo.KnnIterator(ts, 1000, k=3, delta=0.01, repetitions=256)
+  print(next(knns))
+  # while True:
+  #     start = time.time()
+  #     knn = next(knns)
+  #     end = time.time()
+  #     print(knn[2])
+  #     if end - start > 1:
+  #         # Stop if it took too long
+  #         break
 
 
-maturindev:
+maturin-dev:
   maturin develop --release
 
 wheel:
@@ -24,7 +34,7 @@ wheel:
     cargo test
     just cross-wheel x86_64-unknown-linux-gnu
     just cross-wheel x86_64-unknown-linux-musl
-    #just cross-wheel x86_64-apple-darwin
+    just cross-wheel x86_64-apple-darwin
     just cross-wheel aarch64-unknown-linux-gnu
     just cross-wheel aarch64-unknown-linux-musl
     just cross-wheel aarch64-apple-darwin
