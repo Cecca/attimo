@@ -71,71 +71,20 @@ impl SubsequenceNeighborhood {
     }
     pub fn len_non_overlapping(&self, exclusion_zone: usize) -> usize {
         self.iter_non_overlapping(exclusion_zone).count()
-        // let mut last_valid = self.id;
-        // self.neighbors
-        //     .iter()
-        //     .filter(|(_, i)| {
-        //         let i = *i;
-        //         if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
-        //             last_valid = i;
-        //             true
-        //         } else {
-        //             false
-        //         }
-        //     })
-        //     .count()
     }
     pub fn farthest_up_to(&self, k: usize, exclusion_zone: usize) -> Option<f64> {
         self.iter_non_overlapping(exclusion_zone)
-            // let mut last_valid = self.id;
-            // self.neighbors
-            //     .iter()
-            //     .filter(|(_, i)| {
-            //         let i = *i;
-            //         if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
-            //             last_valid = i;
-            //             true
-            //         } else {
-            //             false
-            //         }
-            //     })
             .take(k)
             .map(|pair| (pair.0).0)
             .last()
     }
     pub fn distance_at(&self, k: usize, exclusion_zone: usize) -> Option<f64> {
         self.iter_non_overlapping(exclusion_zone)
-            // let mut last_valid = self.id;
-            // self.neighbors
-            //     .iter()
-            //     .filter(|(_, i)| {
-            //         // let (_, i) = entry.value();
-            //         let i = *i;
-            //         if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
-            //             last_valid = i;
-            //             true
-            //         } else {
-            //             false
-            //         }
-            //     })
             .nth(k)
             .map(|pair| (pair.0).0)
     }
     pub fn knn(&self, k: usize, exclusion_zone: usize) -> Vec<usize> {
         self.iter_non_overlapping(exclusion_zone)
-            // let mut last_valid = self.id;
-            // self.neighbors
-            //     .iter()
-            //     .filter(|(_, i)| {
-            //         // let (_, i) = entry.value();
-            //         let i = *i;
-            //         if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
-            //             last_valid = i;
-            //             true
-            //         } else {
-            //             false
-            //         }
-            //     })
             .take(k)
             .map(|pair| pair.1)
             .collect()
@@ -143,20 +92,6 @@ impl SubsequenceNeighborhood {
     pub fn to_knn(&self, k: usize, exclusion_zone: usize) -> Knn {
         let (neighbors, distances): (Vec<usize>, Vec<f64>) = self
             .iter_non_overlapping(exclusion_zone)
-            // let mut last_valid = self.id;
-            // let (neighbors, distances): (Vec<usize>, Vec<f64>) = self
-            //     .neighbors
-            //     .iter()
-            //     .filter(|(_, i)| {
-            //         // let (_, i) = entry.value();
-            //         let i = *i;
-            //         if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
-            //             last_valid = i;
-            //             true
-            //         } else {
-            //             false
-            //         }
-            //     })
             .take(k)
             .map(|pair| (pair.1, (pair.0).0))
             .unzip();

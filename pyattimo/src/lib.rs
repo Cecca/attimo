@@ -240,10 +240,19 @@ struct KnnIterator {
 #[pymethods]
 impl KnnIterator {
     #[new]
-    #[pyo3(signature=(ts, w, k, repetitions=256, delta = 0.01, seed = 1234))]
-    fn new(ts: Vec<f64>, w: usize, k: usize, repetitions: usize, delta: f64, seed: u64) -> Self {
+    #[pyo3(signature=(ts, w, k, repetitions=256, delta = 0.01, exclusion_zone=None, seed = 1234))]
+    fn new(
+        ts: Vec<f64>,
+        w: usize,
+        k: usize,
+        repetitions: usize,
+        delta: f64,
+        exclusion_zone: Option<usize>,
+        seed: u64,
+    ) -> Self {
         let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
-        let inner = KnnIter::new(ts, k, w, repetitions, delta, seed, false);
+        let exclusion_zone = exclusion_zone.unwrap_or(w / 2);
+        let inner = KnnIter::new(ts, k, exclusion_zone, repetitions, delta, seed, false);
         Self { inner }
     }
 
@@ -259,17 +268,18 @@ impl KnnIterator {
 }
 
 #[pyfunction]
-#[pyo3(signature=(ts, w, support = 3, repetitions=256, delta = 0.05, seed = 1234))]
+#[pyo3(signature=(ts, w, support=3, repetitions=256, delta = 0.05, exclusion_zone=None, seed = 1234))]
 pub fn motiflet(
     ts: Vec<f64>,
     w: usize,
     support: usize,
     repetitions: usize,
     delta: f64,
+    exclusion_zone: Option<usize>,
     seed: u64,
 ) -> KMotiflet {
     let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
-    let exclusion_zone = ts.w;
+    let exclusion_zone = exclusion_zone.unwrap_or(w / 2);
     let mut enumerator = MotifsEnumerator::new(
         ts,
         1,
