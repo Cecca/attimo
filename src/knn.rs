@@ -50,88 +50,113 @@ impl SubsequenceNeighborhood {
             self.neighbors.insert(*pair);
         }
     }
+    fn iter_non_overlapping(
+        &self,
+        exclusion_zone: usize,
+    ) -> impl Iterator<Item = &'_ (OrdF64, usize)> + '_ {
+        let mut selected: BTreeSet<usize> = BTreeSet::new();
+        self.neighbors.iter().filter(move |(_, neigh_idx)| {
+            let start = if *neigh_idx > exclusion_zone {
+                neigh_idx - exclusion_zone
+            } else {
+                0
+            };
+            let end = neigh_idx + exclusion_zone;
+            let overlaps = selected.range(start..end).next().is_some();
+            if !overlaps {
+                selected.insert(*neigh_idx);
+            }
+            !overlaps
+        })
+    }
     pub fn len_non_overlapping(&self, exclusion_zone: usize) -> usize {
-        let mut last_valid = self.id;
-        self.neighbors
-            .iter()
-            .filter(|(_, i)| {
-                let i = *i;
-                if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
-                    last_valid = i;
-                    true
-                } else {
-                    false
-                }
-            })
-            .count()
+        self.iter_non_overlapping(exclusion_zone).count()
+        // let mut last_valid = self.id;
+        // self.neighbors
+        //     .iter()
+        //     .filter(|(_, i)| {
+        //         let i = *i;
+        //         if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
+        //             last_valid = i;
+        //             true
+        //         } else {
+        //             false
+        //         }
+        //     })
+        //     .count()
     }
     pub fn farthest_up_to(&self, k: usize, exclusion_zone: usize) -> Option<f64> {
-        let mut last_valid = self.id;
-        self.neighbors
-            .iter()
-            .filter(|(_, i)| {
-                let i = *i;
-                if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
-                    last_valid = i;
-                    true
-                } else {
-                    false
-                }
-            })
+        self.iter_non_overlapping(exclusion_zone)
+            // let mut last_valid = self.id;
+            // self.neighbors
+            //     .iter()
+            //     .filter(|(_, i)| {
+            //         let i = *i;
+            //         if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
+            //             last_valid = i;
+            //             true
+            //         } else {
+            //             false
+            //         }
+            //     })
             .take(k)
             .map(|pair| (pair.0).0)
             .last()
     }
     pub fn distance_at(&self, k: usize, exclusion_zone: usize) -> Option<f64> {
-        let mut last_valid = self.id;
-        self.neighbors
-            .iter()
-            .filter(|(_, i)| {
-                // let (_, i) = entry.value();
-                let i = *i;
-                if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
-                    last_valid = i;
-                    true
-                } else {
-                    false
-                }
-            })
+        self.iter_non_overlapping(exclusion_zone)
+            // let mut last_valid = self.id;
+            // self.neighbors
+            //     .iter()
+            //     .filter(|(_, i)| {
+            //         // let (_, i) = entry.value();
+            //         let i = *i;
+            //         if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
+            //             last_valid = i;
+            //             true
+            //         } else {
+            //             false
+            //         }
+            //     })
             .nth(k)
             .map(|pair| (pair.0).0)
     }
     pub fn knn(&self, k: usize, exclusion_zone: usize) -> Vec<usize> {
-        let mut last_valid = self.id;
-        self.neighbors
-            .iter()
-            .filter(|(_, i)| {
-                // let (_, i) = entry.value();
-                let i = *i;
-                if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
-                    last_valid = i;
-                    true
-                } else {
-                    false
-                }
-            })
+        self.iter_non_overlapping(exclusion_zone)
+            // let mut last_valid = self.id;
+            // self.neighbors
+            //     .iter()
+            //     .filter(|(_, i)| {
+            //         // let (_, i) = entry.value();
+            //         let i = *i;
+            //         if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
+            //             last_valid = i;
+            //             true
+            //         } else {
+            //             false
+            //         }
+            //     })
             .take(k)
             .map(|pair| pair.1)
             .collect()
     }
     pub fn to_knn(&self, k: usize, exclusion_zone: usize) -> Knn {
-        let mut last_valid = self.id;
         let (neighbors, distances): (Vec<usize>, Vec<f64>) = self
-            .neighbors
-            .iter()
-            .filter(|(_, i)| {
-                // let (_, i) = entry.value();
-                let i = *i;
-                if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
-                    last_valid = i;
-                    true
-                } else {
-                    false
-                }
-            })
+            .iter_non_overlapping(exclusion_zone)
+            // let mut last_valid = self.id;
+            // let (neighbors, distances): (Vec<usize>, Vec<f64>) = self
+            //     .neighbors
+            //     .iter()
+            //     .filter(|(_, i)| {
+            //         // let (_, i) = entry.value();
+            //         let i = *i;
+            //         if i.max(last_valid) - i.min(last_valid) >= exclusion_zone {
+            //             last_valid = i;
+            //             true
+            //         } else {
+            //             false
+            //         }
+            //     })
             .take(k)
             .map(|pair| (pair.1, (pair.0).0))
             .unzip();

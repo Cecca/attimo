@@ -5,8 +5,8 @@ check-motiflet: maturin-dev
   #!/usr/bin/env python
   import pyattimo
   import time
-  ts = pyattimo.load_dataset("ecg", 1000000)
-  m = pyattimo.motiflet(ts, 1000, support=4, delta=0.01)
+  ts = pyattimo.load_dataset("ecg", 100000)
+  m = pyattimo.motiflet(ts, 1000, support=10, repetitions=2048, delta=0.05)
   print(m)
 
 check-knn: maturin-dev
