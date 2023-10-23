@@ -5,6 +5,11 @@ use crate::{
 };
 use rayon::prelude::*;
 
+/// Find the `k` nearest neighbors of the given `from` subsequence, respecting the
+/// given `exclusion_zone`. Returns a pair where the first element is the extent
+/// of the neighborhood thus found (i.e. the maximum z-normalized Eucliedean distance
+/// between any two points in the neighborhood, non squared), and the second element
+/// is a vector of the actual neighbors found.
 fn k_nearest_neighbors_bf(
     ts: &WindowedTimeseries,
     from: usize,
@@ -15,20 +20,35 @@ fn k_nearest_neighbors_bf(
     distances: &mut [f64],
     buf: &mut [f64],
 ) -> (OrdF64, Vec<usize>) {
+    // Check that the auxiliary memory buffers are correctly sized
     assert_eq!(indices.len(), ts.num_subsequences());
     assert_eq!(distances.len(), ts.num_subsequences());
     assert_eq!(buf.len(), ts.w);
+
+    // Compute the distance profile using the MASS algorithm
     ts.distance_profile(&fft_data, from, distances, buf);
+
+    // Reset the indices of the subsequences
     for i in 0..ts.num_subsequences() {
         indices[i] = i;
     }
+    // Find the likely candidates by a (partial) indirect sort of
+    // the indices by increasing distance.
+    let n_candidates = (k * exclusion_zone).min(ts.num_subsequences());
+    indices.select_nth_unstable_by_key(n_candidates, |j| OrdF64(distances[*j]));
+
+    // Sort the candidate indices by increasing distance (the previous step)
+    // only partitioned the indices in two groups with the guarantee that the first
+    // `n_candidates` indices are the ones at shortest distance from the `from` point,
+    // but they are not guaranteed to be sorted
+    let indices = &mut indices[..n_candidates];
     indices.sort_unstable_by_key(|j| OrdF64(distances[*j]));
 
+    // Pick the k-neighborhood skipping overlapping subsequences
     let mut ret = Vec::new();
-    assert!(indices[0] == from);
-    ret.push(indices[0]);
+    ret.push(from);
     let mut j = 1;
-    while ret.len() < k {
+    while ret.len() < k && j < indices.len() {
         // find the non-overlapping subsequences
         let jj = indices[j];
         let mut overlaps = false;
@@ -44,6 +64,7 @@ fn k_nearest_neighbors_bf(
         }
         j += 1;
     }
+    assert_eq!(ret.len(), k);
 
     let mut extent = 0.0f64;
     for i in 0..k {
@@ -56,15 +77,21 @@ fn k_nearest_neighbors_bf(
     (OrdF64(extent), ret)
 }
 
+// Find the (approximate) motiflets by brute force: for each subsequence find its
+// k-nearest neighbors, compute their extents, and pick the neighborhood with the
+// smallest extent.
 pub fn brute_force_motiflets(
     ts: &WindowedTimeseries,
     k: usize,
     exclusion_zone: usize,
 ) -> (f64, Vec<usize>) {
     debug_assert!(false, "Should run only in `release mode`");
+    // pre-compute the FFT for the time series
     let fft_data = FFTData::new(&ts);
     let n = ts.num_subsequences();
 
+    // initialize some auxiliary buffers, which will be cloned on a
+    // per-thread basis.
     let mut indices = Vec::new();
     indices.resize(n, 0usize);
     let mut distances = Vec::new();
@@ -72,6 +99,7 @@ pub fn brute_force_motiflets(
     let mut buf = Vec::new();
     buf.resize(ts.w, 0.0f64);
 
+    // compute all k-nearest neighborhoods
     let (extent, indices) = (0..n)
         .into_par_iter()
         .map_with((indices, distances, buf), |(indices, distances, buf), i| {
