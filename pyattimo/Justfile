@@ -1,30 +1,5 @@
-#publish: wheel
-#    maturin upload --skip-existing target/wheels/*
-
-check-motiflet: maturin-dev
-  #!/usr/bin/env python
-  import pyattimo
-  import time
-  ts = pyattimo.load_dataset("ecg", 100000)
-  m = pyattimo.motiflet(ts, 1000, support=10, repetitions=2048, delta=0.05)
-  print(m)
-
-check-knn: maturin-dev
-  #!/usr/bin/env python
-  import pyattimo
-  import time
-  ts = pyattimo.load_dataset("ecg", 1000000)
-  knns = pyattimo.KnnIterator(ts, 1000, k=3, delta=0.01, repetitions=256)
-  print(next(knns))
-  # while True:
-  #     start = time.time()
-  #     knn = next(knns)
-  #     end = time.time()
-  #     print(knn[2])
-  #     if end - start > 1:
-  #         # Stop if it took too long
-  #         break
-
+bench-motiflet: maturin-dev
+  python bench.py
 
 maturin-dev:
   maturin develop --release
