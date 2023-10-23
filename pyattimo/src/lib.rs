@@ -295,9 +295,30 @@ pub fn motiflet(
     unreachable!()
 }
 
+#[pyfunction]
+#[pyo3(signature=(ts, w, support=3, exclusion_zone=None))]
+pub fn motiflet_brute_force(
+    ts: Vec<f64>,
+    w: usize,
+    support: usize,
+    exclusion_zone: Option<usize>,
+) -> KMotiflet {
+    use attimo::motiflets::*;
+    let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
+    let exclusion_zone = exclusion_zone.unwrap_or(w / 2);
+    let (extent, indices) = brute_force_motiflets(&ts, support, exclusion_zone);
+    KMotiflet {
+        support,
+        indices,
+        extent,
+        ts,
+    }
+}
+
 #[pymodule]
 fn pyattimo(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(motiflet, m)?)?;
+    m.add_function(wrap_pyfunction!(motiflet_brute_force, m)?)?;
     m.add_class::<MotifsIterator>()?;
     m.add_class::<KnnIterator>()?;
     Ok(())

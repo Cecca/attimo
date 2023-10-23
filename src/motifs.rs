@@ -359,7 +359,11 @@ pub trait State: std::fmt::Debug {
     /// are we done with the computation?
     fn is_done(&mut self) -> bool;
     /// emit a bunch of output, if any
-    fn emit<F: Fn(f64) -> bool>(&mut self, predicate: F) -> Vec<Self::Output>;
+    fn emit<F: Fn(f64) -> bool>(
+        &mut self,
+        ts: &WindowedTimeseries,
+        predicate: F,
+    ) -> Vec<Self::Output>;
     /// the next distance we are interested in looking at
     fn next_distance(&self) -> Option<f64>;
 }
@@ -421,7 +425,7 @@ impl State for PairMotifState {
         self.topk.num_confirmed() == self.k
     }
 
-    fn emit<F: Fn(f64) -> bool>(&mut self, predicate: F) -> Vec<Motif> {
+    fn emit<F: Fn(f64) -> bool>(&mut self, _ts: &WindowedTimeseries, predicate: F) -> Vec<Motif> {
         self.merge_threads();
         let mut ret: Vec<Motif> = Vec::new();
         let elapsed = self.start.elapsed();
@@ -522,7 +526,11 @@ impl State for KMotifletState {
         self.merge_threads();
         self.done
     }
-    fn emit<F: Fn(f64) -> bool>(&mut self, predicate: F) -> Vec<Self::Output> {
+    fn emit<F: Fn(f64) -> bool>(
+        &mut self,
+        ts: &WindowedTimeseries,
+        predicate: F,
+    ) -> Vec<Self::Output> {
         if self.done {
             return Vec::new();
         }
@@ -541,20 +549,19 @@ impl State for KMotifletState {
             .iter()
             .filter(|(_, neighborhood)| {
                 neighborhood
-                    .distance_at(self.support - 1, self.exclusion_zone)
+                    .extent(self.support - 1, self.exclusion_zone, ts)
                     .is_some()
             })
             .min_by_key(|(_, neighborhood)| {
                 OrdF64(
                     neighborhood
-                        .distance_at(self.support - 1, self.exclusion_zone)
+                        .extent(self.support - 1, self.exclusion_zone, ts)
                         .unwrap(),
                 )
             })
             .into_iter()
             .filter_map(|(k, neighborhood)| {
-                // let neighborhood = entry.value();
-                if let Some(d) = neighborhood.distance_at(self.support - 1, self.exclusion_zone) {
+                if let Some(d) = neighborhood.extent(self.support - 1, self.exclusion_zone, ts) {
                     if predicate(d) {
                         let mut knn = neighborhood.knn(self.support - 1, self.exclusion_zone);
                         knn.push(*k);
@@ -796,9 +803,9 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
             let rep = self.rep;
             let delta = self.delta;
             let hasher = Arc::clone(&self.hasher);
-            let mut buf = self
-                .state
-                .emit(|d| hasher.failure_probability(d, rep, depth) <= delta);
+            let mut buf = self.state.emit(&self.ts, |d| {
+                hasher.failure_probability(d, rep, depth) <= delta
+            });
             self.to_return.extend(buf.drain(..).map(|m| Reverse(m)));
 
             self.pbar.as_ref().map(|pbar| pbar.inc(1));

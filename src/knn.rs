@@ -83,6 +83,22 @@ impl SubsequenceNeighborhood {
             .nth(k)
             .map(|pair| (pair.0).0)
     }
+    pub fn extent(&self, k: usize, exclusion_zone: usize, ts: &WindowedTimeseries) -> Option<f64> {
+        let ids = self.knn(k, exclusion_zone);
+        if ids.len() < k {
+            return None;
+        }
+        let mut extent = zeucl(ts, self.id, *ids.last().unwrap());
+        for i in 0..ids.len() {
+            let ii = ids[i];
+            for j in (i + 1)..ids.len() {
+                let jj = ids[j];
+                let d = zeucl(ts, ii, jj);
+                extent = extent.max(d);
+            }
+        }
+        Some(extent)
+    }
     pub fn knn(&self, k: usize, exclusion_zone: usize) -> Vec<usize> {
         self.iter_non_overlapping(exclusion_zone)
             .take(k)
