@@ -4,6 +4,31 @@ use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::{cell::RefCell, convert::TryFrom, fmt::Display, sync::Arc, time::Instant};
 use thread_local::ThreadLocal;
 
+pub trait Overlaps<T> {
+    fn overlaps(&self, other: T, exclusion_zone: usize) -> bool;
+}
+
+impl Overlaps<usize> for usize {
+    #[inline]
+    fn overlaps(&self, other: usize, exclusion_zone: usize) -> bool {
+        self.max(&other) - self.min(&other) < exclusion_zone
+    }
+}
+
+impl Overlaps<&[usize]> for usize {
+    #[inline]
+    fn overlaps(&self, other: &[usize], exclusion_zone: usize) -> bool {
+        other.iter().any(|x| self.overlaps(*x, exclusion_zone))
+    }
+}
+
+impl Overlaps<&Vec<usize>> for usize {
+    #[inline]
+    fn overlaps(&self, other: &Vec<usize>, exclusion_zone: usize) -> bool {
+        self.overlaps(other.as_slice(), exclusion_zone)
+    }
+}
+
 pub struct WindowedTimeseries {
     pub data: Vec<f64>,
     pub w: usize,
