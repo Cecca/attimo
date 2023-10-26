@@ -985,7 +985,7 @@ mod test {
             800,
             0.01,
             || PairMotifState::new(10, w),
-            12435,
+            124356,
             false,
         )
         .collect();
@@ -1003,6 +1003,12 @@ mod test {
                         motif.idx_a, motif.idx_b, motif.distance
                     );
                     break;
+                }
+            }
+            if !found {
+                println!("Found motifs");
+                for m in &motifs {
+                    println!("  {:?}", m);
                 }
             }
             assert!(
@@ -1034,7 +1040,7 @@ mod test {
         let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", None).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
 
-        let motifs = motifs(ts, 10, 800, 0.01, 12435);
+        let motifs = motifs(ts, 10, 800, 0.01, 124356);
         for (a, b, dist) in top10 {
             // look for this in the motifs, allowing up to w displacement
             println!("looking for ({a} {b} {dist})");
