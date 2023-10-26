@@ -236,7 +236,7 @@ impl HashCollection {
     }
 
     #[cfg(test)]
-    pub fn extended_hash_value(&self, i: usize, repetition: usize) -> [u8; 32] {
+    pub fn extended_hash_value(&self, i: usize, repetition: usize) -> [u8; K] {
         let mut output = [0; K];
         let (l, r) = self.half_hashes(i, repetition);
         let mut h = 0;

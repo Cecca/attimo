@@ -82,9 +82,9 @@ impl PartialOrd for Motif {
 //// if any two indices in the two motifs are at distance less than
 //// `exclusion_zone` from each other, then the motifs overlap and one of them
 //// shall be discarded.
-impl Motif {
+impl Overlaps<Motif> for Motif {
     /// Tells whether the two motifs overlap, in order to avoid storing trivial matches
-    fn overlaps(&self, other: &Self, exclusion_zone: usize) -> bool {
+    fn overlaps(&self, other: Self, exclusion_zone: usize) -> bool {
         let mut idxs = [self.idx_a, self.idx_b, other.idx_a, other.idx_b];
         idxs.sort_unstable();
 
@@ -92,6 +92,77 @@ impl Motif {
             || idxs[1] + exclusion_zone > idxs[2]
             || idxs[2] + exclusion_zone > idxs[3]
     }
+}
+
+fn nearest_neighbor_bf(
+    ts: &WindowedTimeseries,
+    from: usize,
+    fft_data: &FFTData,
+    exclusion_zone: usize,
+    distances: &mut [f64],
+    buf: &mut [f64],
+) -> (OrdF64, usize) {
+    // Check that the auxiliary memory buffers are correctly sized
+    assert_eq!(distances.len(), ts.num_subsequences());
+    assert_eq!(buf.len(), ts.w);
+
+    // Compute the distance profile using the MASS algorithm
+    ts.distance_profile(&fft_data, from, distances, buf);
+
+    // Pick the nearest neighbor skipping overlapping subsequences
+    let mut nearest = f64::INFINITY;
+    let mut nearest_idx = 0;
+    for (j, &d) in distances.iter().enumerate() {
+        if !j.overlaps(from, exclusion_zone) {
+            if d < nearest {
+                nearest = d;
+                nearest_idx = j;
+            }
+        }
+    }
+    (OrdF64(nearest), nearest_idx)
+}
+
+pub fn brute_force_motifs(ts: &WindowedTimeseries, k: usize, exclusion_zone: usize) -> Vec<Motif> {
+    let start = Instant::now();
+    // pre-compute the FFT for the time series
+    let fft_data = FFTData::new(&ts);
+    let n = ts.num_subsequences();
+
+    // initialize some auxiliary buffers, which will be cloned on a
+    // per-thread basis.
+    let mut distances = Vec::new();
+    distances.resize(n, 0.0f64);
+    let mut buf = Vec::new();
+    buf.resize(ts.w, 0.0f64);
+
+    // compute all k-nearest neighborhoods
+    let mut nns: Vec<Motif> = (0..n)
+        .into_par_iter()
+        .map_with((distances, buf), |(distances, buf), i| {
+            let (d, j) = nearest_neighbor_bf(ts, i, &fft_data, exclusion_zone, distances, buf);
+            Motif {
+                idx_a: i.min(j),
+                idx_b: i.max(j),
+                distance: d.0,
+                elapsed: Some(start.elapsed()),
+                discovered: start.elapsed(),
+            }
+        })
+        .collect();
+
+    nns.sort_unstable();
+
+    let mut res = Vec::new();
+    let mut i = 0;
+    while res.len() < k && i < nns.len() {
+        if !nns[i].overlaps(res.as_slice(), exclusion_zone) {
+            res.push(nns[i]);
+        }
+        i += 1;
+    }
+
+    res
 }
 
 //// ### Top-k data structure
@@ -177,6 +248,7 @@ impl TopK {
             }
             self.top.truncate(self.k);
         }
+        assert!(self.top.len() <= self.k);
     }
 
     //// This function is used to access the k-th motif, if
@@ -300,6 +372,9 @@ pub fn motifs(
     while let Some(m) = enumerator.next() {
         res.push(m);
     }
+    res.sort_unstable();
+    res.truncate(topk);
+    assert_eq!(res.len(), topk);
     eprintln!("{:?}", enumerator.exec_stats);
     res
 }
@@ -760,15 +835,17 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
                                     {
                                         //// This is the first collision in this iteration, _and_ the pair didn't collide
                                         //// at a deeper level.
-                                        if first_colliding_repetition == self.rep
-                                            && self
-                                                .previous_depth
-                                                .map(|d| {
-                                                    self.pools
-                                                        .first_collision(a_idx, b_idx, d)
-                                                        .is_none()
-                                                })
-                                                .unwrap_or(true)
+                                        if
+                                        //first_colliding_repetition == self.rep
+                                        //&&
+                                        self
+                                            .previous_depth
+                                            .map(|d| {
+                                                self.pools
+                                                    .first_collision(a_idx, b_idx, d)
+                                                    .is_none()
+                                            })
+                                            .unwrap_or(true)
                                         {
                                             tl_stats.inc_dists();
                                             self.state.update(
@@ -863,198 +940,56 @@ impl Iterator for MotifsEnumerator<PairMotifState> {
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use crate::{load::loadts, timeseries::WindowedTimeseries};
 
-    use super::*;
-
-    #[test]
-    #[ignore]
-    fn test_motif_ecg_10000() {
-        // The indices and distances in this test have been computed
-        // using SCAMP: https://github.com/zpzim/SCAMP
-        // The distances are slightly different, due to numerical approximation
-        // and a different normalization in their computation of the standard deviation
-        for (w, a, b, d) in [
-            (100, 616, 2780, 0.1761538477),
-            (200, 416, 2580, 0.3602377446),
-            (1000, 1172, 6112, 2.133571168),
-        ] {
-            let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
-            let ts = Arc::new(WindowedTimeseries::new(ts, w, true));
-
-            let motif = *motifs(ts, 1, 256, 0.001, 12435).first().unwrap();
-            dbg!(motif);
-            assert!((motif.idx_a as isize - a as isize).abs() < w as isize);
-            assert!((motif.idx_b as isize - b as isize).abs() < w as isize);
-            assert!(motif.distance <= d + 0.01);
-        }
-    }
-
-    #[test]
-    #[ignore]
-    fn test_motif_ecg_full() {
-        // The indices and distances in this test have been computed
-        // using SCAMP: https://github.com/zpzim/SCAMP
-        // The distances are slightly different, due to numerical approximation
-        // and a different normalization in their computation of the standard deviation
-        for (w, a, b, d) in [(1000, 7137168, 7414108, 0.3013925657)] {
-            let ts: Vec<f64> = loadts("data/ECG.csv.gz", None).unwrap();
-            let ts = Arc::new(WindowedTimeseries::new(ts, w, true));
-            // assert!((crate::distance::zeucl(&ts, a, b) - d) < 0.00000001);
-
-            let motif = *motifs(ts, 1, 200, 0.001, 12435).first().unwrap();
-            println!("Motif distance {}", motif.distance);
-            // We consider the test passed if we find a distance smaller than the one found by SCAMP,
-            // and the motif instances are located within w steps from the ones found by SCAMP.
-            // These differences are due to differences in floating point computations
-            assert!(motif.distance <= d);
-            assert!((motif.idx_a as isize - a as isize).abs() < w as isize);
-            assert!((motif.idx_b as isize - b as isize).abs() < w as isize);
-        }
-    }
-
-    #[test]
-    #[ignore]
-    fn test_motif_ecg_top10() {
-        // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
-        let top10 = [
-            (7137166, 7414106, 0.3013925657),
-            (7377870, 7383302, 0.343015406),
-            (7553828, 7587436, 0.3612951315),
-            (6779076, 7379224, 0.3880223353),
-            (7238944, 7264944, 0.3938163096),
-            (7574696, 7611520, 0.3942701023),
-            (7094136, 7220980, 0.3981813093),
-            (6275400, 6298896, 0.3989290683),
-            (6625400, 7479248, 0.4026470338),
-            (6961239, 7385163, 0.4042721064),
-        ];
-
-        let w = 1000;
-        let ts: Vec<f64> = loadts("data/ECG.csv.gz", None).unwrap();
-        let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
-
-        let motifs = motifs(ts, 10, 200, 0.01, 12435);
-        for (a, b, dist) in top10 {
-            // look for this in the motifs, allowing up to w displacement
-            println!("looking for ({a} {b} {dist})");
-            let mut found = false;
-            for motif in &motifs {
-                found |= (motif.idx_a as isize - a as isize).abs() <= w as isize;
-                found |= (motif.idx_b as isize - b as isize).abs() <= w as isize;
-                if found {
-                    println!(
-                        "   found at ({} {} {})",
-                        motif.idx_a, motif.idx_b, motif.distance
-                    );
-                    break;
-                }
-            }
-            assert!(
-                found,
-                "Could not find ({}, {}, {}) in {:?}",
-                a, b, dist, motifs
+    fn run_motif_test(
+        ts: Arc<WindowedTimeseries>,
+        k: usize,
+        repetitions: usize,
+        seed: u64,
+        ground_truth: Option<Vec<(usize, usize, f64)>>,
+    ) {
+        let failure_probability = 0.01;
+        let exclusion_zone = ts.w;
+        let ground_truth: Vec<(usize, usize, f64)> = ground_truth.unwrap_or_else(|| {
+            eprintln!(
+                "Running brute force algorithm on {} subsequences",
+                ts.num_subsequences()
             );
+            brute_force_motifs(&ts, k, exclusion_zone)
+                .into_iter()
+                .map(|m| (m.idx_a, m.idx_b, m.distance))
+                .collect()
+        });
+        dbg!(&ground_truth);
+        let motifs = motifs(ts, k, repetitions, failure_probability, seed);
+        assert_eq!(motifs.len(), k);
+        let mut cnt = 0;
+        for m in &motifs {
+            println!("{:?}", m);
+            if m.distance <= ground_truth.last().unwrap().2 + 0.0000001 {
+                cnt += 1;
+            }
         }
+        assert_eq!(cnt, k);
     }
 
     #[test]
-    #[ignore]
-    fn test_motif_astro_top10_enumerate() {
-        // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
-        let top10 = [
-            (609810, 888455, 1.264327903),
-            (502518, 656063, 1.312459673),
-            (321598, 423427, 1.368041725),
-            (342595, 625081, 1.403194924),
-            (218448, 1006871, 1.442935122),
-            (192254, 466432, 1.523167513),
-            (527024, 533903, 1.526611152),
-            (520191, 743708, 1.558780057),
-            (192097, 193569, 1.583277835),
-            (267982, 512333, 1.617081054),
-        ];
+    fn test_ecg() {
+        let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
+        let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
+        run_motif_test(ts, 10, 512, 12345, None);
 
-        let w = 100;
-        let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", None).unwrap();
-        let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
-
-        let motifs: Vec<Motif> = MotifsEnumerator::new(
-            ts,
-            10,
-            800,
-            0.01,
-            || PairMotifState::new(10, w),
-            12435,
-            false,
-        )
-        .collect();
-
-        for (a, b, dist) in top10 {
-            // look for this in the motifs, allowing up to w displacement
-            println!("looking for ({a} {b} {dist})");
-            let mut found = false;
-            for motif in &motifs {
-                found |= (motif.idx_a as isize - a as isize).abs() <= w as isize;
-                found |= (motif.idx_b as isize - b as isize).abs() <= w as isize;
-                if found {
-                    println!(
-                        "   found at ({} {} {})",
-                        motif.idx_a, motif.idx_b, motif.distance
-                    );
-                    break;
-                }
-            }
-            assert!(
-                found,
-                "Could not find ({}, {}, {}) in {:?}",
-                a, b, dist, motifs
-            );
-        }
+        let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
+        let ts = Arc::new(WindowedTimeseries::new(ts, 200, false));
+        run_motif_test(ts, 10, 512, 12345, None);
     }
 
     #[test]
-    #[ignore]
-    fn test_motif_astro_top10() {
-        // as in the other examples, the ground truth is obtained using SCAMP run on the GPU
-        let top10 = [
-            (609810, 888455, 1.264327903),
-            (502518, 656063, 1.312459673),
-            (321598, 423427, 1.368041725),
-            (342595, 625081, 1.403194924),
-            (218448, 1006871, 1.442935122),
-            (192254, 466432, 1.523167513),
-            (527024, 533903, 1.526611152),
-            (520191, 743708, 1.558780057),
-            (192097, 193569, 1.583277835),
-            (267982, 512333, 1.617081054),
-        ];
-
-        let w = 100;
-        let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", None).unwrap();
-        let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
-
-        let motifs = motifs(ts, 10, 800, 0.01, 12435);
-        for (a, b, dist) in top10 {
-            // look for this in the motifs, allowing up to w displacement
-            println!("looking for ({a} {b} {dist})");
-            let mut found = false;
-            for motif in &motifs {
-                found |= (motif.idx_a as isize - a as isize).abs() <= w as isize;
-                found |= (motif.idx_b as isize - b as isize).abs() <= w as isize;
-                if found {
-                    println!(
-                        "   found at ({} {} {})",
-                        motif.idx_a, motif.idx_b, motif.distance
-                    );
-                    break;
-                }
-            }
-            assert!(
-                found,
-                "Could not find ({}, {}, {}) in {:?}",
-                a, b, dist, motifs
-            );
-        }
+    fn test_astro() {
+        let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", Some(10000)).unwrap();
+        let ts = Arc::new(WindowedTimeseries::new(ts, 20, false));
+        run_motif_test(ts, 1, 512, 12345, None);
     }
 }

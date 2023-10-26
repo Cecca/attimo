@@ -15,17 +15,21 @@ impl Overlaps<usize> for usize {
     }
 }
 
-impl Overlaps<&[usize]> for usize {
-    #[inline]
-    fn overlaps(&self, other: &[usize], exclusion_zone: usize) -> bool {
-        other.iter().any(|x| self.overlaps(*x, exclusion_zone))
+impl<T> Overlaps<&T> for T
+where
+    T: Overlaps<T> + Copy,
+{
+    fn overlaps(&self, other: &T, exclusion_zone: usize) -> bool {
+        self.overlaps(*other, exclusion_zone)
     }
 }
 
-impl Overlaps<&Vec<usize>> for usize {
-    #[inline]
-    fn overlaps(&self, other: &Vec<usize>, exclusion_zone: usize) -> bool {
-        self.overlaps(other.as_slice(), exclusion_zone)
+impl<T> Overlaps<&[T]> for T
+where
+    T: for<'a> Overlaps<&'a T>,
+{
+    fn overlaps(&self, other: &[T], exclusion_zone: usize) -> bool {
+        other.iter().any(|x| self.overlaps(x, exclusion_zone))
     }
 }
 
