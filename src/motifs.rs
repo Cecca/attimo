@@ -467,11 +467,13 @@ impl KMotifletState {
     }
 
     fn merge_threads(&mut self) {
+        let support = self.support;
+        let exclusion_zone = self.exclusion_zone;
         for tl_neighs in self.tl_neighborhoods.iter_mut() {
             for (id, neighs) in tl_neighs.borrow_mut().iter() {
                 self.neighborhoods
                     .entry(*id)
-                    .or_insert_with(|| SubsequenceNeighborhood::new(*id))
+                    .or_insert_with(|| SubsequenceNeighborhood::new(*id, support, exclusion_zone))
                     .merge(neighs);
             }
             tl_neighs.borrow_mut().clear();
@@ -513,13 +515,13 @@ impl State for KMotifletState {
             .get_or_default()
             .borrow_mut()
             .entry(a)
-            .or_insert_with(|| SubsequenceNeighborhood::new(a))
+            .or_insert_with(|| SubsequenceNeighborhood::new(a, self.support, self.exclusion_zone))
             .update(d, b);
         self.tl_neighborhoods
             .get_or_default()
             .borrow_mut()
             .entry(b)
-            .or_insert_with(|| SubsequenceNeighborhood::new(b))
+            .or_insert_with(|| SubsequenceNeighborhood::new(b, self.support, self.exclusion_zone))
             .update(d, a);
     }
     fn is_done(&mut self) -> bool {
@@ -547,23 +549,15 @@ impl State for KMotifletState {
         let res: Vec<Self::Output> = self
             .neighborhoods
             .iter()
-            .filter(|(_, neighborhood)| {
-                neighborhood
-                    .extent(self.support - 1, self.exclusion_zone, ts)
-                    .is_some()
-            })
+            .filter(|(_, neighborhood)| neighborhood.extent(self.support - 1, ts).is_some())
             .min_by_key(|(_, neighborhood)| {
-                OrdF64(
-                    neighborhood
-                        .extent(self.support - 1, self.exclusion_zone, ts)
-                        .unwrap(),
-                )
+                OrdF64(neighborhood.extent(self.support - 1, ts).unwrap())
             })
             .into_iter()
             .filter_map(|(k, neighborhood)| {
-                if let Some(d) = neighborhood.extent(self.support - 1, self.exclusion_zone, ts) {
+                if let Some(d) = neighborhood.extent(self.support - 1, ts) {
                     if predicate(d) {
-                        let mut knn = neighborhood.knn(self.support - 1, self.exclusion_zone);
+                        let mut knn = neighborhood.knn(self.support - 1);
                         knn.push(*k);
                         Some(Motiflet {
                             indices: knn,
@@ -586,7 +580,7 @@ impl State for KMotifletState {
             .iter()
             .filter_map(|(_, neighborhood)| {
                 neighborhood
-                    .distance_at(self.support - 1, self.exclusion_zone)
+                    .distance_at(self.support - 1)
                     .map(|d| OrdF64(d))
             })
             .min()

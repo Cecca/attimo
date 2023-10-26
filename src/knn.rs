@@ -1,18 +1,12 @@
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use std::{
-    cell::RefCell,
-    collections::{BTreeMap, BTreeSet},
-    ops::Range,
-    sync::Arc,
-    time::Instant,
-};
+use std::{cell::RefCell, collections::BTreeMap, ops::Range, sync::Arc, time::Instant};
 use thread_local::ThreadLocal;
 
 use crate::{
     distance::zeucl,
     lsh::{HashCollection, HashValue, Hasher},
-    timeseries::{FFTData, WindowedTimeseries},
+    timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 
 #[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
@@ -28,13 +22,17 @@ impl Ord for OrdF64 {
 #[derive(Debug, Clone, Ord, Eq, PartialEq, PartialOrd)]
 pub struct SubsequenceNeighborhood {
     pub id: usize,
-    pub neighbors: BTreeSet<(OrdF64, usize)>,
+    k: usize,
+    exclusion_zone: usize,
+    pub neighbors: Vec<(OrdF64, usize)>,
 }
 impl SubsequenceNeighborhood {
-    pub fn new(id: usize) -> Self {
+    pub fn new(id: usize, k: usize, exclusion_zone: usize) -> Self {
         Self {
             id,
-            neighbors: Default::default(),
+            k,
+            exclusion_zone,
+            neighbors: Vec::with_capacity(k + 1),
         }
     }
     pub fn len(&self) -> usize {
@@ -42,49 +40,50 @@ impl SubsequenceNeighborhood {
     }
     pub fn update(&mut self, dist: f64, neighbor: usize) {
         let dist = OrdF64(dist);
-        self.neighbors.insert((dist, neighbor));
+
+        let mut i = 0;
+        while i < self.neighbors.len() && dist > self.neighbors[i].0 {
+            if neighbor.overlaps(self.neighbors[i].1, self.exclusion_zone) {
+                // The candidate neighbor overlaps with one that is closer to
+                // the root point, hence we discard it.
+                return;
+            }
+            i += 1;
+        }
+
+        // we insert the neighbor in the correct position
+        self.neighbors.insert(i, (dist, neighbor));
+
+        // now we remove other neighbors that might be
+        // overlapping with the one just inserted
+        i += 1;
+        while i < self.neighbors.len() {
+            if neighbor.overlaps(self.neighbors[i].1, self.exclusion_zone) {
+                self.neighbors.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+
+        // and now we remove any excess elements
+        while self.neighbors.len() > self.k {
+            self.neighbors.pop();
+        }
     }
     pub fn merge(&mut self, other: &Self) {
         assert_eq!(self.id, other.id);
-        for pair in &other.neighbors {
-            self.neighbors.insert(*pair);
+        for (d, neigh) in &other.neighbors {
+            self.update(d.0, *neigh);
         }
     }
-    fn iter_non_overlapping(
-        &self,
-        exclusion_zone: usize,
-    ) -> impl Iterator<Item = &'_ (OrdF64, usize)> + '_ {
-        let mut selected: BTreeSet<usize> = BTreeSet::new();
-        self.neighbors.iter().filter(move |(_, neigh_idx)| {
-            let start = if *neigh_idx > exclusion_zone {
-                neigh_idx - exclusion_zone
-            } else {
-                0
-            };
-            let end = neigh_idx + exclusion_zone;
-            let overlaps = selected.range(start..end).next().is_some();
-            if !overlaps {
-                selected.insert(*neigh_idx);
-            }
-            !overlaps
-        })
+    pub fn farthest_up_to(&self, k: usize) -> Option<f64> {
+        self.neighbors.iter().take(k).map(|pair| (pair.0).0).last()
     }
-    pub fn len_non_overlapping(&self, exclusion_zone: usize) -> usize {
-        self.iter_non_overlapping(exclusion_zone).count()
+    pub fn distance_at(&self, k: usize) -> Option<f64> {
+        self.neighbors.iter().nth(k).map(|pair| (pair.0).0)
     }
-    pub fn farthest_up_to(&self, k: usize, exclusion_zone: usize) -> Option<f64> {
-        self.iter_non_overlapping(exclusion_zone)
-            .take(k)
-            .map(|pair| (pair.0).0)
-            .last()
-    }
-    pub fn distance_at(&self, k: usize, exclusion_zone: usize) -> Option<f64> {
-        self.iter_non_overlapping(exclusion_zone)
-            .nth(k)
-            .map(|pair| (pair.0).0)
-    }
-    pub fn extent(&self, k: usize, exclusion_zone: usize, ts: &WindowedTimeseries) -> Option<f64> {
-        let ids = self.knn(k, exclusion_zone);
+    pub fn extent(&self, k: usize, ts: &WindowedTimeseries) -> Option<f64> {
+        let ids = self.knn(k);
         if ids.len() < k {
             return None;
         }
@@ -99,15 +98,13 @@ impl SubsequenceNeighborhood {
         }
         Some(extent)
     }
-    pub fn knn(&self, k: usize, exclusion_zone: usize) -> Vec<usize> {
-        self.iter_non_overlapping(exclusion_zone)
-            .take(k)
-            .map(|pair| pair.1)
-            .collect()
+    pub fn knn(&self, k: usize) -> Vec<usize> {
+        self.neighbors.iter().take(k).map(|pair| pair.1).collect()
     }
-    pub fn to_knn(&self, k: usize, exclusion_zone: usize) -> Knn {
+    pub fn to_knn(&self, k: usize) -> Knn {
         let (neighbors, distances): (Vec<usize>, Vec<f64>) = self
-            .iter_non_overlapping(exclusion_zone)
+            .neighbors
+            .iter()
             .take(k)
             .map(|pair| (pair.1, (pair.0).0))
             .unzip();
@@ -140,12 +137,14 @@ impl KnnState {
     }
 
     fn merge_threads(&mut self) {
+        let k = self.k;
+        let exclusion_zone = self.exclusion_zone;
         for tl_neighs in self.tl_neighborhoods.iter_mut() {
             for (id, neighs) in tl_neighs.borrow_mut().iter() {
                 if !self.done[*id] {
                     self.neighborhoods
                         .entry(*id)
-                        .or_insert_with(|| SubsequenceNeighborhood::new(*id))
+                        .or_insert_with(|| SubsequenceNeighborhood::new(*id, k, exclusion_zone))
                         .merge(neighs);
                 }
             }
@@ -156,11 +155,7 @@ impl KnnState {
     fn next_distance(&self) -> Option<f64> {
         self.neighborhoods
             .iter()
-            .filter_map(|(_, neighborhood)| {
-                neighborhood
-                    .distance_at(self.k, self.exclusion_zone)
-                    .map(|d| OrdF64(d))
-            })
+            .filter_map(|(_, neighborhood)| neighborhood.distance_at(self.k).map(|d| OrdF64(d)))
             .min()
             .map(|d| d.0)
     }
@@ -196,7 +191,7 @@ impl KnnState {
                 .get_or_default()
                 .borrow_mut()
                 .entry(a)
-                .or_insert_with(|| SubsequenceNeighborhood::new(a))
+                .or_insert_with(|| SubsequenceNeighborhood::new(a, self.k, self.exclusion_zone))
                 .update(d, b);
         }
         if !self.done[b] {
@@ -204,7 +199,7 @@ impl KnnState {
                 .get_or_default()
                 .borrow_mut()
                 .entry(b)
-                .or_insert_with(|| SubsequenceNeighborhood::new(b))
+                .or_insert_with(|| SubsequenceNeighborhood::new(b, self.k, self.exclusion_zone))
                 .update(d, a);
         }
     }
@@ -218,16 +213,12 @@ impl KnnState {
         let res: Vec<Knn> = self
             .neighborhoods
             .iter()
-            .filter(|(_, neighborhood)| {
-                neighborhood
-                    .distance_at(self.k, self.exclusion_zone)
-                    .is_some()
-            })
+            .filter(|(_, neighborhood)| neighborhood.distance_at(self.k).is_some())
             .into_iter()
             .filter_map(|(id, neighborhood)| {
-                if let Some(d) = neighborhood.distance_at(self.k, self.exclusion_zone) {
+                if let Some(d) = neighborhood.distance_at(self.k) {
                     if !self.done[*id] && predicate(d) {
-                        Some(neighborhood.to_knn(self.k, self.exclusion_zone))
+                        Some(neighborhood.to_knn(self.k))
                     } else {
                         None
                     }
