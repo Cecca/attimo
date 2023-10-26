@@ -227,7 +227,7 @@ impl TopK {
         let k = self.k;
         let mut i = 0;
         while i < self.top.len() {
-            if overlap_count(&self.top[i], &self.top[..i], self.exclusion_zone) == k {
+            if overlap_count(&self.top[i], &self.top[..i], self.exclusion_zone) >= k {
                 self.top.remove(i);
             } else {
                 i += 1;
@@ -581,13 +581,13 @@ impl State for KMotifletState {
     type Output = Motiflet;
     fn update(&self, ts: &WindowedTimeseries, a: usize, b: usize) {
         let d = zeucl(ts, a, b);
-        if let Some(best) = self.current_best {
-            if d > best {
-                // there's no point in keeping track of pairs that cannot
-                // beat the current candidate
-                return;
-            }
-        }
+        // if let Some(best) = self.current_best {
+        //     if d > best {
+        //         // there's no point in keeping track of pairs that cannot
+        //         // beat the current candidate
+        //         return;
+        //     }
+        // }
         self.tl_neighborhoods
             .get_or_default()
             .borrow_mut()
@@ -615,53 +615,36 @@ impl State for KMotifletState {
         }
         self.merge_threads();
 
-        // cleanup
-        if let Some(d) = self.next_distance() {
-            for neighs in self.neighborhoods.values_mut() {
-                neighs.neighbors.retain(|(k, _)| k.0 <= d);
+        self.current_best = self.next_distance();
+        let support = self.support;
+        let mut res: Vec<Self::Output> = Vec::new();
+        for (id, neighborhood) in self.neighborhoods.iter_mut() {
+            if let Some(d) = neighborhood.extent(support - 1, ts) {
+                if predicate(d) {
+                    let mut knn = neighborhood.knn(support - 1);
+                    knn.push(*id);
+                    res.push(Motiflet {
+                        indices: knn,
+                        extent: d,
+                    });
+                }
             }
         }
-        self.current_best = self.next_distance();
-
-        let res: Vec<Self::Output> = self
-            .neighborhoods
-            .iter()
-            .filter(|(_, neighborhood)| neighborhood.extent(self.support - 1, ts).is_some())
-            .min_by_key(|(_, neighborhood)| {
-                OrdF64(neighborhood.extent(self.support - 1, ts).unwrap())
-            })
-            .into_iter()
-            .filter_map(|(k, neighborhood)| {
-                if let Some(d) = neighborhood.extent(self.support - 1, ts) {
-                    if predicate(d) {
-                        let mut knn = neighborhood.knn(self.support - 1);
-                        knn.push(*k);
-                        Some(Motiflet {
-                            indices: knn,
-                            extent: d,
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .into_iter()
-            .collect();
         self.done = !res.is_empty();
         res
     }
     fn next_distance(&mut self) -> Option<f64> {
-        self.neighborhoods
-            .iter()
+        let support = self.support;
+        // FIXME: return the extent, not the k-th distance
+        let retval = self
+            .neighborhoods
+            .iter_mut()
             .filter_map(|(_, neighborhood)| {
-                neighborhood
-                    .distance_at(self.support - 1)
-                    .map(|d| OrdF64(d))
+                neighborhood.distance_at(support - 1).map(|d| OrdF64(d))
             })
             .min()
-            .map(|d| d.0)
+            .map(|d| d.0);
+        None
     }
 }
 

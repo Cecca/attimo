@@ -6,7 +6,7 @@ use thread_local::ThreadLocal;
 use crate::{
     distance::zeucl,
     lsh::{HashCollection, HashValue, Hasher},
-    timeseries::{FFTData, Overlaps, WindowedTimeseries},
+    timeseries::{overlap_count, FFTData, Overlaps, WindowedTimeseries},
 };
 
 #[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
@@ -19,12 +19,20 @@ impl Ord for OrdF64 {
     }
 }
 
+impl Overlaps<(OrdF64, usize)> for (OrdF64, usize) {
+    fn overlaps(&self, other: (OrdF64, usize), exclusion_zone: usize) -> bool {
+        self.1.overlaps(other.1, exclusion_zone)
+    }
+}
+
 #[derive(Debug, Clone, Ord, Eq, PartialEq, PartialOrd)]
 pub struct SubsequenceNeighborhood {
     pub id: usize,
     k: usize,
     exclusion_zone: usize,
-    pub neighbors: Vec<(OrdF64, usize)>,
+    neighbors: Vec<(OrdF64, usize)>,
+    current_non_overlapping: Vec<(OrdF64, usize)>,
+    should_update: bool,
 }
 impl SubsequenceNeighborhood {
     pub fn new(id: usize, k: usize, exclusion_zone: usize) -> Self {
@@ -33,42 +41,62 @@ impl SubsequenceNeighborhood {
             k,
             exclusion_zone,
             neighbors: Vec::with_capacity(k + 1),
+            current_non_overlapping: Vec::new(),
+            should_update: false,
         }
     }
     pub fn len(&self) -> usize {
         self.neighbors.len()
+    }
+    fn cleanup(&mut self) {
+        let k = self.k;
+        let mut i = 0;
+        while i < self.neighbors.len() {
+            if overlap_count(
+                &self.neighbors[i],
+                &self.neighbors[..i],
+                self.exclusion_zone,
+            ) >= k
+            {
+                self.neighbors.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+        assert!(self.neighbors.is_sorted());
+    }
+    fn update_non_overlapping(&mut self) {
+        if !self.should_update {
+            return;
+        }
+        self.current_non_overlapping.clear();
+        for i in 0..self.neighbors.len() {
+            if !self.neighbors[i]
+                .overlaps(self.current_non_overlapping.as_slice(), self.exclusion_zone)
+            {
+                self.current_non_overlapping.push(self.neighbors[i]);
+            }
+        }
+        assert!(self.current_non_overlapping.is_sorted());
+        self.should_update = false;
     }
     pub fn update(&mut self, dist: f64, neighbor: usize) {
         let dist = OrdF64(dist);
 
         let mut i = 0;
         while i < self.neighbors.len() && dist > self.neighbors[i].0 {
-            if neighbor.overlaps(self.neighbors[i].1, self.exclusion_zone) {
-                // The candidate neighbor overlaps with one that is closer to
-                // the root point, hence we discard it.
-                return;
-            }
             i += 1;
         }
 
         // we insert the neighbor in the correct position
         self.neighbors.insert(i, (dist, neighbor));
+        assert!(self.neighbors.is_sorted());
 
-        // now we remove other neighbors that might be
-        // overlapping with the one just inserted
-        i += 1;
-        while i < self.neighbors.len() {
-            if neighbor.overlaps(self.neighbors[i].1, self.exclusion_zone) {
-                self.neighbors.remove(i);
-            } else {
-                i += 1;
-            }
-        }
-
-        // and now we remove any excess elements
-        while self.neighbors.len() > self.k {
-            self.neighbors.pop();
-        }
+        // remove neighbors that are overlapped by more
+        // than k higher-ranked subsequences
+        self.cleanup();
+        assert!(self.neighbors.len() <= (self.k + 1) * (self.k + 1));
+        self.should_update = true;
     }
     pub fn merge(&mut self, other: &Self) {
         assert_eq!(self.id, other.id);
@@ -76,13 +104,22 @@ impl SubsequenceNeighborhood {
             self.update(d.0, *neigh);
         }
     }
-    pub fn farthest_up_to(&self, k: usize) -> Option<f64> {
-        self.neighbors.iter().take(k).map(|pair| (pair.0).0).last()
+    pub fn farthest_up_to(&mut self, k: usize) -> Option<f64> {
+        self.update_non_overlapping();
+        self.current_non_overlapping
+            .iter()
+            .take(k)
+            .map(|pair| (pair.0).0)
+            .last()
     }
-    pub fn distance_at(&self, k: usize) -> Option<f64> {
-        self.neighbors.iter().nth(k).map(|pair| (pair.0).0)
+    pub fn distance_at(&mut self, k: usize) -> Option<f64> {
+        self.update_non_overlapping();
+        self.current_non_overlapping
+            .iter()
+            .nth(k)
+            .map(|pair| (pair.0).0)
     }
-    pub fn extent(&self, k: usize, ts: &WindowedTimeseries) -> Option<f64> {
+    pub fn extent(&mut self, k: usize, ts: &WindowedTimeseries) -> Option<f64> {
         let ids = self.knn(k);
         if ids.len() < k {
             return None;
@@ -98,12 +135,18 @@ impl SubsequenceNeighborhood {
         }
         Some(extent)
     }
-    pub fn knn(&self, k: usize) -> Vec<usize> {
-        self.neighbors.iter().take(k).map(|pair| pair.1).collect()
+    pub fn knn(&mut self, k: usize) -> Vec<usize> {
+        self.update_non_overlapping();
+        self.current_non_overlapping
+            .iter()
+            .take(k)
+            .map(|pair| pair.1)
+            .collect()
     }
-    pub fn to_knn(&self, k: usize) -> Knn {
+    pub fn to_knn(&mut self, k: usize) -> Knn {
+        self.update_non_overlapping();
         let (neighbors, distances): (Vec<usize>, Vec<f64>) = self
-            .neighbors
+            .current_non_overlapping
             .iter()
             .take(k)
             .map(|pair| (pair.1, (pair.0).0))
@@ -152,10 +195,11 @@ impl KnnState {
         }
     }
 
-    fn next_distance(&self) -> Option<f64> {
+    fn next_distance(&mut self) -> Option<f64> {
+        let k = self.k;
         self.neighborhoods
-            .iter()
-            .filter_map(|(_, neighborhood)| neighborhood.distance_at(self.k).map(|d| OrdF64(d)))
+            .iter_mut()
+            .filter_map(|(_, neighborhood)| neighborhood.distance_at(k).map(|d| OrdF64(d)))
             .min()
             .map(|d| d.0)
     }
@@ -210,24 +254,15 @@ impl KnnState {
     fn emit<F: Fn(f64) -> bool>(&mut self, predicate: F) -> Vec<Knn> {
         self.merge_threads();
 
-        let res: Vec<Knn> = self
-            .neighborhoods
-            .iter()
-            .filter(|(_, neighborhood)| neighborhood.distance_at(self.k).is_some())
-            .into_iter()
-            .filter_map(|(id, neighborhood)| {
-                if let Some(d) = neighborhood.distance_at(self.k) {
-                    if !self.done[*id] && predicate(d) {
-                        Some(neighborhood.to_knn(self.k))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
+        let k = self.k;
+        let mut res: Vec<Knn> = Vec::new();
+        for (id, neighborhood) in self.neighborhoods.iter_mut() {
+            if let Some(d) = neighborhood.distance_at(k) {
+                if !self.done[*id] && predicate(d) {
+                    res.push(neighborhood.to_knn(k));
                 }
-            })
-            .into_iter()
-            .collect();
+            }
+        }
 
         for knn in res.iter() {
             self.done[knn.id] = true;

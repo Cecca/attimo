@@ -125,7 +125,7 @@ mod test {
     ) {
         let failure_probability = 0.01;
         let exclusion_zone = ts.w;
-        let (_ground_dist, mut ground_indices): (f64, Vec<usize>) =
+        let (ground_extent, mut ground_indices): (f64, Vec<usize>) =
             ground_truth.unwrap_or_else(|| {
                 eprintln!(
                     "Running brute force algorithm on {} subsequences",
@@ -133,6 +133,7 @@ mod test {
                 );
                 brute_force_motiflets(&ts, k, exclusion_zone)
             });
+        println!("Ground distance of {} motiflet: {}", k, ground_extent);
         ground_indices.sort();
         let motiflet = motiflets(ts, k, repetitions, failure_probability, seed)
             .first()
@@ -144,10 +145,9 @@ mod test {
     }
 
     #[test]
-    #[ignore]
     fn test_ecg_motiflet() {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
-        run_motiflet_test(ts, 10, 1024, 12345, None);
+        run_motiflet_test(ts, 5, 1024, 12345, None);
     }
 }
