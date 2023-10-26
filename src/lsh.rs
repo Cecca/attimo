@@ -27,7 +27,7 @@
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
 use crate::motifs::Motif;
-use crate::{alloc_cnt, allocator::*};
+
 // TODO Remove this dependency
 use crate::sort::*;
 use crate::timeseries::{FFTData, WindowedTimeseries};
