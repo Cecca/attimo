@@ -617,34 +617,40 @@ impl State for KMotifletState {
 
         self.current_best = self.next_distance();
         let support = self.support;
-        let mut res: Vec<Self::Output> = Vec::new();
+        let mut min_key = 0;
+        let mut min_extent = f64::INFINITY;
         for (id, neighborhood) in self.neighborhoods.iter_mut() {
             if let Some(d) = neighborhood.extent(support - 1, ts) {
-                if predicate(d) {
-                    let mut knn = neighborhood.knn(support - 1);
-                    knn.push(*id);
-                    res.push(Motiflet {
-                        indices: knn,
-                        extent: d,
-                    });
+                if d < min_extent {
+                    min_key = *id;
+                    min_extent = d;
                 }
             }
         }
+
+        let mut res: Vec<Self::Output> = Vec::new();
+        if min_extent.is_finite() {
+            println!("Min extent is {min_extent}");
+            self.current_best = Some(min_extent);
+        }
+        if predicate(min_extent) {
+            let mut knn = self
+                .neighborhoods
+                .get_mut(&min_key)
+                .unwrap()
+                .knn(support - 1);
+            knn.push(min_key);
+            res.push(Motiflet {
+                indices: knn,
+                extent: min_extent,
+            });
+        }
+
         self.done = !res.is_empty();
         res
     }
     fn next_distance(&mut self) -> Option<f64> {
-        let support = self.support;
-        // FIXME: return the extent, not the k-th distance
-        let retval = self
-            .neighborhoods
-            .iter_mut()
-            .filter_map(|(_, neighborhood)| {
-                neighborhood.distance_at(support - 1).map(|d| OrdF64(d))
-            })
-            .min()
-            .map(|d| d.0);
-        None
+        self.current_best
     }
 }
 

@@ -133,21 +133,30 @@ mod test {
                 );
                 brute_force_motiflets(&ts, k, exclusion_zone)
             });
-        println!("Ground distance of {} motiflet: {}", k, ground_extent);
+        eprintln!("Ground distance of {} motiflet: {}", k, ground_extent);
         ground_indices.sort();
         let motiflet = motiflets(ts, k, repetitions, failure_probability, seed)
             .first()
             .unwrap()
             .clone();
+        let motiflet_extent = motiflet.extent();
+        eprintln!("Motiflet extent {}", motiflet_extent);
         let mut motiflet_indices = motiflet.indices();
         motiflet_indices.sort();
         assert_eq!(motiflet_indices, ground_indices);
     }
 
     #[test]
-    fn test_ecg_motiflet() {
+    fn test_ecg_motiflet_k5() {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
-        run_motiflet_test(ts, 5, 1024, 12345, None);
+        run_motiflet_test(ts, 5, 1024, 123456, None);
+    }
+
+    #[test]
+    fn test_ecg_motiflet_k8() {
+        let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
+        let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
+        run_motiflet_test(ts, 8, 1024, 123456, None);
     }
 }
