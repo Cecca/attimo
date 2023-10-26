@@ -109,3 +109,44 @@ pub fn brute_force_motiflets(
         .unwrap();
     (extent.0, indices)
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{load::loadts, motifs::motiflets};
+    use std::sync::Arc;
+
+    fn run_motiflet_test(
+        ts: Arc<WindowedTimeseries>,
+        k: usize,
+        repetitions: usize,
+        seed: u64,
+        ground_truth: Option<(f64, Vec<usize>)>,
+    ) {
+        let failure_probability = 0.01;
+        let exclusion_zone = ts.w;
+        let (_ground_dist, mut ground_indices): (f64, Vec<usize>) =
+            ground_truth.unwrap_or_else(|| {
+                eprintln!(
+                    "Running brute force algorithm on {} subsequences",
+                    ts.num_subsequences()
+                );
+                brute_force_motiflets(&ts, k, exclusion_zone)
+            });
+        ground_indices.sort();
+        let motiflet = motiflets(ts, k, repetitions, failure_probability, seed)
+            .first()
+            .unwrap()
+            .clone();
+        let mut motiflet_indices = motiflet.indices();
+        motiflet_indices.sort();
+        assert_eq!(motiflet_indices, ground_indices);
+    }
+
+    #[test]
+    fn test_ecg_motiflet() {
+        let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
+        let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
+        run_motiflet_test(ts, 10, 1024, 12345, None);
+    }
+}
