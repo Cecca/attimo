@@ -33,6 +33,16 @@ where
     }
 }
 
+/// Given the slice `other`, counts how many items are overlapping
+/// with `x`, as per the type's implementation of [Overlaps].
+pub fn overlap_count<T: for<'a> Overlaps<&'a T>>(
+    x: &T,
+    others: &[T],
+    exclusion_zone: usize,
+) -> usize {
+    others.iter().map(|o| x.overlaps(o, exclusion_zone)).count()
+}
+
 pub struct WindowedTimeseries {
     pub data: Vec<f64>,
     pub w: usize,

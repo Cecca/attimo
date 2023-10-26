@@ -177,6 +177,8 @@ pub struct TopK {
     k: usize,
     exclusion_zone: usize,
     top: Vec<Motif>,
+    current_non_overlapping: Vec<Motif>,
+    should_update: bool,
 }
 
 impl std::fmt::Debug for TopK {
@@ -199,6 +201,8 @@ impl TopK {
             k,
             exclusion_zone,
             top: Vec::new(),
+            current_non_overlapping: Vec::new(),
+            should_update: false,
         }
     }
 
@@ -208,69 +212,66 @@ impl TopK {
     pub fn insert(&mut self, motif: Motif) {
         let mut i = 0;
         while i < self.top.len() && self.top[i].distance <= motif.distance {
-            if motif.overlaps(&self.top[i], self.exclusion_zone) {
-                //// If this is the case, we don't insert the motif, and return.
-                return;
-            }
             i += 1;
         }
-
-        //// Otherwise, we insert the motif in the correct position.
-        //// Because of this the `top` array is always in sorted
-        //// order of increasing distance
         self.top.insert(i, motif);
 
-        //// After the insertion we make sure that there are no other
-        //// motifs overlapping with the one just inserted.
-        //// To this end we remove from the tail of the vector all motifs
-        //// that overlap with the one just inserted.
-        ////
-        //// One consequence of this is that among several trivial matches of
-        //// the same motif, the one with the smallest distance is selected.
-        //// In fact, this should be equivalent to just sorting all pairs of subsequences
-        //// based on their distance, and then proceed from the one with smallest distance
-        //// removing trivial matches along the way.
-        i += 1;
+        debug_assert!(self.top.is_sorted());
+
+        self.cleanup();
+        assert!(self.top.len() <= (self.k + 1) * (self.k + 1));
+        self.should_update = true;
+    }
+
+    fn cleanup(&mut self) {
+        let k = self.k;
+        let mut i = 0;
         while i < self.top.len() {
-            if self.top[i].overlaps(&motif, self.exclusion_zone) {
+            if overlap_count(&self.top[i], &self.top[..i], self.exclusion_zone) == k {
                 self.top.remove(i);
             } else {
                 i += 1;
             }
         }
+    }
 
-        debug_assert!(self.top.is_sorted());
-
-        //// Finally, we retain only `k` elements
-        if self.top.len() > self.k {
-            for m in &self.top[self.k..] {
-                assert!(m.elapsed.is_none());
-            }
-            self.top.truncate(self.k);
+    fn update_non_overlapping(&mut self) {
+        if !self.should_update {
+            return;
         }
-        assert!(self.top.len() <= self.k);
+        self.current_non_overlapping.clear();
+        for i in 0..self.top.len() {
+            if !self.top[i].overlaps(self.current_non_overlapping.as_slice(), self.exclusion_zone) {
+                self.current_non_overlapping.push(self.top[i]);
+            }
+        }
+        self.should_update = false;
     }
 
     //// This function is used to access the k-th motif, if
     //// we already found it, even if not confirmed yet
-    pub fn k_th(&self) -> Option<Motif> {
-        if self.top.len() == self.k {
-            self.top.last().map(|mot| *mot)
+    pub fn k_th(&mut self) -> Option<Motif> {
+        self.update_non_overlapping();
+        let current = &self.current_non_overlapping;
+        if current.len() == self.k {
+            current.last().map(|mot| *mot)
         } else {
             None
         }
     }
 
-    pub fn first_not_confirmed(&self) -> Option<Motif> {
-        self.top
+    pub fn first_not_confirmed(&mut self) -> Option<Motif> {
+        self.update_non_overlapping();
+        self.current_non_overlapping
             .iter()
             .filter(|m| m.elapsed.is_none())
             .next()
             .map(|m| *m)
     }
 
-    pub fn last_confirmed(&self) -> Option<Motif> {
-        self.top
+    pub fn last_confirmed(&mut self) -> Option<Motif> {
+        self.update_non_overlapping();
+        self.current_non_overlapping
             .iter()
             .filter(|m| m.elapsed.is_some())
             .last()
@@ -293,8 +294,9 @@ impl TopK {
         self.top.len()
     }
 
-    pub fn to_vec(&self) -> Vec<Motif> {
-        self.top.clone().into_iter().collect()
+    pub fn to_vec(&mut self) -> Vec<Motif> {
+        self.update_non_overlapping();
+        self.current_non_overlapping.clone()
     }
 
     pub fn add_all(&mut self, other: &mut TopK) {
@@ -440,7 +442,7 @@ pub trait State: std::fmt::Debug {
         predicate: F,
     ) -> Vec<Self::Output>;
     /// the next distance we are interested in looking at
-    fn next_distance(&self) -> Option<f64>;
+    fn next_distance(&mut self) -> Option<f64>;
 }
 
 #[derive(Debug)]
@@ -515,7 +517,7 @@ impl State for PairMotifState {
         ret
     }
 
-    fn next_distance(&self) -> Option<f64> {
+    fn next_distance(&mut self) -> Option<f64> {
         self.topk.first_not_confirmed().map(|m| m.distance)
     }
 }
@@ -650,7 +652,7 @@ impl State for KMotifletState {
         self.done = !res.is_empty();
         res
     }
-    fn next_distance(&self) -> Option<f64> {
+    fn next_distance(&mut self) -> Option<f64> {
         self.neighborhoods
             .iter()
             .filter_map(|(_, neighborhood)| {
@@ -835,17 +837,15 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
                                     {
                                         //// This is the first collision in this iteration, _and_ the pair didn't collide
                                         //// at a deeper level.
-                                        if
-                                        //first_colliding_repetition == self.rep
-                                        //&&
-                                        self
-                                            .previous_depth
-                                            .map(|d| {
-                                                self.pools
-                                                    .first_collision(a_idx, b_idx, d)
-                                                    .is_none()
-                                            })
-                                            .unwrap_or(true)
+                                        if first_colliding_repetition == self.rep
+                                            && self
+                                                .previous_depth
+                                                .map(|d| {
+                                                    self.pools
+                                                        .first_collision(a_idx, b_idx, d)
+                                                        .is_none()
+                                                })
+                                                .unwrap_or(true)
                                         {
                                             tl_stats.inc_dists();
                                             self.state.update(
