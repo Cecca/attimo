@@ -553,7 +553,9 @@ impl KMotifletState {
             for (id, neighs) in tl_neighs.borrow_mut().iter() {
                 self.neighborhoods
                     .entry(*id)
-                    .or_insert_with(|| SubsequenceNeighborhood::new(*id, support, exclusion_zone))
+                    .or_insert_with(|| {
+                        SubsequenceNeighborhood::new(*id, support - 1, exclusion_zone)
+                    })
                     .merge(neighs);
             }
             tl_neighs.borrow_mut().clear();
@@ -598,13 +600,17 @@ impl State for KMotifletState {
             .get_or_default()
             .borrow_mut()
             .entry(a)
-            .or_insert_with(|| SubsequenceNeighborhood::new(a, self.support, self.exclusion_zone))
+            .or_insert_with(|| {
+                SubsequenceNeighborhood::new(a, self.support - 1, self.exclusion_zone)
+            })
             .update(d, b);
         self.tl_neighborhoods
             .get_or_default()
             .borrow_mut()
             .entry(b)
-            .or_insert_with(|| SubsequenceNeighborhood::new(b, self.support, self.exclusion_zone))
+            .or_insert_with(|| {
+                SubsequenceNeighborhood::new(b, self.support - 1, self.exclusion_zone)
+            })
             .update(d, a);
     }
     fn is_done(&mut self) -> bool {
@@ -626,7 +632,7 @@ impl State for KMotifletState {
         let mut min_key = 0;
         let mut min_extent = f64::INFINITY;
         for (id, neighborhood) in self.neighborhoods.iter_mut() {
-            if let Some(d) = neighborhood.extent(support - 1, ts) {
+            if let Some(d) = neighborhood.extent(ts) {
                 if d < min_extent {
                     min_key = *id;
                     min_extent = d;
@@ -639,11 +645,7 @@ impl State for KMotifletState {
             self.current_best = Some(min_extent);
         }
         if predicate(min_extent) {
-            let mut knn = self
-                .neighborhoods
-                .get_mut(&min_key)
-                .unwrap()
-                .knn(support - 1);
+            let mut knn = self.neighborhoods.get_mut(&min_key).unwrap().knn();
             knn.push(min_key);
             res.push(Motiflet {
                 indices: knn,

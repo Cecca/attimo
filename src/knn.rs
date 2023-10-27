@@ -44,9 +44,9 @@ impl std::fmt::Debug for SubsequenceNeighborhood {
             self.neighbors.len(),
             self.current_non_overlapping.len()
         )?;
-        write!(f, "neighbors")?;
+        write!(f, " neighbors ")?;
         f.debug_list().entries(self.neighbors.iter()).finish()?;
-        write!(f, "non_overlapping")?;
+        write!(f, " non_overlapping ")?;
         f.debug_list()
             .entries(self.current_non_overlapping.iter())
             .finish()?;
@@ -68,7 +68,6 @@ impl SubsequenceNeighborhood {
         self.neighbors.len()
     }
     fn cleanup(&mut self) {
-        return;
         let k = self.k;
         let mut i = 0;
         while i < self.neighbors.len() {
@@ -120,7 +119,7 @@ impl SubsequenceNeighborhood {
         // remove neighbors that are overlapped by more
         // than k higher-ranked subsequences
         self.cleanup();
-        // assert!(self.neighbors.len() <= (self.k + 1) * (self.k + 1));
+        assert!(self.neighbors.len() <= (self.k + 1) * (self.k + 1));
         self.should_update = true;
     }
     pub fn merge(&mut self, other: &Self) {
@@ -129,27 +128,19 @@ impl SubsequenceNeighborhood {
             self.update(d.0, *neigh);
         }
     }
-    pub fn farthest_up_to(&mut self, k: usize) -> Option<f64> {
+    pub fn farthest_distance(&mut self) -> Option<f64> {
         self.update_non_overlapping();
         self.current_non_overlapping
             .iter()
-            .take(k)
-            .map(|pair| (pair.0).0)
-            .last()
-    }
-    pub fn distance_at(&mut self, k: usize) -> Option<f64> {
-        self.update_non_overlapping();
-        self.current_non_overlapping
-            .iter()
-            .nth(k)
+            .nth(self.k)
             .map(|pair| (pair.0).0)
     }
-    pub fn extent(&mut self, k: usize, ts: &WindowedTimeseries) -> Option<f64> {
-        let ids = self.knn(k);
-        if ids.len() < k {
+    pub fn extent(&mut self, ts: &WindowedTimeseries) -> Option<f64> {
+        let ids = self.knn();
+        if ids.len() < self.k {
             return None;
         }
-        let mut extent = (self.current_non_overlapping[k - 1].0).0;
+        let mut extent = (self.current_non_overlapping[self.k - 1].0).0;
         for i in 0..ids.len() {
             let ii = ids[i];
             for j in (i + 1)..ids.len() {
@@ -159,23 +150,23 @@ impl SubsequenceNeighborhood {
             }
         }
         // We verify that the triangle inequality holds.
-        assert!(extent <= 2.0 * (self.current_non_overlapping[k - 1].0).0);
+        assert!(extent <= 2.0 * (self.current_non_overlapping[self.k - 1].0).0);
         Some(extent)
     }
-    pub fn knn(&mut self, k: usize) -> Vec<usize> {
+    pub fn knn(&mut self) -> Vec<usize> {
         self.update_non_overlapping();
         self.current_non_overlapping
             .iter()
-            .take(k)
+            .take(self.k)
             .map(|pair| pair.1)
             .collect()
     }
-    pub fn to_knn(&mut self, k: usize) -> Knn {
+    pub fn to_knn(&mut self) -> Knn {
         self.update_non_overlapping();
         let (neighbors, distances): (Vec<usize>, Vec<f64>) = self
             .current_non_overlapping
             .iter()
-            .take(k)
+            .take(self.k)
             .map(|pair| (pair.1, (pair.0).0))
             .unzip();
         Knn {
@@ -226,7 +217,7 @@ impl KnnState {
         let k = self.k;
         self.neighborhoods
             .iter_mut()
-            .filter_map(|(_, neighborhood)| neighborhood.distance_at(k).map(|d| OrdF64(d)))
+            .filter_map(|(_, neighborhood)| neighborhood.farthest_distance().map(|d| OrdF64(d)))
             .min()
             .map(|d| d.0)
     }
@@ -284,9 +275,9 @@ impl KnnState {
         let k = self.k;
         let mut res: Vec<Knn> = Vec::new();
         for (id, neighborhood) in self.neighborhoods.iter_mut() {
-            if let Some(d) = neighborhood.distance_at(k) {
+            if let Some(d) = neighborhood.farthest_distance() {
                 if !self.done[*id] && predicate(d) {
-                    res.push(neighborhood.to_knn(k));
+                    res.push(neighborhood.to_knn());
                 }
             }
         }
