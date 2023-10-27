@@ -100,13 +100,24 @@ pub fn brute_force_motiflets(
     buf.resize(ts.w, 0.0f64);
 
     // compute all k-nearest neighborhoods
-    let (extent, indices) = (0..n)
+    let (extent, indices, root) = (0..n)
         .into_par_iter()
         .map_with((indices, distances, buf), |(indices, distances, buf), i| {
-            k_nearest_neighbors_bf(ts, i, &fft_data, k, exclusion_zone, indices, distances, buf)
+            let (extent, indices) = k_nearest_neighbors_bf(
+                ts,
+                i,
+                &fft_data,
+                k,
+                exclusion_zone,
+                indices,
+                distances,
+                buf,
+            );
+            (extent, indices, i)
         })
         .min()
         .unwrap();
+    println!("Root of motiflet is {root}");
     (extent.0, indices)
 }
 

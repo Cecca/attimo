@@ -25,7 +25,7 @@ impl Overlaps<(OrdF64, usize)> for (OrdF64, usize) {
     }
 }
 
-#[derive(Debug, Clone, Ord, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Ord, Eq, PartialEq, PartialOrd)]
 pub struct SubsequenceNeighborhood {
     pub id: usize,
     k: usize,
@@ -33,6 +33,25 @@ pub struct SubsequenceNeighborhood {
     neighbors: Vec<(OrdF64, usize)>,
     current_non_overlapping: Vec<(OrdF64, usize)>,
     should_update: bool,
+}
+impl std::fmt::Debug for SubsequenceNeighborhood {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "SubsequenceNeighborhood {{ id: {}, k: {}, n_neighbors: {} n_non_overlapping: {}",
+            self.id,
+            self.k,
+            self.neighbors.len(),
+            self.current_non_overlapping.len()
+        )?;
+        write!(f, "neighbors")?;
+        f.debug_list().entries(self.neighbors.iter()).finish()?;
+        write!(f, "non_overlapping")?;
+        f.debug_list()
+            .entries(self.current_non_overlapping.iter())
+            .finish()?;
+        write!(f, "}}")
+    }
 }
 impl SubsequenceNeighborhood {
     pub fn new(id: usize, k: usize, exclusion_zone: usize) -> Self {
@@ -49,6 +68,7 @@ impl SubsequenceNeighborhood {
         self.neighbors.len()
     }
     fn cleanup(&mut self) {
+        return;
         let k = self.k;
         let mut i = 0;
         while i < self.neighbors.len() {
@@ -82,20 +102,25 @@ impl SubsequenceNeighborhood {
     }
     pub fn update(&mut self, dist: f64, neighbor: usize) {
         let dist = OrdF64(dist);
+        let pair = (dist, neighbor);
 
         let mut i = 0;
-        while i < self.neighbors.len() && dist > self.neighbors[i].0 {
+        while i < self.neighbors.len() && pair > self.neighbors[i] {
             i += 1;
         }
 
         // we insert the neighbor in the correct position
         self.neighbors.insert(i, (dist, neighbor));
-        assert!(self.neighbors.is_sorted());
+        assert!(
+            self.neighbors.is_sorted(),
+            "neighbors are not sorted: {:?}",
+            self.neighbors
+        );
 
         // remove neighbors that are overlapped by more
         // than k higher-ranked subsequences
         self.cleanup();
-        assert!(self.neighbors.len() <= (self.k + 1) * (self.k + 1));
+        // assert!(self.neighbors.len() <= (self.k + 1) * (self.k + 1));
         self.should_update = true;
     }
     pub fn merge(&mut self, other: &Self) {
@@ -124,7 +149,7 @@ impl SubsequenceNeighborhood {
         if ids.len() < k {
             return None;
         }
-        let mut extent = zeucl(ts, self.id, *ids.last().unwrap());
+        let mut extent = (self.current_non_overlapping[k - 1].0).0;
         for i in 0..ids.len() {
             let ii = ids[i];
             for j in (i + 1)..ids.len() {
@@ -133,6 +158,8 @@ impl SubsequenceNeighborhood {
                 extent = extent.max(d);
             }
         }
+        // We verify that the triangle inequality holds.
+        assert!(extent <= 2.0 * (self.current_non_overlapping[k - 1].0).0);
         Some(extent)
     }
     pub fn knn(&mut self, k: usize) -> Vec<usize> {

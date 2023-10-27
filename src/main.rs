@@ -2,6 +2,7 @@ use anyhow::Result;
 use argh::FromArgs;
 use attimo::allocator::{self, allocated, CountingAllocator};
 use attimo::load::*;
+use attimo::motiflets::brute_force_motiflets;
 use attimo::motifs::{motiflets, motifs, Motif, Motiflet};
 use attimo::timeseries::*;
 use slog::*;
@@ -35,6 +36,10 @@ struct Config {
     #[argh(option)]
     /// the number of repetitions to perform
     pub repetitions: usize,
+
+    #[argh(switch)]
+    /// use the exact algorithm
+    pub exact: bool,
 
     #[argh(option)]
     /// find motiflets, with the specified support
@@ -126,13 +131,18 @@ fn main() -> Result<()> {
     };
 
     if let Some(support) = config.motiflets {
-        let motiflets: Vec<Motiflet> = motiflets(
-            Arc::new(ts),
-            support,
-            config.repetitions,
-            config.failure_probability,
-            config.seed,
-        );
+        let motiflets: Vec<Motiflet> = if config.exact {
+            let (extent, indices) = brute_force_motiflets(&ts, support, ts.w);
+            vec![Motiflet::new(indices, extent)]
+        } else {
+            motiflets(
+                Arc::new(ts),
+                support,
+                config.repetitions,
+                config.failure_probability,
+                config.seed,
+            )
+        };
         eprintln!("Result: {:?}", motiflets);
     } else {
         let motifs: Vec<Motif> = motifs(

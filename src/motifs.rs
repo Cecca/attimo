@@ -318,6 +318,9 @@ impl Ord for Motiflet {
     }
 }
 impl Motiflet {
+    pub fn new(indices: Vec<usize>, extent: f64) -> Self {
+        Self { indices, extent }
+    }
     pub fn support(&self) -> usize {
         self.indices.len()
     }
@@ -588,6 +591,9 @@ impl State for KMotifletState {
         //         return;
         //     }
         // }
+
+        // FIXME: don't acquire the neighborhood on each call to this method, it's expensive.
+        // Can we move it outside?
         self.tl_neighborhoods
             .get_or_default()
             .borrow_mut()
@@ -630,7 +636,6 @@ impl State for KMotifletState {
 
         let mut res: Vec<Self::Output> = Vec::new();
         if min_extent.is_finite() {
-            println!("Min extent is {min_extent}");
             self.current_best = Some(min_extent);
         }
         if predicate(min_extent) {
@@ -755,6 +760,7 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
     //// Find the level for which the given distance has a good probability of being
     //// found withing the allowed number of repetitions
     fn level_for_distance(&self, d: f64, mut prefix: usize) -> usize {
+        let orig_prefix = prefix;
         while prefix > 0 {
             for rep in 0..self.repetitions {
                 if self.hasher.failure_probability(d, rep, prefix) < self.delta {
@@ -763,7 +769,9 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
             }
             prefix -= 1;
         }
-        panic!("Got to prefix of length 0!");
+        let ret = orig_prefix - 1;
+        assert!(ret > 0);
+        ret
     }
 
     /// Return the next motif, or `None` if we already returned `max_k` motifs
