@@ -5,7 +5,7 @@ use thread_local::ThreadLocal;
 
 use crate::{
     distance::zeucl,
-    lsh::{HashCollection, HashValue, Hasher},
+    lsh::{ColumnBuffers, HashCollection, HashValue, Hasher},
     timeseries::{overlap_count, FFTData, Overlaps, WindowedTimeseries},
 };
 
@@ -613,8 +613,7 @@ pub struct KnnIter {
     exclusion_zone: usize,
     hasher: Arc<Hasher>,
     pools: Arc<HashCollection>,
-    column_buffer: Vec<(HashValue, u32)>,
-    buckets: Vec<Range<usize>>,
+    buffers: ColumnBuffers,
     /// the current repetition
     rep: usize,
     /// the current depth
@@ -646,11 +645,6 @@ impl KnnIter {
         eprintln!("Computed hash values in {:?}", start.elapsed());
         drop(fft_data);
 
-        // This vector holds the (sorted) hashed subsequences, and their index
-        let column_buffer = Vec::new();
-        // This vector holds the boundaries between buckets. We reuse the allocations
-        let buckets = Vec::new();
-
         let pbar = if show_progress {
             Some(Self::build_progress_bar(crate::lsh::K, repetitions))
         } else {
@@ -668,8 +662,7 @@ impl KnnIter {
             exclusion_zone,
             hasher,
             pools,
-            column_buffer,
-            buckets,
+            buffers: ColumnBuffers::default(),
             rep: 0,
             depth: crate::lsh::K,
             previous_depth: None,
@@ -719,17 +712,16 @@ impl Iterator for KnnIter {
                 self.depth,
                 self.rep,
                 self.exclusion_zone,
-                &mut self.column_buffer,
-                &mut self.buckets,
+                &mut self.buffers,
             );
-            let n_buckets = self.buckets.len();
+            let n_buckets = self.buffers.buckets.len();
             let chunk_size = std::cmp::max(1, n_buckets / (4 * rayon::current_num_threads()));
 
             (0..n_buckets / chunk_size)
                 .into_par_iter()
                 .for_each(|chunk_i| {
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
-                        let bucket = &self.column_buffer[self.buckets[i].clone()];
+                        let bucket = &self.buffers.buffer[self.buffers.buckets[i].clone()];
 
                         for (_, a_idx) in bucket.iter() {
                             let a_idx = *a_idx as usize;

@@ -673,8 +673,7 @@ pub struct MotifsEnumerator<S: State> {
     exclusion_zone: usize,
     hasher: Arc<Hasher>,
     pools: Arc<HashCollection>,
-    column_buffer: Vec<(HashValue, u32)>,
-    buckets: Vec<Range<usize>>,
+    buffers: ColumnBuffers,
     /// the current repetition
     rep: usize,
     /// the current depth
@@ -712,10 +711,6 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
         drop(fft_data);
 
         info!("tries exploration"; "tag" => "phase");
-        // This vector holds the (sorted) hashed subsequences, and their index
-        let column_buffer = Vec::new();
-        // This vector holds the boundaries between buckets. We reuse the allocations
-        let buckets = Vec::new();
 
         let pbar = if show_progress {
             Some(Self::build_progress_bar(K, repetitions))
@@ -734,8 +729,7 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
             exclusion_zone,
             hasher,
             pools,
-            column_buffer,
-            buckets,
+            buffers: ColumnBuffers::default(),
             rep: 0,
             depth: K,
             previous_depth: None,
@@ -800,10 +794,9 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
                 self.depth,
                 self.rep,
                 self.exclusion_zone,
-                &mut self.column_buffer,
-                &mut self.buckets,
+                &mut self.buffers,
             );
-            let n_buckets = self.buckets.len();
+            let n_buckets = self.buffers.buckets.len();
             let chunk_size = std::cmp::max(1, n_buckets / (4 * rayon::current_num_threads()));
 
             // counters for profiling
@@ -815,7 +808,7 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
                     let mut tl_stats = stats.get_or(|| RefCell::new(Stats::default())).borrow_mut();
 
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
-                        let bucket = &self.column_buffer[self.buckets[i].clone()];
+                        let bucket = &self.buffers.buffer[self.buffers.buckets[i].clone()];
 
                         for (_, a_idx) in bucket.iter() {
                             let a_idx = *a_idx as usize;

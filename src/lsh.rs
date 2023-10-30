@@ -85,6 +85,12 @@ impl GetByte for HashValue {
 ////
 //// **TODO**: maybe give more details on the tensoring approach.
 
+#[derive(Default)]
+pub struct ColumnBuffers {
+    pub buffer: Vec<(HashValue, u32)>,
+    pub buckets: Vec<Range<usize>>,
+}
+
 //// This data structure is taken from [this StackOverflow answer](https://stackoverflow.com/questions/65178245/how-do-i-write-to-a-mutable-slice-from-multiple-threads-at-arbitrary-indexes-wit).
 //// It is simply a wrapper around a mutable slice, providing (unsafe) concurrent mutable
 //// access to its elements, without the need for synchronization primitives.
@@ -336,11 +342,11 @@ impl HashCollection {
         depth: usize,
         repetition: usize,
         exclusion_zone: usize,
-        // This buffer emulates the column of the hash matrix
-        buffer: &mut Vec<(HashValue, u32)>,
-        output: &mut Vec<Range<usize>>,
+        buffers: &mut ColumnBuffers,
     ) -> () {
         let ns = self.n_subsequences;
+        let buffer = &mut buffers.buffer;
+        let output = &mut buffers.buckets;
 
         buffer.clear();
         output.clear();
@@ -499,8 +505,7 @@ impl Hasher {
         let mut r = expected_max_dotp / 128.0;
         return r;
 
-        let mut probe_column = Vec::new();
-        let mut probe_buckets = Vec::new();
+        let mut probe_buffers = ColumnBuffers::default();
 
         let mut pair_probing_time = Duration::from_secs(0);
         let mut probed_pairs = 0usize;
@@ -510,15 +515,15 @@ impl Hasher {
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
             let probe_collection = HashCollection::from_ts(&ts, fft_data, probe_hasher);
             let probe_collection = Arc::new(probe_collection);
-            probe_collection.group_subsequences(K, 0, ts.w, &mut probe_column, &mut probe_buckets);
+            probe_collection.group_subsequences(K, 0, ts.w, &mut probe_buffers);
             info!("grouped subsequences");
 
             let mut has_collision = || {
                 let mut topk = crate::motifs::TopK::new(k, ts.w);
                 let timer = Instant::now();
                 // let mut cnt_dists = 0;
-                for bucket in probe_buckets.iter() {
-                    let bucket = &probe_column[bucket.clone()];
+                for bucket in probe_buffers.buckets.iter() {
+                    let bucket = &probe_buffers.buffer[bucket.clone()];
                     for (_, a_idx) in bucket.iter() {
                         let a_idx = *a_idx as usize;
                         for (_, b_idx) in bucket.iter() {
