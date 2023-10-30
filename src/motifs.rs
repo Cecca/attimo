@@ -530,8 +530,8 @@ pub struct KMotifletState {
     exclusion_zone: usize,
     current_best: Option<f64>,
     done: bool,
-    tl_neighborhoods: ThreadLocal<RefCell<BTreeMap<usize, SubsequenceNeighborhood>>>,
-    neighborhoods: BTreeMap<usize, SubsequenceNeighborhood>,
+    tl_neighborhoods: ThreadLocal<RefCell<BTreeMap<usize, SubsequenceNeighborhoodOld>>>,
+    neighborhoods: BTreeMap<usize, SubsequenceNeighborhoodOld>,
 }
 impl KMotifletState {
     pub fn new(support: usize, exclusion_zone: usize) -> Self {
@@ -554,7 +554,7 @@ impl KMotifletState {
                 self.neighborhoods
                     .entry(*id)
                     .or_insert_with(|| {
-                        SubsequenceNeighborhood::new(*id, support - 1, exclusion_zone)
+                        SubsequenceNeighborhoodOld::new(*id, support - 1, exclusion_zone)
                     })
                     .merge(neighs);
             }
@@ -601,7 +601,7 @@ impl State for KMotifletState {
             .borrow_mut()
             .entry(a)
             .or_insert_with(|| {
-                SubsequenceNeighborhood::new(a, self.support - 1, self.exclusion_zone)
+                SubsequenceNeighborhoodOld::new(a, self.support - 1, self.exclusion_zone)
             })
             .update(d, b);
         self.tl_neighborhoods
@@ -609,7 +609,7 @@ impl State for KMotifletState {
             .borrow_mut()
             .entry(b)
             .or_insert_with(|| {
-                SubsequenceNeighborhood::new(b, self.support - 1, self.exclusion_zone)
+                SubsequenceNeighborhoodOld::new(b, self.support - 1, self.exclusion_zone)
             })
             .update(d, a);
     }
