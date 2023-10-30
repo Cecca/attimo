@@ -721,7 +721,7 @@ impl Iterator for KnnIter {
                 .into_par_iter()
                 .for_each(|chunk_i| {
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
-                        let bucket = &self.buffers.buffer[self.buffers.buckets[i].clone()];
+                        let bucket = &self.buffers.hashes[self.buffers.buckets[i].clone()];
 
                         for (_, a_idx) in bucket.iter() {
                             let a_idx = *a_idx as usize;

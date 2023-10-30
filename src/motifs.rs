@@ -17,7 +17,6 @@ use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::collections::BinaryHeap;
-use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -808,7 +807,7 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
                     let mut tl_stats = stats.get_or(|| RefCell::new(Stats::default())).borrow_mut();
 
                     for i in (chunk_i * chunk_size)..((chunk_i + 1) * chunk_size) {
-                        let bucket = &self.buffers.buffer[self.buffers.buckets[i].clone()];
+                        let bucket = &self.buffers.hashes[self.buffers.buckets[i].clone()];
 
                         for (_, a_idx) in bucket.iter() {
                             let a_idx = *a_idx as usize;

@@ -87,8 +87,139 @@ impl GetByte for HashValue {
 
 #[derive(Default)]
 pub struct ColumnBuffers {
-    pub buffer: Vec<(HashValue, u32)>,
+    pub hashes: Vec<(HashValue, u32)>,
     pub buckets: Vec<Range<usize>>,
+}
+impl ColumnBuffers {
+    pub fn enumerator(&self) -> CollisionEnumerator {
+        let current_bucket = 0;
+        let i = 0;
+        let j = 1;
+        CollisionEnumerator {
+            current_bucket,
+            i,
+            j,
+            buffers: self,
+        }
+    }
+}
+
+pub struct CollisionEnumerator<'hashes> {
+    current_bucket: usize,
+    i: usize,
+    j: usize,
+    buffers: &'hashes ColumnBuffers,
+}
+impl<'hashes> CollisionEnumerator<'hashes> {
+    /// Fills the given output buffer with colliding pairs, and returns the number
+    /// of pairs that have been put into the buffer. If there were no pairs to add,
+    /// return `None`.
+    pub fn next(&mut self, output: &mut [(u32, u32)]) -> Option<usize> {
+        let mut idx = 0;
+        while self.current_bucket < self.buffers.buckets.len() {
+            let range = self.buffers.buckets[self.current_bucket].clone();
+            while self.i < range.end {
+                while self.j < range.end {
+                    let a = self.buffers.hashes[self.i].1;
+                    let b = self.buffers.hashes[self.j].1;
+                    output[idx] = (a.min(b), a.max(b));
+                    self.j += 1;
+                    idx += 1;
+                    if idx >= output.len() {
+                        return Some(idx);
+                    }
+                }
+                self.i += 1;
+                self.j = self.i + 1;
+            }
+
+            self.current_bucket += 1;
+            if self.current_bucket < self.buffers.buckets.len() {
+                let range = self.buffers.buckets[self.current_bucket].clone();
+                self.i = range.start;
+                self.j = range.start + 1;
+            } else {
+                if idx == 0 {
+                    return None;
+                } else {
+                    return Some(idx);
+                }
+            }
+        }
+        if idx == 0 {
+            return None;
+        } else {
+            return Some(idx);
+        }
+    }
+}
+
+#[test]
+fn test_collision_enumerator() {
+    let buf_size = 16;
+    let buffers = ColumnBuffers::default();
+    let mut enumerator = buffers.enumerator();
+    let mut buf = vec![(0, 0); buf_size];
+    assert_eq!(enumerator.next(&mut buf), None);
+
+    let mut buffers = ColumnBuffers::default();
+    buffers.hashes.extend_from_slice(&[
+        (HashValue(0), 0),
+        (HashValue(0), 1),
+        (HashValue(0), 2),
+        (HashValue(0), 3),
+    ]);
+    let n = buffers.hashes.len();
+    buffers.buckets.push(0..n);
+    let mut enumerator = buffers.enumerator();
+    let mut buf = vec![(0, 0); buf_size];
+    let ret = enumerator.next(&mut buf);
+    println!("{:?}", buf);
+    assert_eq!(ret, Some(n * (n - 1) / 2));
+
+    let mut buffers = ColumnBuffers::default();
+    buffers.hashes.extend_from_slice(&[
+        (HashValue(0), 0),
+        (HashValue(0), 1),
+        (HashValue(0), 2),
+        (HashValue(0), 3),
+        (HashValue(0), 4),
+        (HashValue(0), 5),
+        (HashValue(0), 6),
+        (HashValue(0), 7),
+    ]);
+    let n = buffers.hashes.len();
+    let tot_pairs = n * (n - 1) / 2;
+    buffers.buckets.push(0..n);
+    let mut enumerator = buffers.enumerator();
+    let mut buf = vec![(0, 0); buf_size];
+    let mut enumerated = 0;
+    while let Some(cnt) = enumerator.next(&mut buf) {
+        enumerated += cnt;
+    }
+    assert_eq!(enumerated, tot_pairs);
+
+    let mut buffers = ColumnBuffers::default();
+    buffers.hashes.extend_from_slice(&[
+        (HashValue(0), 0),
+        (HashValue(0), 1),
+        (HashValue(0), 2),
+        (HashValue(0), 3),
+        (HashValue(1), 4),
+        (HashValue(1), 5),
+        (HashValue(1), 6),
+        (HashValue(1), 7),
+    ]);
+    let tot_pairs = 4 * (4 - 1);
+    buffers.buckets.push(0..4);
+    buffers.buckets.push(4..8);
+    let mut enumerator = buffers.enumerator();
+    let mut buf = vec![(0, 0); buf_size];
+    let mut enumerated = 0;
+    while let Some(cnt) = enumerator.next(&mut buf) {
+        enumerated += cnt;
+    }
+    assert_eq!(enumerated, tot_pairs);
 }
 
 //// This data structure is taken from [this StackOverflow answer](https://stackoverflow.com/questions/65178245/how-do-i-write-to-a-mutable-slice-from-multiple-threads-at-arbitrary-indexes-wit).
@@ -345,7 +476,7 @@ impl HashCollection {
         buffers: &mut ColumnBuffers,
     ) -> () {
         let ns = self.n_subsequences;
-        let buffer = &mut buffers.buffer;
+        let buffer = &mut buffers.hashes;
         let output = &mut buffers.buckets;
 
         buffer.clear();
@@ -523,7 +654,7 @@ impl Hasher {
                 let timer = Instant::now();
                 // let mut cnt_dists = 0;
                 for bucket in probe_buffers.buckets.iter() {
-                    let bucket = &probe_buffers.buffer[bucket.clone()];
+                    let bucket = &probe_buffers.hashes[bucket.clone()];
                     for (_, a_idx) in bucket.iter() {
                         let a_idx = *a_idx as usize;
                         for (_, b_idx) in bucket.iter() {
