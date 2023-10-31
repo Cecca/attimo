@@ -56,7 +56,8 @@ impl SupportBuffers {
     }
 }
 
-struct EvolvingNeighborhood {
+#[derive(Debug)]
+pub struct EvolvingNeighborhood {
     subsequence: usize,
     max_k: usize,
     /// When true, requires to update the flags in the [neighbors] vector.
@@ -82,7 +83,9 @@ impl EvolvingNeighborhood {
         while i < self.neighbors.len() && tuple.0 > self.neighbors[i].0 {
             i += 1;
         }
-        self.neighbors.insert(i, tuple);
+        if i >= self.neighbors.len() || self.neighbors[i].1 != neigh {
+            self.neighbors.insert(i, tuple);
+        }
     }
     fn clean(&mut self, exclusion_zone: usize) {
         if !self.dirty {
@@ -103,7 +106,8 @@ impl EvolvingNeighborhood {
     /// Returns an upper bound to the extent of this neighborhood
     fn extent(&mut self, k: usize, exclusion_zone: usize) -> OrdF64 {
         self.clean(exclusion_zone);
-        self.neighbors
+        let ext = self
+            .neighbors
             .iter()
             .filter_map(|(d, _, is_neighbor)| {
                 if *is_neighbor {
@@ -112,13 +116,15 @@ impl EvolvingNeighborhood {
                     None
                 }
             })
-            .nth(k)
-            .unwrap_or(OrdF64(f64::INFINITY))
+            .nth(k - 1)
+            .unwrap_or(OrdF64(f64::INFINITY));
+        ext
     }
     /// Counts how many neighbors have a distance _strictly_ larger than the given distance
     fn count_larger_than(&mut self, k: usize, exclusion_zone: usize, d: OrdF64) -> usize {
         self.clean(exclusion_zone);
-        self.neighbors
+        let cnt_smaller = self
+            .neighbors
             .iter()
             .filter_map(
                 |(d, _, is_neighbor)| {
@@ -130,11 +136,13 @@ impl EvolvingNeighborhood {
                 },
             )
             .take(k)
-            .filter(|nn_dist| *nn_dist > d.0)
-            .count()
+            .filter(|nn_dist| *nn_dist <= d.0)
+            .count();
+        k - cnt_smaller
     }
 }
 
+#[derive(Debug)]
 pub enum SubsequenceNeighborhood {
     /// This subsequence neighborhood has been "brute forced", i.e.
     /// it has been computed exactly. It ignores any proposed update.
@@ -154,7 +162,7 @@ pub enum SubsequenceNeighborhood {
 impl SubsequenceNeighborhood {
     pub fn evolving(max_k: usize, subsequence: usize) -> Self {
         Self::Evolving {
-            neighborhood: EvolvingNeighborhood::new(max_k, subsequence),
+            neighborhood: EvolvingNeighborhood::new(subsequence, max_k),
         }
     }
     pub fn exact(
@@ -181,14 +189,14 @@ impl SubsequenceNeighborhood {
         }
         // Find the likely candidates by a (partial) indirect sort of
         // the indices by increasing distance.
-        let n_candidates = (k * exclusion_zone).min(ts.num_subsequences());
-        indices.select_nth_unstable_by_key(n_candidates, |j| OrdF64(distances[*j]));
+        // let n_candidates = (k * exclusion_zone).min(ts.num_subsequences());
+        // indices.select_nth_unstable_by_key(n_candidates, |j| OrdF64(distances[*j]));
 
         // Sort the candidate indices by increasing distance (the previous step)
         // only partitioned the indices in two groups with the guarantee that the first
         // `n_candidates` indices are the ones at shortest distance from the `from` point,
         // but they are not guaranteed to be sorted
-        let indices = &mut indices[..n_candidates];
+        // let indices = &mut indices[..n_candidates];
         indices.sort_unstable_by_key(|j| OrdF64(distances[*j]));
 
         // Pick the k-neighborhood skipping overlapping subsequences
@@ -213,16 +221,16 @@ impl SubsequenceNeighborhood {
         }
         assert_eq!(ids.len(), k);
 
-        let mut extents = Vec::new();
-        extents.push(OrdF64(0.0));
+        let mut extents = vec![OrdF64(0.0); k];
         for i in 0..k {
             let mut extent = 0.0f64;
-            for j in (i + 1)..k {
+            for j in 0..i {
                 let d = zeucl(ts, ids[i], ids[j]);
                 extent = extent.max(d);
             }
-            extents.push(OrdF64(extent));
+            extents[i] = OrdF64(extent).max(*extents[0..i].iter().max().unwrap_or(&OrdF64(0.0)));
         }
+        assert_eq!(extents.len(), k);
 
         Self::Exact {
             subsequence,
@@ -276,6 +284,12 @@ impl SubsequenceNeighborhood {
             }
         }
     }
+    pub fn is_evolving(&self) -> bool {
+        match self {
+            Self::Evolving { neighborhood: _ } => true,
+            _ => false,
+        }
+    }
     pub fn extent(&mut self, k: usize, exclusion_zone: usize) -> OrdF64 {
         match self {
             Self::Evolving { neighborhood } => neighborhood.extent(k, exclusion_zone),
@@ -285,6 +299,16 @@ impl SubsequenceNeighborhood {
                 ids: _,
             } => extents[k],
             Self::Discarded { subsequence: _ } => OrdF64(std::f64::INFINITY),
+        }
+    }
+    pub fn neighbors(&mut self, k: usize) -> Vec<usize> {
+        match self {
+            Self::Exact {
+                subsequence: _,
+                extents: _,
+                ids,
+            } => ids[..k].to_vec(),
+            _ => panic!(),
         }
     }
     pub fn update(&mut self, dist: OrdF64, neigh: usize) {
@@ -308,15 +332,19 @@ impl SubsequenceNeighborhood {
         match self {
             Self::Evolving { neighborhood } => {
                 let h = neighborhood.count_larger_than(k, exclusion_zone, extent_lower_bound);
+                if h == 0 {
+                    return 0.0;
+                }
                 assert!(h <= k);
-                lower_bound_fp.powi((k - h) as i32)
+                let ret = lower_bound_fp.powi(h as i32);
+                ret
             }
             Self::Exact {
                 subsequence: _,
                 extents: _,
                 ids: _,
             } => 0.0,
-            Self::Discarded { subsequence: _ } => 1.0,
+            Self::Discarded { subsequence: _ } => 0.0,
         }
     }
 }

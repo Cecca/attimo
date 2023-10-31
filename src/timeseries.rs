@@ -15,6 +15,13 @@ impl Overlaps<usize> for usize {
     }
 }
 
+impl Overlaps<u32> for u32 {
+    #[inline]
+    fn overlaps(&self, other: u32, exclusion_zone: usize) -> bool {
+        self.max(&other) - self.min(&other) < exclusion_zone as u32
+    }
+}
+
 impl<T> Overlaps<&T> for T
 where
     T: Overlaps<T> + Copy,

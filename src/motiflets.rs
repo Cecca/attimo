@@ -1,9 +1,12 @@
 use crate::{
     distance::zeucl,
-    knn::OrdF64,
+    knn::*,
+    lsh::{self, ColumnBuffers, HashCollection, Hasher},
     timeseries::{FFTData, WindowedTimeseries},
 };
 use rayon::prelude::*;
+use std::{collections::BinaryHeap, sync::Arc};
+use std::{collections::HashMap, time::Instant};
 
 /// Find the `k` nearest neighbors of the given `from` subsequence, respecting the
 /// given `exclusion_zone`. Returns a pair where the first element is the extent
@@ -117,8 +120,159 @@ pub fn brute_force_motiflets(
         })
         .min()
         .unwrap();
-    println!("Root of motiflet is {root}");
+    eprintln!("Root of motiflet is {root}");
     (extent.0, indices)
+}
+
+pub fn probabilistic_motiflets(
+    ts: &WindowedTimeseries,
+    k: usize,
+    exclusion_zone: usize,
+    repetitions: usize,
+    failure_probability: f64,
+    seed: u64,
+) -> (f64, Vec<usize>) {
+    const BUFFER_SIZE: usize = 1 << 16;
+    let fft_data = FFTData::new(&ts);
+    let n = ts.num_subsequences();
+
+    let hasher_width = Hasher::estimate_width(&ts, &fft_data, 1, None, seed);
+
+    let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
+    let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
+    let mut hash_buffers = ColumnBuffers::default();
+    let mut support_buffers = SupportBuffers::new(ts);
+    let mut pairs_buffer = vec![(0u32, 0u32, OrdF64(f64::INFINITY)); BUFFER_SIZE];
+
+    let mut neighborhoods: HashMap<usize, SubsequenceNeighborhood> = HashMap::new();
+
+    let mut brute_forced = 0;
+
+    let mut last_extent = f64::INFINITY;
+
+    let mut previous_prefix = None;
+    for prefix in (1..=lsh::K).rev() {
+        eprintln!("=== {prefix}");
+        for rep in 0..repetitions {
+            let timer = Instant::now();
+            pools.group_subsequences(prefix, rep, exclusion_zone, &mut hash_buffers);
+            if let Some(mut enumerator) = hash_buffers.enumerator() {
+                while let Some(cnt) = enumerator.next(&mut pairs_buffer, exclusion_zone) {
+                    // Fixup the distances
+                    pairs_buffer[0..cnt]
+                        .par_iter_mut()
+                        .for_each(|(a, b, dist)| {
+                            let a = *a as usize;
+                            let b = *b as usize;
+                            if let Some(first_colliding_repetition) =
+                                pools.first_collision(a, b, prefix)
+                            {
+                                if first_colliding_repetition == rep
+                                    && previous_prefix
+                                        .map(|prefix| pools.first_collision(a, b, prefix).is_none())
+                                        .unwrap_or(true)
+                                {
+                                    *dist = OrdF64(zeucl(ts, a, b));
+                                }
+                            }
+                        });
+
+                    // Update the neighborhoods
+                    for (a, b, dist) in &pairs_buffer[0..cnt] {
+                        if dist.0.is_finite() {
+                            let a = *a as usize;
+                            let b = *b as usize;
+                            neighborhoods
+                                .entry(a)
+                                .or_insert_with(|| SubsequenceNeighborhood::evolving(k, a))
+                                .update(*dist, b);
+                            neighborhoods
+                                .entry(b)
+                                .or_insert_with(|| SubsequenceNeighborhood::evolving(k, b))
+                                .update(*dist, a);
+                        }
+                    }
+                }
+            } // while there are collisions
+
+            let num_top_extents = 2;
+            let mut top_extents = BinaryHeap::new();
+            for (idx, neighborhood) in neighborhoods.iter_mut() {
+                if neighborhood.is_evolving() {
+                    let ext = neighborhood.extent(k - 1, exclusion_zone);
+                    if ext.0.is_finite() {
+                        top_extents.push((ext, *idx));
+                    }
+                    if top_extents.len() > num_top_extents {
+                        top_extents.pop();
+                    }
+                }
+            }
+            for (_, idx) in top_extents {
+                brute_forced += 1;
+                neighborhoods.get_mut(&idx).unwrap().brute_force(
+                    ts,
+                    &fft_data,
+                    k,
+                    &mut support_buffers,
+                );
+            }
+
+            // Find the smallest extent so far
+            if let Some((smallest_extent, smallest_extent_idx)) = neighborhoods
+                .iter_mut()
+                .map(|(idx, neighborhood)| (neighborhood.extent(k - 1, exclusion_zone), idx))
+                .min()
+            {
+                if smallest_extent.0.is_finite() {
+                    let fp_smallest_extent =
+                        hasher.failure_probability(smallest_extent.0, rep, prefix);
+
+                    if smallest_extent.0 < last_extent {
+                        println!(
+                            "[{}@{}] Updated best extent: {} rooted at {}",
+                            rep, prefix, smallest_extent.0, smallest_extent_idx
+                        );
+                        last_extent = smallest_extent.0;
+                    }
+
+                    // Find the failure probabilities
+                    let mut max_fp = 0.0f64;
+                    for neighborhood in neighborhoods.values_mut() {
+                        let fp = neighborhood.failure_probability(
+                            k - 1,
+                            smallest_extent,
+                            fp_smallest_extent,
+                            exclusion_zone,
+                        );
+                        max_fp = max_fp.max(fp);
+                    }
+                    // eprintln!(
+                    //     "Max failure probablity {}, smallest_extent {}",
+                    //     max_fp, smallest_extent.0
+                    // );
+                    if max_fp < failure_probability {
+                        let n_neighborhoods = neighborhoods.len();
+                        // pick the neighborhood with the best extent
+                        let (extent, best_idx, best_neighborhood) = neighborhoods
+                            .iter_mut()
+                            .map(|(idx, ns)| (ns.extent(k - 1, exclusion_zone), idx, ns))
+                            .min_by_key(|tup| tup.0)
+                            .unwrap();
+                        let ids = best_neighborhood.neighbors(k);
+                        eprintln!(
+                            "Returning motiflet {:?} with extent {} rooted at {} (brute forced {} over {})",
+                            ids, extent.0, best_idx, brute_forced, n_neighborhoods
+                        );
+                        return (extent.0, ids);
+                    }
+                }
+            }
+        }
+        previous_prefix.replace(prefix);
+    }
+
+    unreachable!()
 }
 
 #[cfg(test)]
@@ -145,14 +299,17 @@ mod test {
                 brute_force_motiflets(&ts, k, exclusion_zone)
             });
         eprintln!("Ground distance of {} motiflet: {}", k, ground_extent);
+        eprintln!("Motiflet is {:?}", ground_indices);
         ground_indices.sort();
-        let motiflet = motiflets(ts, k, repetitions, failure_probability, seed)
-            .first()
-            .unwrap()
-            .clone();
-        let motiflet_extent = motiflet.extent();
-        eprintln!("Motiflet extent {}", motiflet_extent);
-        let mut motiflet_indices = motiflet.indices();
+        let (_motiflet_extent, mut motiflet_indices) = if false {
+            let motiflet = motiflets(ts, k, repetitions, failure_probability, seed)
+                .first()
+                .unwrap()
+                .clone();
+            (motiflet.extent(), motiflet.indices())
+        } else {
+            probabilistic_motiflets(&ts, k, exclusion_zone, repetitions, 0.01, 1234)
+        };
         motiflet_indices.sort();
         assert_eq!(motiflet_indices, ground_indices);
     }
