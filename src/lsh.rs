@@ -601,17 +601,24 @@ impl Hasher {
                 * (1.0 - (-r * r / (2.0 * d * d)).exp())
     }
 
-    pub fn failure_probability(&self, zeucl_dist: f64, reps: usize, prefix: usize) -> f64 {
+    pub fn failure_probability(
+        &self,
+        zeucl_dist: f64,
+        reps: usize,
+        prefix: usize,
+        prev_prefix: Option<usize>,
+    ) -> f64 {
         let p = self.collision_probability_at(zeucl_dist);
+        let prev_prefix = prev_prefix.unwrap_or(prefix + 1);
 
         // TODO: precompute all these numbers
         let cur_left_bits = (prefix as f64 / 2.0).floor() as i32;
         let cur_right_bits = (prefix as f64 / 2.0).ceil() as i32;
         assert_eq!(cur_left_bits + cur_right_bits, prefix as i32);
 
-        let prev_left_bits = ((prefix + 1) as f64 / 2.0).floor() as i32;
-        let prev_right_bits = ((prefix + 1) as f64 / 2.0).ceil() as i32;
-        assert_eq!(prev_left_bits + prev_right_bits, prefix as i32 + 1);
+        let prev_left_bits = ((prev_prefix) as f64 / 2.0).floor() as i32;
+        let prev_right_bits = ((prev_prefix) as f64 / 2.0).ceil() as i32;
+        assert_eq!(prev_left_bits + prev_right_bits, prev_prefix as i32);
         assert!(prev_left_bits >= cur_left_bits);
         assert!(prev_right_bits >= cur_right_bits);
 

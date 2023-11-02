@@ -758,7 +758,7 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
         let orig_prefix = prefix;
         while prefix > 0 {
             for rep in 0..self.repetitions {
-                if self.hasher.failure_probability(d, rep, prefix) < self.delta {
+                if self.hasher.failure_probability(d, rep, prefix, None) < self.delta {
                     return prefix;
                 }
             }
@@ -867,7 +867,7 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
             let delta = self.delta;
             let hasher = Arc::clone(&self.hasher);
             let mut buf = self.state.emit(&self.ts, |d| {
-                hasher.failure_probability(d, rep, depth) <= delta
+                hasher.failure_probability(d, rep, depth, None) <= delta
             });
             self.to_return.extend(buf.drain(..).map(|m| Reverse(m)));
 

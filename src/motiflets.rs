@@ -229,7 +229,7 @@ pub fn probabilistic_motiflets(
             {
                 if smallest_extent.0.is_finite() {
                     let fp_smallest_extent =
-                        hasher.failure_probability(smallest_extent.0, rep, prefix);
+                        hasher.failure_probability(smallest_extent.0, rep, prefix, previous_prefix);
 
                     if smallest_extent.0 < last_extent {
                         println!(
@@ -276,20 +276,27 @@ pub fn probabilistic_motiflets(
         }
         previous_prefix.replace(prefix);
 
-        if last_extent.is_finite() {
+        if last_extent.is_finite() && prefix > 1 {
             while prefix > 0 {
                 if (0..repetitions).any(|rep| {
-                    hasher.failure_probability(last_extent, rep, prefix)
+                    hasher.failure_probability(last_extent, rep, prefix, previous_prefix)
                         <= target_failure_probability
                 }) {
                     break;
                 }
                 prefix -= 1;
             }
+            if prefix == 0 {
+                prefix = 1;
+            }
         } else {
             prefix -= 1;
         }
-        eprintln!("Next prefix is {}", prefix);
+        eprintln!(
+            "Next prefix is {}, where the failure probability will be {} in the first iteration",
+            prefix,
+            hasher.failure_probability(last_extent, 0, prefix, previous_prefix)
+        );
     }
 
     unreachable!()
@@ -350,8 +357,8 @@ mod test {
 
     #[test]
     fn test_ecg_motiflet_k10() {
-        let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
-        let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
+        let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(20000)).unwrap();
+        let ts = Arc::new(WindowedTimeseries::new(ts, 50, false));
         run_motiflet_test(ts, 10, 8192, 123456, None);
     }
 }

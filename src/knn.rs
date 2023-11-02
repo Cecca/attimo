@@ -711,7 +711,7 @@ impl KnnIter {
     fn level_for_distance(&self, d: f64, mut prefix: usize) -> usize {
         while prefix > 0 {
             for rep in 0..self.repetitions {
-                if self.hasher.failure_probability(d, rep, prefix) < self.delta {
+                if self.hasher.failure_probability(d, rep, prefix, None) < self.delta {
                     return prefix;
                 }
             }
@@ -790,7 +790,7 @@ impl Iterator for KnnIter {
             let hasher = Arc::clone(&self.hasher);
             let mut buf: Vec<Knn> = self
                 .state
-                .emit(|d| hasher.failure_probability(d, rep, depth) <= delta);
+                .emit(|d| hasher.failure_probability(d, rep, depth, None) <= delta);
             self.buffer.extend(buf.drain(..));
             self.buffer.sort_by(|knn1, knn2| knn1.cmp(knn2).reverse());
 
