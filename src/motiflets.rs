@@ -139,6 +139,7 @@ pub fn probabilistic_motiflets(
     let hasher_width = Hasher::estimate_width(&ts, &fft_data, 1, None, seed);
 
     let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
+    hasher.print_collision_probabilities(ts.w);
     let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
     let mut hash_buffers = ColumnBuffers::default();
     let mut support_buffers = SupportBuffers::new(ts);

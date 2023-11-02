@@ -594,6 +594,25 @@ impl Hasher {
         }
     }
 
+    pub fn print_collision_probabilities(&self, window_size: usize) {
+        let max_dist = (window_size as f64).sqrt();
+        let step = max_dist / 10.0;
+        let mut d = step;
+        println!("Collision probability profile");
+        print!("dist: ");
+        while d < max_dist {
+            print!("{:>8.3} ", d);
+            d += step;
+        }
+        print!("\nprob: ");
+        let mut d = step;
+        while d < max_dist {
+            print!("{:>8.3} ", self.collision_probability_at(d));
+            d += step;
+        }
+        println!();
+    }
+
     pub fn collision_probability_at(&self, d: f64) -> f64 {
         let r = self.width;
         let normal = NormalDistr::new(0.0, 1.0).unwrap();
