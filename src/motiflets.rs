@@ -129,7 +129,7 @@ pub fn probabilistic_motiflets(
     k: usize,
     exclusion_zone: usize,
     repetitions: usize,
-    failure_probability: f64,
+    target_failure_probability: f64,
     seed: u64,
 ) -> (f64, Vec<usize>) {
     const BUFFER_SIZE: usize = 1 << 16;
@@ -155,12 +155,13 @@ pub fn probabilistic_motiflets(
         eprintln!("=== {prefix}");
         for rep in 0..repetitions {
             let timer = Instant::now();
-            pools.group_subsequences(prefix, rep, exclusion_zone, &mut hash_buffers);
+            pools.group_subsequences(prefix, rep, exclusion_zone, &mut hash_buffers, true);
             if let Some(mut enumerator) = hash_buffers.enumerator() {
                 while let Some(cnt) = enumerator.next(&mut pairs_buffer, exclusion_zone) {
                     // Fixup the distances
                     pairs_buffer[0..cnt]
                         .par_iter_mut()
+                        .with_min_len(1024)
                         .for_each(|(a, b, dist)| {
                             let a = *a as usize;
                             let b = *b as usize;
@@ -195,12 +196,14 @@ pub fn probabilistic_motiflets(
                 }
             } // while there are collisions
 
-            let num_top_extents = 2;
+            let num_top_extents = 10;
             let mut top_extents = BinaryHeap::new();
             for (idx, neighborhood) in neighborhoods.iter_mut() {
                 if neighborhood.is_evolving() {
                     let ext = neighborhood.extent(k - 1, exclusion_zone);
-                    if ext.0.is_finite() {
+                    // we brute force only the extents that can
+                    // overtake the current best motiflet
+                    if ext.0 <= 2.0 * last_extent {
                         top_extents.push((ext, *idx));
                     }
                     if top_extents.len() > num_top_extents {
@@ -237,21 +240,23 @@ pub fn probabilistic_motiflets(
                     }
 
                     // Find the failure probabilities
-                    let mut max_fp = 0.0f64;
-                    for neighborhood in neighborhoods.values_mut() {
-                        let fp = neighborhood.failure_probability(
-                            k - 1,
-                            smallest_extent,
-                            fp_smallest_extent,
-                            exclusion_zone,
+                    let mut max_fp = fp_smallest_extent;
+                    // for neighborhood in neighborhoods.values_mut() {
+                    //     let fp = neighborhood.failure_probability(
+                    //         k - 1,
+                    //         smallest_extent,
+                    //         fp_smallest_extent,
+                    //         exclusion_zone,
+                    //     );
+                    //     max_fp = max_fp.max(fp);
+                    // }
+                    if rep == 0 {
+                        eprintln!(
+                            "smallest_extent {} failure probability {}",
+                            smallest_extent.0, max_fp
                         );
-                        max_fp = max_fp.max(fp);
                     }
-                    // eprintln!(
-                    //     "Max failure probablity {}, smallest_extent {}",
-                    //     max_fp, smallest_extent.0
-                    // );
-                    if max_fp < failure_probability {
+                    if max_fp < target_failure_probability {
                         let n_neighborhoods = neighborhoods.len();
                         // pick the neighborhood with the best extent
                         let (extent, best_idx, best_neighborhood) = neighborhoods
@@ -318,13 +323,20 @@ mod test {
     fn test_ecg_motiflet_k5() {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
-        run_motiflet_test(ts, 5, 1024, 123456, None);
+        run_motiflet_test(ts, 5, 8192, 123456, None);
     }
 
     #[test]
     fn test_ecg_motiflet_k8() {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
-        run_motiflet_test(ts, 8, 1024, 123456, None);
+        run_motiflet_test(ts, 8, 8192, 123456, None);
+    }
+
+    #[test]
+    fn test_ecg_motiflet_k10() {
+        let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
+        let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
+        run_motiflet_test(ts, 10, 8192, 123456, None);
     }
 }

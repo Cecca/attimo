@@ -489,6 +489,7 @@ impl HashCollection {
         repetition: usize,
         exclusion_zone: usize,
         buffers: &mut ColumnBuffers,
+        parallel: bool,
     ) -> () {
         let ns = self.n_subsequences;
         let buffer = &mut buffers.hashes;
@@ -498,14 +499,23 @@ impl HashCollection {
         output.clear();
 
         let start = Instant::now();
-        buffer.par_extend(
-            (0..ns)
-                .into_par_iter()
-                .map(|i| (self.hash_value(i, depth, repetition), i as u32)),
-        );
+        if parallel {
+            buffer.par_extend(
+                (0..ns)
+                    .into_par_iter()
+                    .map(|i| (self.hash_value(i, depth, repetition), i as u32)),
+            );
+        } else {
+            buffer.extend((0..ns).map(|i| (self.hash_value(i, depth, repetition), i as u32)));
+        }
+
         let elapsed_hashes = start.elapsed();
         let start = Instant::now();
-        buffer.par_sort_unstable();
+        if parallel {
+            buffer.par_sort_unstable();
+        } else {
+            buffer.sort_unstable();
+        }
         let elapsed_sort = start.elapsed();
         debug_assert!(buffer.is_sorted_by_key(|pair| pair.0.clone()));
 
@@ -661,7 +671,7 @@ impl Hasher {
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
             let probe_collection = HashCollection::from_ts(&ts, fft_data, probe_hasher);
             let probe_collection = Arc::new(probe_collection);
-            probe_collection.group_subsequences(K, 0, ts.w, &mut probe_buffers);
+            probe_collection.group_subsequences(K, 0, ts.w, &mut probe_buffers, true);
             info!("grouped subsequences");
 
             let mut has_collision = || {

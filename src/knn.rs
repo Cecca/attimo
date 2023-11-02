@@ -741,6 +741,7 @@ impl Iterator for KnnIter {
                 self.rep,
                 self.exclusion_zone,
                 &mut self.buffers,
+                true,
             );
             let n_buckets = self.buffers.buckets.len();
             let chunk_size = std::cmp::max(1, n_buckets / (4 * rayon::current_num_threads()));

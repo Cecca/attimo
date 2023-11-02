@@ -2,8 +2,8 @@ use anyhow::Result;
 use argh::FromArgs;
 use attimo::allocator::{self, allocated, CountingAllocator};
 use attimo::load::*;
-use attimo::motiflets::brute_force_motiflets;
-use attimo::motifs::{motiflets, motifs, Motif, Motiflet};
+use attimo::motiflets::{brute_force_motiflets, probabilistic_motiflets};
+use attimo::motifs::{motifs, Motif, Motiflet};
 use attimo::timeseries::*;
 use slog::*;
 use slog_scope::GlobalLoggerGuard;
@@ -135,13 +135,15 @@ fn main() -> Result<()> {
             let (extent, indices) = brute_force_motiflets(&ts, support, ts.w);
             vec![Motiflet::new(indices, extent)]
         } else {
-            motiflets(
-                Arc::new(ts),
+            let (extent, indices) = probabilistic_motiflets(
+                &ts,
                 support,
+                ts.w,
                 config.repetitions,
                 config.failure_probability,
                 config.seed,
-            )
+            );
+            vec![Motiflet::new(indices, extent)]
         };
         eprintln!("Result: {:?}", motiflets);
     } else {
