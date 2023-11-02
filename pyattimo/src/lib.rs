@@ -1,4 +1,5 @@
 use attimo::knn::KnnIter;
+use attimo::motiflets::probabilistic_motiflets;
 use attimo::motifs::{KMotifletState, MotifsEnumerator, PairMotifState};
 use attimo::timeseries::WindowedTimeseries;
 use pyo3::prelude::*;
@@ -46,6 +47,14 @@ impl KMotiflet {
             support: m.support(),
             indices: m.indices(),
             extent: m.extent(),
+            ts,
+        }
+    }
+    fn new(extent: f64, indices: Vec<usize>, support: usize, ts: Arc<WindowedTimeseries>) -> Self {
+        Self {
+            support,
+            indices,
+            extent,
             ts,
         }
     }
@@ -280,19 +289,9 @@ pub fn motiflet(
 ) -> KMotiflet {
     let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
     let exclusion_zone = exclusion_zone.unwrap_or(w / 2);
-    let mut enumerator = MotifsEnumerator::new(
-        ts,
-        1,
-        repetitions,
-        delta,
-        || KMotifletState::new(support, exclusion_zone),
-        seed,
-        true,
-    );
-    if let Some(m) = enumerator.next() {
-        return KMotiflet::with_context(m, enumerator.get_ts());
-    }
-    unreachable!()
+    let (extent, indices) =
+        probabilistic_motiflets(&ts, support, exclusion_zone, repetitions, delta, seed);
+    return KMotiflet::new(extent, indices, support, Arc::clone(&ts));
 }
 
 #[pyfunction]
