@@ -125,6 +125,28 @@ impl WindowedTimeseries {
         self.data.len() - self.w
     }
 
+    pub fn maximum_distance(&self) -> f64 {
+        2.0 * (self.w as f64).sqrt()
+    }
+
+    pub fn average_pairwise_distance(&self, seed: u64) -> f64 {
+        use rand::prelude::*;
+        use rand_distr::Uniform;
+        use rand_xoshiro::Xoshiro256PlusPlus;
+
+        const SAMPLES: usize = 10000;
+        let uniform = Uniform::new(0, self.num_subsequences());
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let mut sum = 0.0;
+        for _ in 0..SAMPLES {
+            let i = uniform.sample(&mut rng);
+            let j = uniform.sample(&mut rng);
+            sum += zeucl(self, i, j);
+        }
+
+        sum / SAMPLES as f64
+    }
+
     pub fn sliding_dot_product_for_each<F: FnMut(usize, f64)>(
         &self,
         fft_data: &FFTData,

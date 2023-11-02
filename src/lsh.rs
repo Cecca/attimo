@@ -594,8 +594,7 @@ impl Hasher {
         }
     }
 
-    pub fn print_collision_probabilities(&self, window_size: usize, concatenations: usize) {
-        let max_dist = (window_size as f64).sqrt() / 4.0;
+    pub fn print_collision_probabilities(&self, max_dist: f64, concatenations: usize) {
         let step = max_dist / 10.0;
         let mut d = step;
         println!(

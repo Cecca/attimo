@@ -135,6 +135,12 @@ pub fn probabilistic_motiflets(
     const BUFFER_SIZE: usize = 1 << 16;
     let fft_data = FFTData::new(&ts);
     let n = ts.num_subsequences();
+    let average_distance = ts.average_pairwise_distance(seed);
+    println!(
+        "Average subsequence distance is {} (maximum {})",
+        average_distance,
+        ts.maximum_distance()
+    );
 
     let hasher_width = Hasher::estimate_width(&ts, &fft_data, 1, None, seed);
 
@@ -149,12 +155,13 @@ pub fn probabilistic_motiflets(
     let mut brute_forced = 0;
 
     let mut last_extent = f64::INFINITY;
+    let mut cnt_distances = 0;
 
     let mut previous_prefix = None;
     let mut prefix = lsh::K;
     while prefix > 0 {
         eprintln!("=== {prefix}");
-        hasher.print_collision_probabilities(ts.w, prefix);
+        hasher.print_collision_probabilities(average_distance, prefix);
         for rep in 0..repetitions {
             pools.group_subsequences(prefix, rep, exclusion_zone, &mut hash_buffers, false);
             if let Some(mut enumerator) = hash_buffers.enumerator() {
@@ -175,6 +182,7 @@ pub fn probabilistic_motiflets(
                                         .map(|prefix| pools.first_collision(a, b, prefix).is_none())
                                         .unwrap_or(true)
                                 {
+                                    cnt_distances += 1;
                                     *dist = OrdF64(zeucl(ts, a, b));
                                 }
                             }
@@ -268,8 +276,8 @@ pub fn probabilistic_motiflets(
                             .unwrap();
                         let ids = best_neighborhood.neighbors(k);
                         eprintln!(
-                            "Returning motiflet {:?} with extent {} rooted at {} with failure probability {} (brute forced {} over {})",
-                            ids, extent.0, best_idx, max_fp, brute_forced, n_neighborhoods
+                            "Returning motiflet {:?} with extent {} rooted at {} with failure probability {} (brute forced {} over {}, computed {} distances)",
+                            ids, extent.0, best_idx, max_fp, brute_forced, n_neighborhoods, cnt_distances
                         );
                         return (extent.0, ids);
                     }
