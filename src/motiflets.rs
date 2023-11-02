@@ -139,7 +139,6 @@ pub fn probabilistic_motiflets(
     let hasher_width = Hasher::estimate_width(&ts, &fft_data, 1, None, seed);
 
     let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
-    hasher.print_collision_probabilities(ts.w);
     let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
     let mut hash_buffers = ColumnBuffers::default();
     let mut support_buffers = SupportBuffers::new(ts);
@@ -155,6 +154,7 @@ pub fn probabilistic_motiflets(
     let mut prefix = lsh::K;
     while prefix > 0 {
         eprintln!("=== {prefix}");
+        hasher.print_collision_probabilities(ts.w, prefix);
         for rep in 0..repetitions {
             pools.group_subsequences(prefix, rep, exclusion_zone, &mut hash_buffers, false);
             if let Some(mut enumerator) = hash_buffers.enumerator() {

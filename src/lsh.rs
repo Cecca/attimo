@@ -594,11 +594,14 @@ impl Hasher {
         }
     }
 
-    pub fn print_collision_probabilities(&self, window_size: usize) {
-        let max_dist = (window_size as f64).sqrt();
+    pub fn print_collision_probabilities(&self, window_size: usize, concatenations: usize) {
+        let max_dist = (window_size as f64).sqrt() / 4.0;
         let step = max_dist / 10.0;
         let mut d = step;
-        println!("Collision probability profile");
+        println!(
+            "Collision probability profile with {} concatenations",
+            concatenations
+        );
         print!("dist: ");
         while d < max_dist {
             print!("{:>8.3} ", d);
@@ -607,7 +610,10 @@ impl Hasher {
         print!("\nprob: ");
         let mut d = step;
         while d < max_dist {
-            print!("{:>8.3} ", self.collision_probability_at(d));
+            print!(
+                "{:>8.3e} ",
+                self.collision_probability_at(d).powi(concatenations as i32)
+            );
             d += step;
         }
         println!();
