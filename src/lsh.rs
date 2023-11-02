@@ -52,7 +52,7 @@ use std::{cell::UnsafeCell, sync::Arc, time::Instant};
 //// vector, rather than falling back to vector of vectors. Removing this dereference allows for
 //// a rather large speed up.
 //// Also, it is one fewer parameter for the user to set.
-pub const K: usize = 32;
+pub const K: usize = 8;
 pub const K_HALF: usize = K / 2;
 
 //// That said, here is the definition of a hash value, with several
@@ -401,6 +401,7 @@ impl HashCollection {
     }
 
     pub fn k_pair(k: usize) -> (usize, usize) {
+        assert!(k <= K);
         let k_left = (k as f64 / 2.0).ceil() as usize;
         let k_right = (k as f64 / 2.0).floor() as usize;
         (k_left, k_right)
@@ -780,7 +781,7 @@ mod test {
         let hasher = Arc::new(Hasher::new(w, repetitions, 5.0, 1245));
         let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
 
-        for &depth in &[32usize, 20, 10] {
+        for &depth in &[K, K / 2, K / 4] {
             for i in 0..ts.num_subsequences() {
                 for j in 0..ts.num_subsequences() {
                     // println!("i={} j={}", i, j);

@@ -155,13 +155,14 @@ pub fn probabilistic_motiflets(
     while prefix > 0 {
         eprintln!("=== {prefix}");
         for rep in 0..repetitions {
-            pools.group_subsequences(prefix, rep, exclusion_zone, &mut hash_buffers, true);
+            pools.group_subsequences(prefix, rep, exclusion_zone, &mut hash_buffers, false);
             if let Some(mut enumerator) = hash_buffers.enumerator() {
                 while let Some(cnt) = enumerator.next(&mut pairs_buffer, exclusion_zone) {
                     // Fixup the distances
                     pairs_buffer[0..cnt]
-                        .par_iter_mut()
-                        .with_min_len(1024)
+                        // .par_iter_mut()
+                        // .with_min_len(1024)
+                        .iter_mut()
                         .for_each(|(a, b, dist)| {
                             let a = *a as usize;
                             let b = *b as usize;
@@ -266,8 +267,8 @@ pub fn probabilistic_motiflets(
                             .unwrap();
                         let ids = best_neighborhood.neighbors(k);
                         eprintln!(
-                            "Returning motiflet {:?} with extent {} rooted at {} (brute forced {} over {})",
-                            ids, extent.0, best_idx, brute_forced, n_neighborhoods
+                            "Returning motiflet {:?} with extent {} rooted at {} with failure probability {} (brute forced {} over {})",
+                            ids, extent.0, best_idx, max_fp, brute_forced, n_neighborhoods
                         );
                         return (extent.0, ids);
                     }
