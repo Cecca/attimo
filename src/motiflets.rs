@@ -151,10 +151,10 @@ pub fn probabilistic_motiflets(
     let mut last_extent = f64::INFINITY;
 
     let mut previous_prefix = None;
-    for prefix in (1..=lsh::K).rev() {
+    let mut prefix = lsh::K;
+    while prefix > 0 {
         eprintln!("=== {prefix}");
         for rep in 0..repetitions {
-            let timer = Instant::now();
             pools.group_subsequences(prefix, rep, exclusion_zone, &mut hash_buffers, true);
             if let Some(mut enumerator) = hash_buffers.enumerator() {
                 while let Some(cnt) = enumerator.next(&mut pairs_buffer, exclusion_zone) {
@@ -240,16 +240,16 @@ pub fn probabilistic_motiflets(
                     }
 
                     // Find the failure probabilities
-                    let mut max_fp = fp_smallest_extent;
-                    // for neighborhood in neighborhoods.values_mut() {
-                    //     let fp = neighborhood.failure_probability(
-                    //         k - 1,
-                    //         smallest_extent,
-                    //         fp_smallest_extent,
-                    //         exclusion_zone,
-                    //     );
-                    //     max_fp = max_fp.max(fp);
-                    // }
+                    let mut max_fp = fp_smallest_extent.powi((k - 1) as i32);
+                    for neighborhood in neighborhoods.values_mut() {
+                        let fp = neighborhood.failure_probability(
+                            k - 1,
+                            smallest_extent,
+                            fp_smallest_extent,
+                            exclusion_zone,
+                        );
+                        max_fp = max_fp.max(fp);
+                    }
                     if rep == 0 {
                         eprintln!(
                             "smallest_extent {} failure probability {}",
@@ -275,6 +275,21 @@ pub fn probabilistic_motiflets(
             }
         }
         previous_prefix.replace(prefix);
+
+        if last_extent.is_finite() {
+            while prefix > 0 {
+                if (0..repetitions).any(|rep| {
+                    hasher.failure_probability(last_extent, rep, prefix)
+                        <= target_failure_probability
+                }) {
+                    break;
+                }
+                prefix -= 1;
+            }
+        } else {
+            prefix -= 1;
+        }
+        eprintln!("Next prefix is {}", prefix);
     }
 
     unreachable!()
