@@ -42,21 +42,9 @@ use std::ops::Range;
 use std::time::Duration;
 use std::{cell::UnsafeCell, sync::Arc, time::Instant};
 
-//// ## Hash values
-//// We consider hash values made of 8-bit words. So we have to make sure, setting the
-//// `width` parameter, that the values are in the range `[-128, 127]`.
-//// More on the estimation of the `width` parameter down below.
-
-//// We only consider concatenations of hash values of a fixed length, defined in this
-//// constant `K`. The reason is that this way we can inline the hash values when allocated into a
-//// vector, rather than falling back to vector of vectors. Removing this dereference allows for
-//// a rather large speed up.
-//// Also, it is one fewer parameter for the user to set.
 pub const K: usize = 8;
 pub const K_HALF: usize = K / 2;
 
-//// That said, here is the definition of a hash value, with several
-//// utility implementations following.
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Default)]
 pub struct HashValue(pub u32);
 
@@ -69,22 +57,6 @@ impl GetByte for HashValue {
         (self.0 >> (8 * (std::mem::size_of::<u32>() - i - 1)) & 0xFF) as u8
     }
 }
-
-//// ## Collections of hash values
-
-//// A key part of the algorithm is the ability to process hash values related to different subsequence
-//// in bulk. In particular, we want to be able to access all the hash values associated to one particular repetition,
-//// so that all subsequences sharing a common prefix of a given length can be accessed together.
-////
-//// Furthermore, we want to reduce the number of hash function evaluations, which tend to be expensive even
-//// when using the convolution trick. Implementing the LSH repetitions naively would require
-//// computing `K * L` hash values for each subsequence of the time series, where `K` is the
-//// number of concatenations, and `L` is the number of repetitions.
-//// We can cut down these evaluations by using the [tensoring technique](https://arxiv.org/pdf/1708.07586.pdf), which
-//// allows to compute just `2 * K * sqrt(L)` hash values, which are then combined to derive the
-//// instances of `HashValue` we need.
-////
-//// **TODO**: maybe give more details on the tensoring approach.
 
 #[derive(Default)]
 pub struct ColumnBuffers {
@@ -353,7 +325,6 @@ impl HashCollection {
                     });
                     max_dotp = max_dotp.max(mdp1.max(mdp2));
                 }
-                println!("Max dotp {}", max_dotp);
                 repdata
             })
             .collect();
