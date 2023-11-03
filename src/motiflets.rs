@@ -297,22 +297,6 @@ pub fn probabilistic_motiflets(
         previous_prefix.replace(prefix);
 
         prefix -= 1;
-        // if last_extent.is_finite() && prefix > 1 {
-        //     while prefix > 0 {
-        //         if (0..repetitions).any(|rep| {
-        //             hasher.failure_probability(last_extent, rep, prefix, previous_prefix)
-        //                 <= target_failure_probability
-        //         }) {
-        //             break;
-        //         }
-        //         prefix -= 1;
-        //     }
-        //     if prefix == 0 {
-        //         prefix = 1;
-        //     }
-        // } else {
-        //     prefix -= 1;
-        // }
         eprintln!(
             "Next prefix is {}, where the failure probability will be {} in the first iteration",
             prefix,
@@ -326,7 +310,7 @@ pub fn probabilistic_motiflets(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{load::loadts, motifs::motiflets};
+    use crate::load::loadts;
     use std::sync::Arc;
 
     fn run_motiflet_test(
@@ -349,15 +333,14 @@ mod test {
         eprintln!("Ground distance of {} motiflet: {}", k, ground_extent);
         eprintln!("Motiflet is {:?}", ground_indices);
         ground_indices.sort();
-        let (_motiflet_extent, mut motiflet_indices) = if false {
-            let motiflet = motiflets(ts, k, repetitions, failure_probability, seed)
-                .first()
-                .unwrap()
-                .clone();
-            (motiflet.extent(), motiflet.indices())
-        } else {
-            probabilistic_motiflets(&ts, k, exclusion_zone, repetitions, 0.01, 1234)
-        };
+        let (_motiflet_extent, mut motiflet_indices) = probabilistic_motiflets(
+            &ts,
+            k,
+            exclusion_zone,
+            repetitions,
+            failure_probability,
+            seed,
+        );
         motiflet_indices.sort();
         assert_eq!(motiflet_indices, ground_indices);
     }
