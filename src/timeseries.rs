@@ -125,23 +125,35 @@ impl WindowedTimeseries {
         self.data.len() - self.w
     }
 
+    pub fn num_subsequence_pairs(&self) -> usize {
+        let n = self.num_subsequences();
+        n * (n - 1) / 2
+    }
+
     pub fn maximum_distance(&self) -> f64 {
         2.0 * (self.w as f64).sqrt()
     }
 
-    pub fn average_pairwise_distance(&self, seed: u64) -> f64 {
+    pub fn average_pairwise_distance(&self, seed: u64, exclusion_zone: usize) -> f64 {
         use rand::prelude::*;
         use rand_distr::Uniform;
         use rand_xoshiro::Xoshiro256PlusPlus;
 
-        const SAMPLES: usize = 10000;
+        const SAMPLES: usize = 100000;
         let uniform = Uniform::new(0, self.num_subsequences());
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         let mut sum = 0.0;
-        for _ in 0..SAMPLES {
-            let i = uniform.sample(&mut rng);
-            let j = uniform.sample(&mut rng);
-            sum += zeucl(self, i, j);
+        let mut sampled = 0;
+        while sampled < SAMPLES {
+            loop {
+                let i = uniform.sample(&mut rng);
+                let j = uniform.sample(&mut rng);
+                if !i.overlaps(j, exclusion_zone) {
+                    sum += zeucl(self, i, j);
+                    sampled += 1;
+                    break;
+                }
+            }
         }
 
         sum / SAMPLES as f64

@@ -134,8 +134,7 @@ pub fn probabilistic_motiflets(
 ) -> (f64, Vec<usize>) {
     const BUFFER_SIZE: usize = 1 << 16;
     let fft_data = FFTData::new(&ts);
-    let n = ts.num_subsequences();
-    let average_distance = ts.average_pairwise_distance(seed);
+    let average_distance = ts.average_pairwise_distance(seed, exclusion_zone);
     println!(
         "Average subsequence distance is {} (maximum {})",
         average_distance,
@@ -161,9 +160,15 @@ pub fn probabilistic_motiflets(
     let mut prefix = lsh::K;
     while prefix > 0 {
         eprintln!("=== {prefix}");
+        eprintln!(
+            "Computed {} distances so far, {}% of all possible",
+            cnt_distances,
+            100.0 * cnt_distances as f64 / ts.num_subsequence_pairs() as f64
+        );
         hasher.print_collision_probabilities(average_distance, prefix);
         for rep in 0..repetitions {
             pools.group_subsequences(prefix, rep, exclusion_zone, &mut hash_buffers, false);
+            let mut rep_collisions = 0;
             if let Some(mut enumerator) = hash_buffers.enumerator() {
                 while let Some(cnt) = enumerator.next(&mut pairs_buffer, exclusion_zone) {
                     // Fixup the distances
@@ -174,6 +179,7 @@ pub fn probabilistic_motiflets(
                         .for_each(|(a, b, dist)| {
                             let a = *a as usize;
                             let b = *b as usize;
+                            rep_collisions += 1;
                             if let Some(first_colliding_repetition) =
                                 pools.first_collision(a, b, prefix)
                             {
@@ -190,6 +196,7 @@ pub fn probabilistic_motiflets(
 
                     // Update the neighborhoods
                     for (a, b, dist) in &pairs_buffer[0..cnt] {
+                        assert!(dist.0 > 0.0);
                         if dist.0.is_finite() {
                             let a = *a as usize;
                             let b = *b as usize;
@@ -205,6 +212,9 @@ pub fn probabilistic_motiflets(
                     }
                 }
             } // while there are collisions
+            if rep_collisions == 0 {
+                eprintln!("WARNING: No collisions in repetition {}@{}", rep, prefix);
+            }
 
             let num_top_extents = 10;
             let mut top_extents = BinaryHeap::new();
@@ -286,22 +296,23 @@ pub fn probabilistic_motiflets(
         }
         previous_prefix.replace(prefix);
 
-        if last_extent.is_finite() && prefix > 1 {
-            while prefix > 0 {
-                if (0..repetitions).any(|rep| {
-                    hasher.failure_probability(last_extent, rep, prefix, previous_prefix)
-                        <= target_failure_probability
-                }) {
-                    break;
-                }
-                prefix -= 1;
-            }
-            if prefix == 0 {
-                prefix = 1;
-            }
-        } else {
-            prefix -= 1;
-        }
+        prefix -= 1;
+        // if last_extent.is_finite() && prefix > 1 {
+        //     while prefix > 0 {
+        //         if (0..repetitions).any(|rep| {
+        //             hasher.failure_probability(last_extent, rep, prefix, previous_prefix)
+        //                 <= target_failure_probability
+        //         }) {
+        //             break;
+        //         }
+        //         prefix -= 1;
+        //     }
+        //     if prefix == 0 {
+        //         prefix = 1;
+        //     }
+        // } else {
+        //     prefix -= 1;
+        // }
         eprintln!(
             "Next prefix is {}, where the failure probability will be {} in the first iteration",
             prefix,

@@ -341,16 +341,19 @@ impl HashCollection {
             .into_par_iter()
             .map(|trep| {
                 let mut repdata = vec![([0u8; K_HALF], [0u8; K_HALF]); ns];
+                let mut max_dotp = 0.0f64;
                 for k in 0..K_HALF {
-                    hasher.hash_all(&ts, fft_data, k, trep, |i, h| {
+                    let mdp1 = hasher.hash_all(&ts, fft_data, k, trep, |i, h| {
                         let h = ((h as i64 & 0xFFi64) as i8) as u8;
                         repdata[i].0[k] = h;
                     });
-                    hasher.hash_all(&ts, fft_data, k + K_HALF, trep, |i, h| {
+                    let mdp2 = hasher.hash_all(&ts, fft_data, k + K_HALF, trep, |i, h| {
                         let h = ((h as i64 & 0xFFi64) as i8) as u8;
                         repdata[i].1[k] = h;
                     });
+                    max_dotp = max_dotp.max(mdp1.max(mdp2));
                 }
+                println!("Max dotp {}", max_dotp);
                 repdata
             })
             .collect();
@@ -690,6 +693,7 @@ impl Hasher {
         let n = ts.num_subsequences();
         let subsequence_norm = (ts.w as f64).sqrt();
         let expected_max_dotp = subsequence_norm * (2.0 * (n as f64).ln()).sqrt();
+        println!("Expected max dotp: {}", expected_max_dotp);
         let mut r = expected_max_dotp / 128.0;
         return r;
 
@@ -772,20 +776,20 @@ impl Hasher {
         k: usize,
         repetition: usize,
         mut callback: F,
-    ) -> usize {
+    ) -> f64 {
         let v = self.get_vector(repetition, k);
         let shift = self.shifts[repetition * K + k];
-        let mut oob = 0; // count how many out of bounds we have
+        let mut max_dotp = 0.0f64;
         ts.znormalized_sliding_dot_product_for_each(fft_data, v, |i, mut h| {
+            max_dotp = max_dotp.max(h.abs());
             h = (h + shift) / self.width;
             //// Count if the value is out of bounds to be repre
             if h.abs() > 128.0 {
-                oob += 1;
                 h = h.signum() * 127.0;
             }
             callback(i, h);
         });
-        oob
+        max_dotp
     }
 }
 

@@ -109,7 +109,8 @@ fn main() -> Result<()> {
     let ts_bytes = allocated() - mem_before;
     let input_elapsed = timer.elapsed();
     println!(
-        "Create windowed time series in {:?}, taking {}",
+        "Create windowed time series with {} subsequences in {:?}, taking {}",
+        ts.num_subsequences(),
         input_elapsed,
         PrettyBytes(ts_bytes)
     );
