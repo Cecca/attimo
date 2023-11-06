@@ -647,10 +647,18 @@ impl Hasher {
             * (1.0 - collide_low_left_prev * collide_up_right_prev)
     }
 
+    pub fn compute_width(ts: &WindowedTimeseries) -> f64 {
+        let n = ts.num_subsequences();
+        let subsequence_norm = (ts.w as f64).sqrt();
+        let expected_max_dotp = subsequence_norm * (2.0 * (n as f64).ln()).sqrt();
+        expected_max_dotp / 128.0
+    }
+
     /// With this function we estimate the `width` parameter for bucketing the projections in
     /// the LSH function. While the precise value of this parameter is not so important (since
     /// the effects on the collision probability of a misconfiguration can be counterbalanced by
     /// using a larger or smaller `k`), setting a sensible value can help a great deal.
+    #[deprecated]
     pub fn estimate_width(
         ts: &WindowedTimeseries,
         fft_data: &FFTData,
@@ -666,7 +674,6 @@ impl Hasher {
         let expected_max_dotp = subsequence_norm * (2.0 * (n as f64).ln()).sqrt();
         println!("Expected max dotp: {}", expected_max_dotp);
         let mut r = expected_max_dotp / 128.0;
-        return r;
 
         let mut probe_buffers = ColumnBuffers::default();
 

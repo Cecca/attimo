@@ -2,16 +2,11 @@ use crate::{
     distance::zeucl,
     knn::*,
     lsh::{self, ColumnBuffers, HashCollection, Hasher},
-    motifs::Stats,
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
-use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::{collections::HashMap, time::Instant};
-use std::{
-    collections::{BinaryHeap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 
 /// Find the `k` nearest neighbors of the given `from` subsequence, respecting the
 /// given `exclusion_zone`. Returns a pair where the first element is the extent
@@ -130,189 +125,6 @@ pub fn brute_force_motiflets(
     (extent.0, indices)
 }
 
-pub fn probabilistic_motiflets(
-    ts: &WindowedTimeseries,
-    k: usize,
-    exclusion_zone: usize,
-    repetitions: usize,
-    target_failure_probability: f64,
-    seed: u64,
-) -> (f64, Vec<usize>) {
-    const BUFFER_SIZE: usize = 1 << 16;
-    let fft_data = FFTData::new(&ts);
-    let average_distance = ts.average_pairwise_distance(seed, exclusion_zone);
-    println!(
-        "Average subsequence distance is {} (maximum {})",
-        average_distance,
-        ts.maximum_distance()
-    );
-
-    let hasher_width = Hasher::estimate_width(&ts, &fft_data, 1, None, seed);
-
-    let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
-    let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
-    let mut hash_buffers = ColumnBuffers::default();
-    let mut support_buffers = SupportBuffers::new(ts);
-    let mut pairs_buffer = vec![(0u32, 0u32, OrdF64(f64::INFINITY)); BUFFER_SIZE];
-
-    let mut neighborhoods: HashMap<usize, SubsequenceNeighborhood> = HashMap::new();
-
-    let mut brute_forced = 0;
-
-    let mut last_extent = f64::INFINITY;
-    let mut cnt_distances = 0;
-
-    let mut previous_prefix = None;
-    let mut prefix = lsh::K;
-    while prefix > 0 {
-        eprintln!("=== {prefix}");
-        eprintln!(
-            "Computed {} distances so far, {}% of all possible",
-            cnt_distances,
-            100.0 * cnt_distances as f64 / ts.num_subsequence_pairs() as f64
-        );
-        hasher.print_collision_probabilities(average_distance, prefix);
-        for rep in 0..repetitions {
-            pools.group_subsequences(prefix, rep, exclusion_zone, &mut hash_buffers, false);
-            let mut rep_collisions = 0;
-            if let Some(mut enumerator) = hash_buffers.enumerator() {
-                while let Some(cnt) = enumerator.next(&mut pairs_buffer, exclusion_zone) {
-                    // Fixup the distances
-                    pairs_buffer[0..cnt]
-                        // .par_iter_mut()
-                        // .with_min_len(1024)
-                        .iter_mut()
-                        .for_each(|(a, b, dist)| {
-                            let a = *a as usize;
-                            let b = *b as usize;
-                            rep_collisions += 1;
-                            if let Some(first_colliding_repetition) =
-                                pools.first_collision(a, b, prefix)
-                            {
-                                if first_colliding_repetition == rep
-                                    && previous_prefix
-                                        .map(|prefix| pools.first_collision(a, b, prefix).is_none())
-                                        .unwrap_or(true)
-                                {
-                                    cnt_distances += 1;
-                                    *dist = OrdF64(zeucl(ts, a, b));
-                                }
-                            }
-                        });
-
-                    // Update the neighborhoods
-                    for (a, b, dist) in &pairs_buffer[0..cnt] {
-                        assert!(dist.0 > 0.0);
-                        if dist.0.is_finite() {
-                            let a = *a as usize;
-                            let b = *b as usize;
-                            neighborhoods
-                                .entry(a)
-                                .or_insert_with(|| SubsequenceNeighborhood::evolving(k, a))
-                                .update(*dist, b);
-                            neighborhoods
-                                .entry(b)
-                                .or_insert_with(|| SubsequenceNeighborhood::evolving(k, b))
-                                .update(*dist, a);
-                        }
-                    }
-                }
-            } // while there are collisions
-            if rep_collisions == 0 {
-                eprintln!("WARNING: No collisions in repetition {}@{}", rep, prefix);
-            }
-
-            let num_top_extents = 10;
-            let mut top_extents = BinaryHeap::new();
-            for (idx, neighborhood) in neighborhoods.iter_mut() {
-                if neighborhood.is_evolving() {
-                    let ext = neighborhood.extent(k - 1, exclusion_zone);
-                    // we brute force only the extents that can
-                    // overtake the current best motiflet
-                    if ext.0 <= 2.0 * last_extent {
-                        top_extents.push((ext, *idx));
-                    }
-                    if top_extents.len() > num_top_extents {
-                        top_extents.pop();
-                    }
-                }
-            }
-            for (_, idx) in top_extents {
-                brute_forced += 1;
-                neighborhoods.get_mut(&idx).unwrap().brute_force(
-                    ts,
-                    &fft_data,
-                    k,
-                    &mut support_buffers,
-                );
-            }
-
-            // Find the smallest extent so far
-            if let Some((smallest_extent, smallest_extent_idx)) = neighborhoods
-                .iter_mut()
-                .map(|(idx, neighborhood)| (neighborhood.extent(k - 1, exclusion_zone), idx))
-                .min()
-            {
-                if smallest_extent.0.is_finite() {
-                    let fp_smallest_extent =
-                        hasher.failure_probability(smallest_extent.0, rep, prefix, previous_prefix);
-
-                    if smallest_extent.0 < last_extent {
-                        println!(
-                            "[{}@{}] Updated best extent: {} rooted at {}",
-                            rep, prefix, smallest_extent.0, smallest_extent_idx
-                        );
-                        last_extent = smallest_extent.0;
-                    }
-
-                    // Find the failure probabilities
-                    let mut max_fp = fp_smallest_extent.powi((k - 1) as i32);
-                    for neighborhood in neighborhoods.values_mut() {
-                        let fp = neighborhood.failure_probability(
-                            k - 1,
-                            smallest_extent,
-                            fp_smallest_extent,
-                            exclusion_zone,
-                        );
-                        max_fp = max_fp.max(fp);
-                    }
-                    if rep == 0 {
-                        eprintln!(
-                            "smallest_extent {} failure probability {}",
-                            smallest_extent.0, max_fp
-                        );
-                    }
-                    if max_fp < target_failure_probability {
-                        let n_neighborhoods = neighborhoods.len();
-                        // pick the neighborhood with the best extent
-                        let (extent, best_idx, best_neighborhood) = neighborhoods
-                            .iter_mut()
-                            .map(|(idx, ns)| (ns.extent(k - 1, exclusion_zone), idx, ns))
-                            .min_by_key(|tup| tup.0)
-                            .unwrap();
-                        let ids = best_neighborhood.neighbors(k);
-                        eprintln!(
-                            "Returning motiflet {:?} with extent {} rooted at {} with failure probability {} (brute forced {} over {}, computed {} distances)",
-                            ids, extent.0, best_idx, max_fp, brute_forced, n_neighborhoods, cnt_distances
-                        );
-                        return (extent.0, ids);
-                    }
-                }
-            }
-        }
-        previous_prefix.replace(prefix);
-
-        prefix -= 1;
-        eprintln!(
-            "Next prefix is {}, where the failure probability will be {} in the first iteration",
-            prefix,
-            hasher.failure_probability(last_extent, 0, prefix, previous_prefix)
-        );
-    }
-
-    unreachable!()
-}
-
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub struct Motiflet {
     indices: Vec<usize>,
@@ -360,10 +172,6 @@ pub struct MotifletsIterator {
     prefix: usize,
     /// the previous prefix
     previous_prefix: Option<usize>,
-    /// the progress bar
-    pbar: Option<ProgressBar>,
-    /// the execution statistics
-    exec_stats: Stats,
 }
 
 impl MotifletsIterator {
@@ -374,23 +182,17 @@ impl MotifletsIterator {
         delta: f64,
         exclusion_zone: usize,
         seed: u64,
-        show_progress: bool,
+        _show_progress: bool,
     ) -> Self {
         let start = Instant::now();
         let fft_data = FFTData::new(&ts);
 
-        let hasher_width = Hasher::estimate_width(&ts, &fft_data, 1, None, seed);
+        let hasher_width = Hasher::compute_width(&ts);
 
         let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
         let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
         let pools = Arc::new(pools);
         eprintln!("Computed hash values in {:?}", start.elapsed());
-
-        let pbar = if show_progress {
-            Some(Self::build_progress_bar(lsh::K, repetitions))
-        } else {
-            None
-        };
 
         let best_motiflet = vec![(OrdF64(std::f64::INFINITY), 0, false); max_k];
         let pairs_buffer = vec![(0, 0, OrdF64(0.0)); 65536];
@@ -414,24 +216,11 @@ impl MotifletsIterator {
             rep: 0,
             prefix: lsh::K,
             previous_prefix: None,
-            pbar,
-            exec_stats: Stats::default(),
         }
     }
 
     pub fn get_ts(&self) -> Arc<WindowedTimeseries> {
         Arc::clone(&self.ts)
-    }
-
-    fn build_progress_bar(depth: usize, repetitions: usize) -> ProgressBar {
-        let pbar = ProgressBar::new(repetitions as u64);
-        pbar.set_draw_rate(1);
-        pbar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
-        );
-        pbar.set_message(format!("depth {}", depth));
-        pbar
     }
 }
 

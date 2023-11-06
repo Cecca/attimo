@@ -15,7 +15,6 @@ use rayon::prelude::*;
 use slog_scope::info;
 use std::cell::RefCell;
 use std::cmp::Reverse;
-use std::collections::BTreeMap;
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -511,7 +510,7 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
         let exclusion_zone = ts.w;
         let fft_data = FFTData::new(&ts);
 
-        let hasher_width = Hasher::estimate_width(&ts, &fft_data, max_k, None, seed);
+        let hasher_width = Hasher::compute_width(&ts);
         info!("Computed hasher width"; "hasher_width" => hasher_width);
 
         info!("hash computation"; "tag" => "phase");

@@ -1,12 +1,6 @@
-use indicatif::{ProgressBar, ProgressStyle};
-use rayon::prelude::*;
-use std::{cell::RefCell, collections::BTreeMap, ops::Range, sync::Arc, time::Instant};
-use thread_local::ThreadLocal;
-
 use crate::{
     distance::zeucl,
-    lsh::{ColumnBuffers, HashCollection, HashValue, Hasher},
-    timeseries::{overlap_count, FFTData, Overlaps, WindowedTimeseries},
+    timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 
 #[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
