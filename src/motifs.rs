@@ -305,32 +305,6 @@ impl TopK {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
-pub struct Motiflet {
-    indices: Vec<usize>,
-    extent: f64,
-}
-impl Eq for Motiflet {}
-impl Ord for Motiflet {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.extent.partial_cmp(&other.extent).unwrap()
-    }
-}
-impl Motiflet {
-    pub fn new(indices: Vec<usize>, extent: f64) -> Self {
-        Self { indices, extent }
-    }
-    pub fn support(&self) -> usize {
-        self.indices.len()
-    }
-    pub fn extent(&self) -> f64 {
-        self.extent
-    }
-    pub fn indices(&self) -> Vec<usize> {
-        self.indices.clone()
-    }
-}
-
 //// ## Motif finding algorithm
 
 //// At last, this is the algorithm to find the motifs.

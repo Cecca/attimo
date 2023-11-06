@@ -120,6 +120,17 @@ impl EvolvingNeighborhood {
             .unwrap_or(OrdF64(f64::INFINITY));
         ext
     }
+    fn extents(&mut self, exclusion_zone: usize, out: &mut [OrdF64]) {
+        assert_eq!(out.len(), self.max_k + 1);
+        self.clean(exclusion_zone);
+
+        out[0] = OrdF64(0.0);
+        for (i, (d, _, included)) in self.neighbors.iter().filter(|tup| tup.2).enumerate() {
+            if *included {
+                out[i + 1] = OrdF64(d.0 * 2.0);
+            }
+        }
+    }
     /// Counts how many neighbors have a distance _strictly_ larger than the given distance
     fn count_larger_than(&mut self, k: usize, exclusion_zone: usize, d: OrdF64) -> usize {
         self.clean(exclusion_zone);
@@ -203,7 +214,7 @@ impl SubsequenceNeighborhood {
         let mut ids = Vec::new();
         ids.push(subsequence);
         let mut j = 1;
-        while ids.len() < k && j < indices.len() {
+        while ids.len() <= k && j < indices.len() {
             // find the non-overlapping subsequences
             let jj = indices[j];
             let mut overlaps = false;
@@ -219,10 +230,10 @@ impl SubsequenceNeighborhood {
             }
             j += 1;
         }
-        assert_eq!(ids.len(), k);
+        assert_eq!(ids.len(), k + 1);
 
-        let mut extents = vec![OrdF64(0.0); k];
-        for i in 0..k {
+        let mut extents = vec![OrdF64(0.0); k + 1];
+        for i in 0..=k {
             let mut extent = 0.0f64;
             for j in 0..i {
                 let d = zeucl(ts, ids[i], ids[j]);
@@ -230,7 +241,7 @@ impl SubsequenceNeighborhood {
             }
             extents[i] = OrdF64(extent).max(*extents[0..i].iter().max().unwrap_or(&OrdF64(0.0)));
         }
-        assert_eq!(extents.len(), k);
+        assert_eq!(extents.len(), k + 1);
 
         Self::Exact {
             subsequence,
@@ -288,6 +299,19 @@ impl SubsequenceNeighborhood {
         match self {
             Self::Evolving { neighborhood: _ } => true,
             _ => false,
+        }
+    }
+    pub fn extents(&mut self, exclusion_zone: usize, out: &mut [OrdF64]) {
+        match self {
+            Self::Evolving { neighborhood } => {
+                neighborhood.extents(exclusion_zone, out);
+            }
+            Self::Exact {
+                subsequence: _,
+                extents,
+                ids: _,
+            } => out.copy_from_slice(extents),
+            Self::Discarded { subsequence: _ } => unreachable!(),
         }
     }
     pub fn extent(&mut self, k: usize, exclusion_zone: usize) -> OrdF64 {

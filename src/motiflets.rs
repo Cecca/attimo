@@ -2,11 +2,16 @@ use crate::{
     distance::zeucl,
     knn::*,
     lsh::{self, ColumnBuffers, HashCollection, Hasher},
+    motifs::Stats,
     timeseries::{FFTData, WindowedTimeseries},
 };
+use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use std::{collections::BinaryHeap, sync::Arc};
 use std::{collections::HashMap, time::Instant};
+use std::{
+    collections::{BinaryHeap, HashSet},
+    sync::Arc,
+};
 
 /// Find the `k` nearest neighbors of the given `from` subsequence, respecting the
 /// given `exclusion_zone`. Returns a pair where the first element is the extent
@@ -307,6 +312,247 @@ pub fn probabilistic_motiflets(
     unreachable!()
 }
 
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
+pub struct Motiflet {
+    indices: Vec<usize>,
+    extent: f64,
+}
+impl Eq for Motiflet {}
+impl Ord for Motiflet {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.extent.partial_cmp(&other.extent).unwrap()
+    }
+}
+impl Motiflet {
+    pub fn new(indices: Vec<usize>, extent: f64) -> Self {
+        Self { indices, extent }
+    }
+    pub fn support(&self) -> usize {
+        self.indices.len()
+    }
+    pub fn extent(&self) -> f64 {
+        self.extent
+    }
+    pub fn indices(&self) -> Vec<usize> {
+        self.indices.clone()
+    }
+}
+
+pub struct MotifletsIterator {
+    max_k: usize,
+    ts: Arc<WindowedTimeseries>,
+    fft_data: FFTData,
+    best_motiflet: Vec<(OrdF64, usize, bool)>,
+    neighborhoods: HashMap<usize, SubsequenceNeighborhood>,
+    to_return: Vec<Motiflet>,
+    repetitions: usize,
+    delta: f64,
+    exclusion_zone: usize,
+    hasher: Arc<Hasher>,
+    pools: Arc<HashCollection>,
+    buffers: ColumnBuffers,
+    pairs_buffer: Vec<(u32, u32, OrdF64)>,
+    support_buffers: SupportBuffers,
+    /// the current repetition
+    rep: usize,
+    /// the current hash prefix
+    prefix: usize,
+    /// the previous prefix
+    previous_prefix: Option<usize>,
+    /// the progress bar
+    pbar: Option<ProgressBar>,
+    /// the execution statistics
+    exec_stats: Stats,
+}
+
+impl MotifletsIterator {
+    pub fn new(
+        ts: Arc<WindowedTimeseries>,
+        max_k: usize,
+        repetitions: usize,
+        delta: f64,
+        exclusion_zone: usize,
+        seed: u64,
+        show_progress: bool,
+    ) -> Self {
+        let start = Instant::now();
+        let fft_data = FFTData::new(&ts);
+
+        let hasher_width = Hasher::estimate_width(&ts, &fft_data, 1, None, seed);
+
+        let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
+        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
+        let pools = Arc::new(pools);
+        eprintln!("Computed hash values in {:?}", start.elapsed());
+
+        let pbar = if show_progress {
+            Some(Self::build_progress_bar(lsh::K, repetitions))
+        } else {
+            None
+        };
+
+        let best_motiflet = vec![(OrdF64(std::f64::INFINITY), 0, false); max_k + 1];
+        let pairs_buffer = vec![(0, 0, OrdF64(0.0)); 65536];
+        let support_buffers = SupportBuffers::new(&ts);
+
+        Self {
+            ts,
+            fft_data,
+            best_motiflet,
+            neighborhoods: HashMap::new(),
+            max_k,
+            to_return: Vec::new(),
+            repetitions,
+            delta,
+            exclusion_zone,
+            hasher,
+            pools,
+            buffers: ColumnBuffers::default(),
+            pairs_buffer,
+            support_buffers,
+            rep: 0,
+            prefix: lsh::K,
+            previous_prefix: None,
+            pbar,
+            exec_stats: Stats::default(),
+        }
+    }
+
+    fn build_progress_bar(depth: usize, repetitions: usize) -> ProgressBar {
+        let pbar = ProgressBar::new(repetitions as u64);
+        pbar.set_draw_rate(1);
+        pbar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
+        );
+        pbar.set_message(format!("depth {}", depth));
+        pbar
+    }
+}
+
+impl Iterator for MotifletsIterator {
+    type Item = Motiflet;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.to_return.is_empty() {
+            // check the stopping condition: everything is confirmed
+            if self.best_motiflet[2..].iter().all(|tup| tup.2) {
+                return None;
+            }
+
+            let prefix = self.prefix;
+            let previous_prefix = self.previous_prefix;
+            let rep = self.rep;
+            let exclusion_zone = self.exclusion_zone;
+            let max_k = self.max_k;
+            let pools = &self.pools;
+            let ts = &self.ts;
+
+            self.pools
+                .group_subsequences(prefix, rep, exclusion_zone, &mut self.buffers, false);
+            let mut rep_collisions = 0;
+            if let Some(mut enumerator) = self.buffers.enumerator() {
+                while let Some(cnt) =
+                    enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone)
+                {
+                    // Fixup the distances
+                    self.pairs_buffer[0..cnt]
+                        // .par_iter_mut()
+                        // .with_min_len(1024)
+                        .iter_mut()
+                        .for_each(|(a, b, dist)| {
+                            let a = *a as usize;
+                            let b = *b as usize;
+                            rep_collisions += 1;
+                            if let Some(first_colliding_repetition) =
+                                pools.first_collision(a, b, prefix)
+                            {
+                                if first_colliding_repetition == rep
+                                    && previous_prefix
+                                        .map(|prefix| pools.first_collision(a, b, prefix).is_none())
+                                        .unwrap_or(true)
+                                {
+                                    *dist = OrdF64(zeucl(ts, a, b));
+                                }
+                            }
+                        });
+
+                    // Update the neighborhoods
+                    for (a, b, dist) in &self.pairs_buffer[0..cnt] {
+                        assert!(dist.0 > 0.0);
+                        if dist.0.is_finite() {
+                            let a = *a as usize;
+                            let b = *b as usize;
+                            self.neighborhoods
+                                .entry(a)
+                                .or_insert_with(|| SubsequenceNeighborhood::evolving(max_k, a))
+                                .update(*dist, b);
+                            self.neighborhoods
+                                .entry(b)
+                                .or_insert_with(|| SubsequenceNeighborhood::evolving(max_k, b))
+                                .update(*dist, a);
+                        }
+                    }
+                }
+            } // while there are collisions
+
+            // Resolve the most promising candidates
+            let mut exts = vec![OrdF64(0.0); self.max_k + 1];
+            let mut to_brute_force = HashSet::new();
+            for (idx, neighborhood) in self.neighborhoods.iter_mut() {
+                if neighborhood.is_evolving() {
+                    neighborhood.extents(exclusion_zone, &mut exts);
+                    // we brute force only the extents that can
+                    // overtake the current best motiflet for a given k
+                    for k in 2..=self.max_k {
+                        if exts[k].0 <= 2.0 * (self.best_motiflet[k].0).0 {
+                            to_brute_force.insert(*idx);
+                        }
+                    }
+                }
+            }
+            for idx in to_brute_force {
+                let neighborhood = self.neighborhoods.get_mut(&idx).unwrap();
+                neighborhood.brute_force(ts, &self.fft_data, self.max_k, &mut self.support_buffers);
+                neighborhood.extents(exclusion_zone, &mut exts);
+                for k in 2..=self.max_k {
+                    if !self.best_motiflet[k].2 && exts[k] <= self.best_motiflet[k].0 {
+                        self.best_motiflet[k] = (exts[k], idx, false);
+                    }
+                }
+            }
+
+            // And now try to emit the motiflets confirmed in this iteration, if any
+            for k in 2..=self.max_k {
+                let (extent, root_idx, emitted) = self.best_motiflet[k];
+                if !emitted {
+                    let fp = self
+                        .hasher
+                        .failure_probability(extent.0, rep, prefix, previous_prefix)
+                        .powi(k as i32);
+                    if fp < self.delta {
+                        let neighborhood = self.neighborhoods.get_mut(&root_idx).unwrap();
+                        self.best_motiflet[k].2 = true;
+                        let indices = neighborhood.neighbors(k);
+                        let m = Motiflet::new(indices, extent.0);
+                        self.to_return.push(m);
+                    }
+                }
+            }
+
+            // Advance
+            self.rep += 1;
+            if self.rep >= self.repetitions {
+                self.rep = 0;
+                self.previous_prefix.replace(self.prefix);
+                self.prefix -= 1;
+            }
+        }
+
+        self.to_return.pop()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -322,6 +568,19 @@ mod test {
     ) {
         let failure_probability = 0.01;
         let exclusion_zone = ts.w;
+
+        let iter = MotifletsIterator::new(
+            Arc::clone(&ts),
+            k,
+            repetitions,
+            failure_probability,
+            exclusion_zone,
+            seed,
+            false,
+        );
+        let result: Vec<Motiflet> = iter.collect();
+        dbg!(result);
+
         let (ground_extent, mut ground_indices): (f64, Vec<usize>) =
             ground_truth.unwrap_or_else(|| {
                 eprintln!(
