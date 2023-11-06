@@ -3,7 +3,7 @@ use crate::{
     knn::*,
     lsh::{self, ColumnBuffers, HashCollection, Hasher},
     motifs::Stats,
-    timeseries::{FFTData, WindowedTimeseries},
+    timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -62,7 +62,8 @@ fn k_nearest_neighbors_bf(
         let mut overlaps = false;
         for h in 0..ret.len() {
             let hh = ret[h];
-            if jj.max(hh) - jj.min(hh) < exclusion_zone {
+            if jj.overlaps(hh, exclusion_zone) {
+                // if jj.max(hh) - jj.min(hh) < exclusion_zone {
                 overlaps = true;
                 break;
             }
@@ -584,8 +585,11 @@ mod test {
         );
         let result: Vec<Motiflet> = iter.collect();
         dbg!(&result);
-        let motiflet = result[result.len() - 1].clone();
-        dbg!(motiflet.extent());
+        let motiflet = result
+            .into_iter()
+            .filter(|m| m.support() == k)
+            .next()
+            .unwrap();
         let mut motiflet_indices = motiflet.indices();
         motiflet_indices.sort();
 
@@ -600,15 +604,6 @@ mod test {
         eprintln!("Ground distance of {} motiflet: {}", k, ground_extent);
         eprintln!("Motiflet is {:?}", ground_indices);
         ground_indices.sort();
-        // let (_motiflet_extent, mut motiflet_indices) = probabilistic_motiflets(
-        //     &ts,
-        //     k,
-        //     exclusion_zone,
-        //     repetitions,
-        //     failure_probability,
-        //     seed,
-        // );
-        // motiflet_indices.sort();
         assert_eq!(motiflet_indices, ground_indices);
     }
 
