@@ -391,7 +391,7 @@ impl MotifletsIterator {
             None
         };
 
-        let best_motiflet = vec![(OrdF64(std::f64::INFINITY), 0, false); max_k + 1];
+        let best_motiflet = vec![(OrdF64(std::f64::INFINITY), 0, false); max_k];
         let pairs_buffer = vec![(0, 0, OrdF64(0.0)); 65536];
         let support_buffers = SupportBuffers::new(&ts);
 
@@ -497,14 +497,14 @@ impl Iterator for MotifletsIterator {
             } // while there are collisions
 
             // Resolve the most promising candidates
-            let mut exts = vec![OrdF64(0.0); self.max_k + 1];
+            let mut exts = vec![OrdF64(0.0); self.max_k];
             let mut to_brute_force = HashSet::new();
             for (idx, neighborhood) in self.neighborhoods.iter_mut() {
                 if neighborhood.is_evolving() {
                     neighborhood.extents(exclusion_zone, &mut exts);
                     // we brute force only the extents that can
                     // overtake the current best motiflet for a given k
-                    for k in 2..=self.max_k {
+                    for k in 1..self.max_k {
                         if exts[k].0 <= 2.0 * (self.best_motiflet[k].0).0 {
                             to_brute_force.insert(*idx);
                         }
@@ -515,7 +515,7 @@ impl Iterator for MotifletsIterator {
                 let neighborhood = self.neighborhoods.get_mut(&idx).unwrap();
                 neighborhood.brute_force(ts, &self.fft_data, self.max_k, &mut self.support_buffers);
                 neighborhood.extents(exclusion_zone, &mut exts);
-                for k in 2..=self.max_k {
+                for k in 1..self.max_k {
                     if !self.best_motiflet[k].2 && exts[k] <= self.best_motiflet[k].0 {
                         self.best_motiflet[k] = (exts[k], idx, false);
                     }
@@ -523,7 +523,7 @@ impl Iterator for MotifletsIterator {
             }
 
             // And now try to emit the motiflets confirmed in this iteration, if any
-            for k in 2..=self.max_k {
+            for k in 1..self.max_k {
                 let (extent, root_idx, emitted) = self.best_motiflet[k];
                 if !emitted {
                     let fp = self
@@ -531,6 +531,10 @@ impl Iterator for MotifletsIterator {
                         .failure_probability(extent.0, rep, prefix, previous_prefix)
                         .powi(k as i32);
                     if fp < self.delta {
+                        eprintln!(
+                            "[{}@{}] Failure probability for k={} is {} (extent {})",
+                            rep, prefix, k, fp, extent.0
+                        );
                         let neighborhood = self.neighborhoods.get_mut(&root_idx).unwrap();
                         self.best_motiflet[k].2 = true;
                         let indices = neighborhood.neighbors(k);
@@ -579,7 +583,11 @@ mod test {
             false,
         );
         let result: Vec<Motiflet> = iter.collect();
-        dbg!(result);
+        dbg!(&result);
+        let motiflet = result[result.len() - 1].clone();
+        dbg!(motiflet.extent());
+        let mut motiflet_indices = motiflet.indices();
+        motiflet_indices.sort();
 
         let (ground_extent, mut ground_indices): (f64, Vec<usize>) =
             ground_truth.unwrap_or_else(|| {
@@ -592,15 +600,15 @@ mod test {
         eprintln!("Ground distance of {} motiflet: {}", k, ground_extent);
         eprintln!("Motiflet is {:?}", ground_indices);
         ground_indices.sort();
-        let (_motiflet_extent, mut motiflet_indices) = probabilistic_motiflets(
-            &ts,
-            k,
-            exclusion_zone,
-            repetitions,
-            failure_probability,
-            seed,
-        );
-        motiflet_indices.sort();
+        // let (_motiflet_extent, mut motiflet_indices) = probabilistic_motiflets(
+        //     &ts,
+        //     k,
+        //     exclusion_zone,
+        //     repetitions,
+        //     failure_probability,
+        //     seed,
+        // );
+        // motiflet_indices.sort();
         assert_eq!(motiflet_indices, ground_indices);
     }
 

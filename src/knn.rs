@@ -116,12 +116,15 @@ impl EvolvingNeighborhood {
                     None
                 }
             })
+            // offset by one because we are not
+            // storing the subsequence itself in the
+            // neighbors array
             .nth(k - 1)
             .unwrap_or(OrdF64(f64::INFINITY));
         ext
     }
     fn extents(&mut self, exclusion_zone: usize, out: &mut [OrdF64]) {
-        assert_eq!(out.len(), self.max_k + 1);
+        assert_eq!(out.len(), self.max_k);
         self.clean(exclusion_zone);
 
         out[0] = OrdF64(0.0);
@@ -232,8 +235,8 @@ impl SubsequenceNeighborhood {
         }
         assert_eq!(ids.len(), k + 1);
 
-        let mut extents = vec![OrdF64(0.0); k + 1];
-        for i in 0..=k {
+        let mut extents = vec![OrdF64(0.0); k];
+        for i in 0..k {
             let mut extent = 0.0f64;
             for j in 0..i {
                 let d = zeucl(ts, ids[i], ids[j]);
@@ -241,7 +244,7 @@ impl SubsequenceNeighborhood {
             }
             extents[i] = OrdF64(extent).max(*extents[0..i].iter().max().unwrap_or(&OrdF64(0.0)));
         }
-        assert_eq!(extents.len(), k + 1);
+        assert_eq!(extents.len(), k);
 
         Self::Exact {
             subsequence,
@@ -331,7 +334,7 @@ impl SubsequenceNeighborhood {
                 subsequence: _,
                 extents: _,
                 ids,
-            } => ids[..k].to_vec(),
+            } => ids[..=k].to_vec(),
             _ => panic!(),
         }
     }
