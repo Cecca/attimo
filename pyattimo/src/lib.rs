@@ -41,7 +41,7 @@ pub struct KMotiflet {
 }
 
 impl KMotiflet {
-    fn with_context(m: attimo::motifs::Motiflet, ts: Arc<WindowedTimeseries>) -> Self {
+    fn with_context(m: attimo::motiflets::Motiflet, ts: Arc<WindowedTimeseries>) -> Self {
         Self {
             support: m.support(),
             indices: m.indices(),
@@ -240,22 +240,51 @@ impl MotifsIterator {
     }
 }
 
-#[pyfunction]
-#[pyo3(signature=(ts, w, support=3, repetitions=256, delta = 0.05, exclusion_zone=None, seed = 1234))]
-pub fn motiflet(
-    ts: Vec<f64>,
-    w: usize,
-    support: usize,
-    repetitions: usize,
-    delta: f64,
-    exclusion_zone: Option<usize>,
-    seed: u64,
-) -> KMotiflet {
-    let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
-    let exclusion_zone = exclusion_zone.unwrap_or(w / 2);
-    let (extent, indices) =
-        probabilistic_motiflets(&ts, support, exclusion_zone, repetitions, delta, seed);
-    return KMotiflet::new(extent, indices, support, Arc::clone(&ts));
+#[pyclass]
+struct MotifletsIterator {
+    inner: attimo::motiflets::MotifletsIterator,
+}
+
+#[pymethods]
+impl MotifletsIterator {
+    #[new]
+    #[pyo3(signature=(ts, w, max_k = 100, exclusion_zone=None, repetitions=1000, delta = 0.05, seed = 1234))]
+    fn new(
+        ts: Vec<f64>,
+        w: usize,
+        max_k: usize,
+        exclusion_zone: Option<usize>,
+        repetitions: usize,
+        delta: f64,
+        seed: u64,
+    ) -> Self {
+        let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
+        let exclusion_zone = exclusion_zone.unwrap_or(w);
+        let inner = attimo::motiflets::MotifletsIterator::new(
+            ts,
+            max_k,
+            repetitions,
+            delta,
+            exclusion_zone,
+            seed,
+            false,
+        );
+        Self { inner }
+    }
+
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<KMotiflet> {
+        slf.inner
+            .next()
+            .map(|m| KMotiflet::new(m.extent(), m.indices(), m.support(), slf.inner.get_ts()))
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.max_k
+    }
 }
 
 #[pyfunction]
@@ -280,8 +309,8 @@ pub fn motiflet_brute_force(
 
 #[pymodule]
 fn pyattimo(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(motiflet, m)?)?;
     m.add_function(wrap_pyfunction!(motiflet_brute_force, m)?)?;
     m.add_class::<MotifsIterator>()?;
+    m.add_class::<MotifletsIterator>()?;
     Ok(())
 }

@@ -2,7 +2,9 @@ use anyhow::Result;
 use argh::FromArgs;
 use attimo::allocator::{self, allocated, CountingAllocator};
 use attimo::load::*;
-use attimo::motiflets::{brute_force_motiflets, probabilistic_motiflets, Motiflet};
+use attimo::motiflets::{
+    brute_force_motiflets, probabilistic_motiflets, Motiflet, MotifletsIterator,
+};
 use attimo::motifs::{motifs, Motif};
 use attimo::timeseries::*;
 use slog::*;
@@ -136,15 +138,26 @@ fn main() -> Result<()> {
             let (extent, indices) = brute_force_motiflets(&ts, support, ts.w);
             vec![Motiflet::new(indices, extent)]
         } else {
-            let (extent, indices) = probabilistic_motiflets(
-                &ts,
+            let exclusion_zone = ts.w;
+            // let (extent, indices) = probabilistic_motiflets(
+            //     &ts,
+            //     support,
+            //     ts.w,
+            //     config.repetitions,
+            //     config.failure_probability,
+            //     config.seed,
+            // );
+            // vec![Motiflet::new(indices, extent)]
+            MotifletsIterator::new(
+                Arc::new(ts),
                 support,
-                ts.w,
                 config.repetitions,
                 config.failure_probability,
+                exclusion_zone,
                 config.seed,
-            );
-            vec![Motiflet::new(indices, extent)]
+                false,
+            )
+            .collect()
         };
         eprintln!("Result: {:?}", motiflets);
     } else {

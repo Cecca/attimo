@@ -340,7 +340,7 @@ impl Motiflet {
 }
 
 pub struct MotifletsIterator {
-    max_k: usize,
+    pub max_k: usize,
     ts: Arc<WindowedTimeseries>,
     fft_data: FFTData,
     best_motiflet: Vec<(OrdF64, usize, bool)>,
@@ -419,6 +419,10 @@ impl MotifletsIterator {
         }
     }
 
+    pub fn get_ts(&self) -> Arc<WindowedTimeseries> {
+        Arc::clone(&self.ts)
+    }
+
     fn build_progress_bar(depth: usize, repetitions: usize) -> ProgressBar {
         let pbar = ProgressBar::new(repetitions as u64);
         pbar.set_draw_rate(1);
@@ -436,11 +440,13 @@ impl Iterator for MotifletsIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.to_return.is_empty() {
+            eprintln!("[{}@{}]", self.rep, self.prefix);
             // check the stopping condition: everything is confirmed
             if self.best_motiflet[2..].iter().all(|tup| tup.2) {
                 return None;
             }
 
+            let n = self.ts.num_subsequences();
             let prefix = self.prefix;
             let previous_prefix = self.previous_prefix;
             let rep = self.rep;
@@ -449,13 +455,19 @@ impl Iterator for MotifletsIterator {
             let pools = &self.pools;
             let ts = &self.ts;
 
-            self.pools
-                .group_subsequences(prefix, rep, exclusion_zone, &mut self.buffers, false);
+            self.pools.group_subsequences(
+                prefix,
+                rep,
+                exclusion_zone,
+                &mut self.buffers,
+                n > 100000,
+            );
             let mut rep_collisions = 0;
             if let Some(mut enumerator) = self.buffers.enumerator() {
                 while let Some(cnt) =
                     enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone)
                 {
+                    eprintln!("Rep collisions {}", rep_collisions);
                     // Fixup the distances
                     self.pairs_buffer[0..cnt]
                         // .par_iter_mut()
@@ -478,6 +490,7 @@ impl Iterator for MotifletsIterator {
                             }
                         });
 
+                    eprintln!("Updating {} neighborhoods", cnt);
                     // Update the neighborhoods
                     for (a, b, dist) in &self.pairs_buffer[0..cnt] {
                         assert!(dist.0 > 0.0);
@@ -494,10 +507,15 @@ impl Iterator for MotifletsIterator {
                                 .update(*dist, a);
                         }
                     }
+                    eprintln!("Done");
                 }
             } // while there are collisions
 
             // Resolve the most promising candidates
+            // FIXME: here we have to limit the number of subsequences that are brute forced in the
+            // first iteration, most likely by picking the most promising one, brute forcing it,
+            // and then continuing only if the next ones can better the current one for some of the
+            // k values.
             let mut exts = vec![OrdF64(0.0); self.max_k];
             let mut to_brute_force = HashSet::new();
             for (idx, neighborhood) in self.neighborhoods.iter_mut() {
@@ -512,6 +530,7 @@ impl Iterator for MotifletsIterator {
                     }
                 }
             }
+            eprintln!("Resolving {} top candidates", to_brute_force.len());
             for idx in to_brute_force {
                 let neighborhood = self.neighborhoods.get_mut(&idx).unwrap();
                 neighborhood.brute_force(ts, &self.fft_data, self.max_k, &mut self.support_buffers);
