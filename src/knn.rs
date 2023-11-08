@@ -121,10 +121,11 @@ impl EvolvingNeighborhood {
         assert_eq!(out.len(), self.max_k);
         self.clean(exclusion_zone);
 
+        out.fill(OrdF64(std::f64::INFINITY));
         out[0] = OrdF64(0.0);
         for (i, (d, _, included)) in self.neighbors.iter().filter(|tup| tup.2).enumerate() {
             if *included && i < self.max_k - 1 {
-                out[i + 1] = OrdF64(d.0 * 2.0);
+                out[i + 1] = *d;
             }
         }
     }

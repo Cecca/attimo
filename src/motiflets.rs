@@ -304,31 +304,43 @@ impl MotifletsIterator {
                 // we brute force only the extents that can
                 // overtake the current best motiflet for a given k
                 for k in 1..self.max_k {
-                    if exts[k].0 <= 2.0 * (self.best_motiflet[k].0).0 {
+                    if exts[k] <= self.best_motiflet[k].0 {
                         to_brute_force[k].push((Reverse(exts[k]), *idx));
                     }
                 }
             }
         }
-        // let num_to_brute_force = to_brute_force
-        //     .iter()
-        //     .map(|queue| queue.len())
-        //     .sum::<usize>();
-        // if num_to_brute_force > 0 {
-        //     eprintln!("Potential neighborhoods to resolve {}", num_to_brute_force);
-        // }
-        // let mut cnt_brute_forced = 0;
+        let num_to_brute_force = to_brute_force
+            .iter()
+            .map(|queue| queue.len())
+            .sum::<usize>();
+        if num_to_brute_force > 0 {
+            eprintln!(
+                "[{}@{}] Potential neighborhoods to resolve {}",
+                self.rep, self.prefix, num_to_brute_force
+            );
+        }
+        let mut cnt_brute_forced = 0;
         for k in 1..self.max_k {
             if !self.best_motiflet[k].2 {
-                while let Some((Reverse(extent_upper_bound), idx)) = to_brute_force[k].pop() {
-                    if extent_upper_bound.0 > 2.0 * (self.best_motiflet[k].0).0 {
+                while let Some((Reverse(extent_lower_bound), idx)) = to_brute_force[k].pop() {
+                    if extent_lower_bound.0 > (self.best_motiflet[k].0).0 {
                         // Don't consider candidate neighborhoods that cannot improve the
                         // current best motiflet at k
                         break;
                     }
                     let neighborhood = self.neighborhoods.get_mut(&idx).unwrap();
                     if neighborhood.is_evolving() {
-                        // cnt_brute_forced += 1;
+                        cnt_brute_forced += 1;
+                        eprintln!(
+                            "[{}@{}] Brute forcing {} (lower bound@{} = {} <= {})",
+                            self.rep,
+                            self.prefix,
+                            idx,
+                            k,
+                            extent_lower_bound.0,
+                            (self.best_motiflet[k].0).0
+                        );
                         neighborhood.brute_force(
                             ts,
                             &self.fft_data,
@@ -337,15 +349,18 @@ impl MotifletsIterator {
                         );
                     }
                     neighborhood.extents(exclusion_zone, &mut exts);
-                    if exts[k] <= self.best_motiflet[k].0 {
-                        self.best_motiflet[k] = (exts[k], idx, false);
+                    // tentatively update all extents
+                    for k in 1..self.max_k {
+                        if !self.best_motiflet[k].2 && exts[k] <= self.best_motiflet[k].0 {
+                            self.best_motiflet[k] = (exts[k], idx, false);
+                        }
                     }
                 }
             }
         }
-        // if cnt_brute_forced > 0 {
-        //     eprintln!("Brute forced: {}", cnt_brute_forced);
-        // }
+        if cnt_brute_forced > 0 {
+            eprintln!("Brute forced: {}", cnt_brute_forced);
+        }
     }
 
     /// adds to `self.to_return` the motiflets that can
