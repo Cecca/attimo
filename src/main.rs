@@ -146,6 +146,10 @@ fn main() -> Result<()> {
                 config.seed,
                 false,
             )
+            .map(|m| {
+                eprintln!("discovered {:?}", m);
+                m
+            })
             .collect()
         };
         eprintln!("Result: {:?}", motiflets);

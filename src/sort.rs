@@ -233,14 +233,11 @@ fn test_radix_sort_u8() {
 
 macro_rules! getbyte {
     ($x: expr, $b: literal) => {
-        (($x >> 8*$b) & 0xff) as usize
+        (($x >> 8 * $b) & 0xff) as usize
     };
 }
 
-pub fn sort_hash_pairs(
-    data: &mut [(HashValue, u32)],
-    scratch: &mut [(HashValue, u32)]
-) {
+pub fn sort_hash_pairs(data: &mut [(HashValue, u32)], scratch: &mut [(HashValue, u32)]) {
     assert!(data.len() == scratch.len());
 
     // build histograms in a first pass over the data
@@ -266,7 +263,7 @@ pub fn sort_hash_pairs(
         let mut tmp = sum0 + b0[i];
         b0[i] = sum0;
         sum0 = tmp;
-        
+
         tmp = sum1 + b1[i];
         b1[i] = sum1;
         sum1 = tmp;
@@ -315,7 +312,12 @@ fn test_radix_sort_hash_pairs() {
 
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(12435);
     let unif = Uniform::new_inclusive(u32::MIN, u32::MAX);
-    let v: Vec<(HashValue, u32)> = unif.sample_iter(&mut rng).take(100000).enumerate().map(|(i, h)| (HashValue(h), i as u32)).collect();
+    let v: Vec<(HashValue, u32)> = unif
+        .sample_iter(&mut rng)
+        .take(100000)
+        .enumerate()
+        .map(|(i, h)| (HashValue(h), i as u32))
+        .collect();
     let mut expected = v.clone();
     let mut actual = v.clone();
     let mut scratch: Vec<(HashValue, u32)> = Vec::new();
@@ -329,4 +331,3 @@ fn test_radix_sort_hash_pairs() {
         expected, actual
     );
 }
-

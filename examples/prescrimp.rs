@@ -128,7 +128,8 @@ fn pre_scrimp(
             if i + k >= ns || j + k >= ns {
                 break;
             }
-            q = q - ts.data[i + k - 1] * ts.data[j + k - 1] + ts.data[i + k + w - 1] * ts.data[j + k + w - 1];
+            q = q - ts.data[i + k - 1] * ts.data[j + k - 1]
+                + ts.data[i + k + w - 1] * ts.data[j + k + w - 1];
             debug_assert!(
                 relative_error(q, dot(ts.subsequence(i + k), ts.subsequence(j + k))) <= 0.00001,
                 "sliding dot product: actual {} expectd {}",
@@ -144,9 +145,10 @@ fn pre_scrimp(
                 ts.sd(j + k),
             );
             debug_assert!(
-                relative_error(d, zeucl(ts, i+k, j+k)) <= 0.00001,
+                relative_error(d, zeucl(ts, i + k, j + k)) <= 0.00001,
                 "dotp_to_zeucl: actual {} expected {}",
-                d, zeucl(ts, i+k, j+k)
+                d,
+                zeucl(ts, i + k, j + k)
             );
             if d < mp.dists[i + k] {
                 mp.dists[i + k] = d;
@@ -179,9 +181,10 @@ fn pre_scrimp(
                 ts.sd(j - k),
             );
             debug_assert!(
-                relative_error(d, zeucl(ts, i-k, j-k)) <= 0.00001,
+                relative_error(d, zeucl(ts, i - k, j - k)) <= 0.00001,
                 "dotp_to_zeucl: actual {} expected {}",
-                d, zeucl(ts, i-k, j-k)
+                d,
+                zeucl(ts, i - k, j - k)
             );
             if d < mp.dists[i - k] {
                 mp.dists[i - k] = d;
