@@ -28,8 +28,6 @@
 
 use crate::knn::OrdF64;
 use crate::motifs::Motif;
-
-// TODO Remove this dependency
 use crate::sort::*;
 use crate::timeseries::{FFTData, Overlaps, WindowedTimeseries};
 use rand::prelude::*;
@@ -50,11 +48,21 @@ pub struct HashValue(pub u32);
 
 impl GetByte for HashValue {
     fn num_bytes(&self) -> usize {
-        8
+        4
     }
     #[inline(always)]
     fn get_byte(&self, i: usize) -> u8 {
         (self.0 >> (8 * (std::mem::size_of::<u32>() - i - 1)) & 0xFF) as u8
+    }
+}
+
+impl GetByte for (HashValue, u32) {
+    fn num_bytes(&self) -> usize {
+        4
+    }
+    #[inline(always)]
+    fn get_byte(&self, i: usize) -> u8 {
+        self.0.get_byte(i)
     }
 }
 
@@ -497,7 +505,9 @@ impl HashCollection {
         if parallel {
             buffer.par_sort_unstable();
         } else {
-            buffer.sort_unstable();
+            // buffer.sort_unstable();
+            let mut scratch = vec![Default::default(); buffer.len()];
+            sort_hash_pairs(buffer, &mut scratch);
         }
         let elapsed_sort = start.elapsed();
         debug_assert!(buffer.is_sorted_by_key(|pair| pair.0.clone()));
