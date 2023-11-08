@@ -198,14 +198,14 @@ impl SubsequenceNeighborhood {
         }
         // Find the likely candidates by a (partial) indirect sort of
         // the indices by increasing distance.
-        // let n_candidates = (k * exclusion_zone).min(ts.num_subsequences());
-        // indices.select_nth_unstable_by_key(n_candidates, |j| OrdF64(distances[*j]));
+        let n_candidates = (k * exclusion_zone).min(ts.num_subsequences());
+        indices.select_nth_unstable_by_key(n_candidates, |j| OrdF64(distances[*j]));
 
         // Sort the candidate indices by increasing distance (the previous step)
         // only partitioned the indices in two groups with the guarantee that the first
         // `n_candidates` indices are the ones at shortest distance from the `from` point,
         // but they are not guaranteed to be sorted
-        // let indices = &mut indices[..n_candidates];
+        let indices = &mut indices[..n_candidates];
         indices.sort_unstable_by_key(|j| OrdF64(distances[*j]));
 
         // Pick the k-neighborhood skipping overlapping subsequences

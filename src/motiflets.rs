@@ -247,7 +247,7 @@ impl MotifletsIterator {
         let ts = &self.ts;
 
         self.pools
-            .group_subsequences(prefix, rep, exclusion_zone, &mut self.buffers, n > 100000);
+            .group_subsequences(prefix, rep, exclusion_zone, &mut self.buffers, false);
         if let Some(mut enumerator) = self.buffers.enumerator() {
             while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone)
             {
