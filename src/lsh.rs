@@ -50,7 +50,7 @@ pub struct HashValue(pub u32);
 
 impl GetByte for HashValue {
     fn num_bytes(&self) -> usize {
-        4
+        8
     }
     #[inline(always)]
     fn get_byte(&self, i: usize) -> u8 {
@@ -389,6 +389,14 @@ impl HashCollection {
             hv[2 * h + 1] = r[h];
         }
         HashValue(xxhash_rust::xxh32::xxh32(&hv[..prefix], 1234))
+        // let mut bytes: [u8; 8] = [0; 8];
+        // let (l, r) = self.half_hashes(i, repetition);
+        // for h in 0..usize::div_ceil(prefix, 2) {
+        //     bytes[2 * h] = l[h];
+        //     bytes[2 * h + 1] = r[h];
+        // }
+
+        // HashValue(u64::from_be_bytes(bytes))
     }
 
     #[cfg(test)]

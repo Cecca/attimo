@@ -198,7 +198,7 @@ impl SubsequenceNeighborhood {
         }
         // Find the likely candidates by a (partial) indirect sort of
         // the indices by increasing distance.
-        let n_candidates = (k * exclusion_zone).min(ts.num_subsequences());
+        let n_candidates = (2 * k * exclusion_zone).min(ts.num_subsequences());
         indices.select_nth_unstable_by_key(n_candidates, |j| OrdF64(distances[*j]));
 
         // Sort the candidate indices by increasing distance (the previous step)
