@@ -5,7 +5,7 @@ use crate::{
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 use rayon::prelude::*;
-use std::{collections::BinaryHeap, collections::HashMap, sync::Arc, time::Instant};
+use std::{cmp::Reverse, collections::BinaryHeap, collections::HashMap, sync::Arc, time::Instant};
 
 /// Find the `k` nearest neighbors of the given `from` subsequence, respecting the
 /// given `exclusion_zone`. Returns a pair where the first element is the extent
@@ -305,22 +305,22 @@ impl MotifletsIterator {
                 // overtake the current best motiflet for a given k
                 for k in 1..self.max_k {
                     if exts[k].0 <= 2.0 * (self.best_motiflet[k].0).0 {
-                        to_brute_force[k].push((exts[k], *idx));
+                        to_brute_force[k].push((Reverse(exts[k]), *idx));
                     }
                 }
             }
         }
-        let num_to_brute_force = to_brute_force
-            .iter()
-            .map(|queue| queue.len())
-            .sum::<usize>();
-        if num_to_brute_force > 0 {
-            eprintln!("Potential neighborhoods to resolve {}", num_to_brute_force);
-        }
-        let mut cnt_brute_forced = 0;
+        // let num_to_brute_force = to_brute_force
+        //     .iter()
+        //     .map(|queue| queue.len())
+        //     .sum::<usize>();
+        // if num_to_brute_force > 0 {
+        //     eprintln!("Potential neighborhoods to resolve {}", num_to_brute_force);
+        // }
+        // let mut cnt_brute_forced = 0;
         for k in 1..self.max_k {
             if !self.best_motiflet[k].2 {
-                while let Some((extent_upper_bound, idx)) = to_brute_force[k].pop() {
+                while let Some((Reverse(extent_upper_bound), idx)) = to_brute_force[k].pop() {
                     if extent_upper_bound.0 > 2.0 * (self.best_motiflet[k].0).0 {
                         // Don't consider candidate neighborhoods that cannot improve the
                         // current best motiflet at k
@@ -328,7 +328,7 @@ impl MotifletsIterator {
                     }
                     let neighborhood = self.neighborhoods.get_mut(&idx).unwrap();
                     if neighborhood.is_evolving() {
-                        cnt_brute_forced += 1;
+                        // cnt_brute_forced += 1;
                         neighborhood.brute_force(
                             ts,
                             &self.fft_data,
@@ -343,9 +343,9 @@ impl MotifletsIterator {
                 }
             }
         }
-        if cnt_brute_forced > 0 {
-            eprintln!("Brute forced: {}", cnt_brute_forced);
-        }
+        // if cnt_brute_forced > 0 {
+        //     eprintln!("Brute forced: {}", cnt_brute_forced);
+        // }
     }
 
     /// adds to `self.to_return` the motiflets that can
@@ -359,12 +359,12 @@ impl MotifletsIterator {
             if !emitted {
                 let fp = self
                     .hasher
-                    .failure_probability(extent.0, rep, prefix, previous_prefix)
-                    .powi(k as i32);
+                    .failure_probability(extent.0, rep, prefix, previous_prefix);
+                // .powi(k as i32);
                 if fp < self.delta {
                     eprintln!(
-                        "[{}@{}] Failure probability for k={} is {} (extent {})",
-                        rep, prefix, k, fp, extent.0
+                        "[{}@{}] Failure probability for k={} is {} (extent {}, threshold {})",
+                        rep, prefix, k, fp, extent.0, self.delta
                     );
                     let neighborhood = self.neighborhoods.get_mut(&root_idx).unwrap();
                     self.best_motiflet[k].2 = true;
@@ -382,9 +382,8 @@ impl Iterator for MotifletsIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.to_return.is_empty() {
-            // eprintln!("[{}@{}]", self.rep, self.prefix);
             // check the stopping condition: everything is confirmed
-            if self.best_motiflet[2..].iter().all(|tup| tup.2) {
+            if self.best_motiflet[1..].iter().all(|tup| tup.2) {
                 return None;
             }
 
@@ -411,14 +410,8 @@ mod test {
     use crate::load::loadts;
     use std::sync::Arc;
 
-    fn run_motiflet_test(
-        ts: Arc<WindowedTimeseries>,
-        k: usize,
-        repetitions: usize,
-        seed: u64,
-        ground_truth: Option<(f64, Vec<usize>)>,
-    ) {
-        let failure_probability = 0.01;
+    fn run_motiflet_test(ts: Arc<WindowedTimeseries>, k: usize, repetitions: usize, seed: u64) {
+        let failure_probability = 0.01; // / (k as f64);
         let exclusion_zone = ts.w;
 
         let iter = MotifletsIterator::new(
@@ -430,48 +423,51 @@ mod test {
             seed,
             false,
         );
-        let result: Vec<Motiflet> = iter.collect();
-        dbg!(&result);
-        let motiflet = result
-            .into_iter()
-            .filter(|m| m.support() == k)
-            .next()
-            .unwrap();
-        let mut motiflet_indices = motiflet.indices();
-        motiflet_indices.sort();
+        // let result: Vec<Motiflet> = iter.collect();
+        let motiflets: HashMap<usize, Motiflet> = iter.map(|m| (m.support(), m)).collect();
+        dbg!(&motiflets);
 
-        let (ground_extent, mut ground_indices): (f64, Vec<usize>) =
-            ground_truth.unwrap_or_else(|| {
-                eprintln!(
-                    "Running brute force algorithm on {} subsequences",
-                    ts.num_subsequences()
-                );
-                brute_force_motiflets(&ts, k, exclusion_zone)
-            });
-        eprintln!("Ground distance of {} motiflet: {}", k, ground_extent);
-        eprintln!("Motiflet is {:?}", ground_indices);
-        ground_indices.sort();
-        assert_eq!(motiflet_indices, ground_indices);
+        for k in 2..=k {
+            dbg!(k);
+            let motiflet = &motiflets[&k];
+            let mut motiflet_indices = motiflet.indices();
+            eprintln!("Extent of discovered motiflet {}", motiflet.extent());
+            motiflet_indices.sort();
+
+            let (ground_extent, mut ground_indices): (f64, Vec<usize>) =
+                brute_force_motiflets(&ts, k, exclusion_zone);
+            eprintln!("Ground distance of {} motiflet: {}", k, ground_extent);
+            eprintln!("Motiflet is {:?}", ground_indices);
+            ground_indices.sort();
+            assert_eq!(motiflet_indices, ground_indices);
+        }
+    }
+
+    #[test]
+    fn test_ecg_motiflet_k2() {
+        let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(20000)).unwrap();
+        let ts = Arc::new(WindowedTimeseries::new(ts, 50, false));
+        run_motiflet_test(ts, 2, 8192, 123456);
     }
 
     #[test]
     fn test_ecg_motiflet_k5() {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
-        run_motiflet_test(ts, 5, 8192, 123456, None);
+        run_motiflet_test(ts, 5, 8192, 123456);
     }
 
     #[test]
     fn test_ecg_motiflet_k8() {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
-        run_motiflet_test(ts, 8, 8192, 123456, None);
+        run_motiflet_test(ts, 8, 8192, 123456);
     }
 
     #[test]
     fn test_ecg_motiflet_k10() {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(20000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 50, false));
-        run_motiflet_test(ts, 10, 8192, 123456, None);
+        run_motiflet_test(ts, 10, 8192, 123456);
     }
 }

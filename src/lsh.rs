@@ -600,6 +600,21 @@ impl Hasher {
                 * (1.0 - (-r * r / (2.0 * d * d)).exp())
     }
 
+    pub fn failure_probability_independent(
+        &self,
+        zeucl_dist: f64,
+        reps: usize,
+        prefix: usize,
+        prev_prefix: Option<usize>,
+    ) -> f64 {
+        let p = self.collision_probability_at(zeucl_dist);
+        let cur_fail = (1.0 - p.powi(prefix as i32)).powi(reps as i32);
+        let prev_fail = prev_prefix
+            .map(|prefix| (1.0 - p.powi(prefix as i32)).powi(reps as i32))
+            .unwrap_or(1.0);
+        cur_fail * prev_fail
+    }
+
     pub fn failure_probability(
         &self,
         zeucl_dist: f64,
@@ -608,18 +623,20 @@ impl Hasher {
         prev_prefix: Option<usize>,
     ) -> f64 {
         let p = self.collision_probability_at(zeucl_dist);
-        let prev_prefix = prev_prefix.unwrap_or(prefix + 1);
+        // FIXME: do not use prefix + 1 as a default, but rather use 1.0 as the previous failure
+        // probability
 
         // TODO: precompute all these numbers
         let cur_left_bits = (prefix as f64 / 2.0).floor() as i32;
         let cur_right_bits = (prefix as f64 / 2.0).ceil() as i32;
         assert_eq!(cur_left_bits + cur_right_bits, prefix as i32);
 
-        let prev_left_bits = ((prev_prefix) as f64 / 2.0).floor() as i32;
-        let prev_right_bits = ((prev_prefix) as f64 / 2.0).ceil() as i32;
-        assert_eq!(prev_left_bits + prev_right_bits, prev_prefix as i32);
-        assert!(prev_left_bits >= cur_left_bits);
-        assert!(prev_right_bits >= cur_right_bits);
+        let prev_prefixes = prev_prefix.map(|prefix| {
+            (
+                (prefix as f64 / 2.0).floor() as i32,
+                (prefix as f64 / 2.0).ceil() as i32,
+            )
+        });
 
         let up_treps = (reps as f64 + 1.0).sqrt().floor() as i32;
         let low_treps = self.tensor_repetitions as i32 - up_treps;
@@ -628,8 +645,13 @@ impl Hasher {
         let cur_left_fail = 1.0 - p.powi(cur_left_bits);
         let cur_right_fail = 1.0 - p.powi(cur_right_bits);
 
-        let prev_left_fail = 1.0 - p.powi(prev_left_bits);
-        let prev_right_fail = 1.0 - p.powi(prev_right_bits);
+        let (prev_left_fail, prev_right_fail) = prev_prefixes
+            .map(|(prev_left_bits, prev_right_bits)| {
+                (1.0 - p.powi(prev_left_bits), 1.0 - p.powi(prev_right_bits))
+            })
+            // default to failure probability 1 on the previous
+            // level if there was no previous level
+            .unwrap_or((1.0, 1.0));
 
         // Probabilities of collising in *at least* on repetition
         let collide_up_left_cur = 1.0 - cur_left_fail.powi(up_treps);
