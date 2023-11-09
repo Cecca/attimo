@@ -14,6 +14,12 @@ impl Ord for OrdF64 {
     }
 }
 
+impl std::fmt::Display for OrdF64 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl Overlaps<(OrdF64, usize)> for (OrdF64, usize) {
     fn overlaps(&self, other: (OrdF64, usize), exclusion_zone: usize) -> bool {
         self.1.overlaps(other.1, exclusion_zone)

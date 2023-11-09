@@ -321,6 +321,7 @@ impl MotifletsIterator {
             );
         }
         let mut cnt_brute_forced = 0;
+        let mut some_updated = false;
         for k in 1..self.max_k {
             if !self.best_motiflet[k].2 {
                 while let Some((Reverse(extent_lower_bound), idx)) = to_brute_force[k].pop() {
@@ -352,7 +353,9 @@ impl MotifletsIterator {
                     // tentatively update all extents
                     for k in 1..self.max_k {
                         if !self.best_motiflet[k].2 && exts[k] <= self.best_motiflet[k].0 {
+                            eprintln!("{} is updating at {} with {}", idx, k, exts[k]);
                             self.best_motiflet[k] = (exts[k], idx, false);
+                            some_updated = true;
                         }
                     }
                 }
@@ -360,6 +363,9 @@ impl MotifletsIterator {
         }
         if cnt_brute_forced > 0 {
             eprintln!("Brute forced: {}", cnt_brute_forced);
+        }
+        if some_updated {
+            eprintln!("Updated motiflets: {:?}", self.best_motiflet);
         }
     }
 

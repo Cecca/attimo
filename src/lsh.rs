@@ -291,6 +291,9 @@ pub struct HashCollection {
     /// Pools of hash values, we have a vector for each tensor repetition, and each vector has an
     /// entry for the strings of K_HALF hash values, one for the left, and one for the right pool
     pools: Vec<Vec<([u8; K_HALF], [u8; K_HALF])>>,
+    /// This table caches, in row-major order, the results of calls to
+    /// [get_minimal_repetition] for different pairs i and j
+    minimal_repetition_table: Vec<Option<usize>>,
 }
 
 impl HashCollection {
@@ -343,10 +346,17 @@ impl HashCollection {
             "time_s" => elapsed.as_secs_f64()
         );
 
+        let trep = hasher.tensor_repetitions;
+        let reps = hasher.repetitions;
+        let minimal_repetition_table = (0..trep)
+            .flat_map(|i| (0..trep).map(move |j| get_minimal_repetition(reps, i, j)))
+            .collect();
+
         Self {
             hasher,
             n_subsequences: ns,
             pools,
+            minimal_repetition_table,
         }
     }
 
@@ -418,6 +428,11 @@ impl HashCollection {
             .next()
     }
 
+    fn get_minimal_repetition(&self, lindex: usize, rindex: usize) -> Option<usize> {
+        let idx = lindex * self.hasher.tensor_repetitions + rindex;
+        self.minimal_repetition_table[idx]
+    }
+
     pub fn first_collision(&self, i: usize, j: usize, prefix: usize) -> Option<usize> {
         let (k_left, k_right) = Self::k_pair(prefix);
 
@@ -446,8 +461,9 @@ impl HashCollection {
                 break;
             }
         }
-        let res =
-            get_minimal_repetition(self.hasher.repetitions, lindex?, rindex?).and_then(|rep| {
+        let res = self
+            .get_minimal_repetition(lindex?, rindex?)
+            .and_then(|rep| {
                 if rep > self.hasher.repetitions {
                     None
                 } else {
