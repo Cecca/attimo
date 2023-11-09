@@ -232,6 +232,9 @@ fn test_radix_sort_u8() {
 }
 
 macro_rules! getbyte {
+    ($x: expr, $b: ident) => {
+        (($x >> 8 * $b) & 0xff) as usize
+    };
     ($x: expr, $b: literal) => {
         (($x >> 8 * $b) & 0xff) as usize
     };
@@ -277,31 +280,26 @@ pub fn sort_hash_pairs(data: &mut [(HashValue, u32)], scratch: &mut [(HashValue,
         sum3 = tmp;
     }
 
+    #[inline]
+    fn pass(
+        data: &mut [(HashValue, u32)],
+        scratch: &mut [(HashValue, u32)],
+        pass_idx: usize,
+        hist: &mut [usize; 256],
+    ) {
+        for pair in data.iter() {
+            let b = getbyte!((pair.0).0, pass_idx);
+            let t = hist[b];
+            hist[b] += 1;
+            scratch[t] = *pair;
+        }
+    }
+
     // Sort the data in four more passes
-    for pair in data.iter() {
-        let b = getbyte!((pair.0).0, 0);
-        let t = b0[b];
-        b0[b] += 1;
-        scratch[t] = *pair;
-    }
-    for pair in scratch.iter() {
-        let b = getbyte!((pair.0).0, 1);
-        let t = b1[b];
-        b1[b] += 1;
-        data[t] = *pair;
-    }
-    for pair in data.iter() {
-        let b = getbyte!((pair.0).0, 2);
-        let t = b2[b];
-        b2[b] += 1;
-        scratch[t] = *pair;
-    }
-    for pair in scratch.iter() {
-        let b = getbyte!((pair.0).0, 3);
-        let t = b3[b];
-        b3[b] += 1;
-        data[t] = *pair;
-    }
+    pass(data, scratch, 0, &mut b0);
+    pass(scratch, data, 1, &mut b1);
+    pass(data, scratch, 2, &mut b2);
+    pass(scratch, data, 3, &mut b3);
 }
 
 #[test]

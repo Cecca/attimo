@@ -331,8 +331,8 @@ criterion_group!(
     // bench_hash_ts,
     // bench_sort_usize,
     // bench_sort_u8,
-    // bench_sort_hashes,
-    bench_zdot // bench_first_collision,
-               // bench_zeucl
+    bench_sort_hashes // bench_zdot,
+                      // bench_first_collision,
+                      // bench_zeucl
 );
 criterion_main!(benches);
