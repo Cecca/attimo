@@ -85,6 +85,7 @@ impl EvolvingNeighborhood {
         if !self.dirty {
             return;
         }
+        self.neighbors.truncate((self.max_k + 1) * (self.max_k + 1));
         for tup in self.neighbors.iter_mut() {
             tup.2 = false;
         }
@@ -121,12 +122,18 @@ impl EvolvingNeighborhood {
         assert_eq!(out.len(), self.max_k);
         self.clean(exclusion_zone);
 
+        let n = self.neighbors.len();
         out.fill(OrdF64(std::f64::INFINITY));
         out[0] = OrdF64(0.0);
-        for (i, (d, _, included)) in self.neighbors.iter().filter(|tup| tup.2).enumerate() {
-            if *included && i < self.max_k - 1 {
-                out[i + 1] = *d;
+        let mut i = 1;
+        let mut nn = 0;
+        while i < self.max_k && nn < n {
+            let (d, _, included) = self.neighbors[nn];
+            if included {
+                out[i] = d;
+                i += 1;
             }
+            nn += 1;
         }
     }
     /// Counts how many neighbors have a distance _strictly_ larger than the given distance
