@@ -148,17 +148,9 @@ impl EvolvingNeighborhood {
         let cnt_smaller = self
             .neighbors
             .iter()
-            .filter_map(
-                |(d, _, is_neighbor)| {
-                    if *is_neighbor {
-                        Some(2.0 * d.0)
-                    } else {
-                        None
-                    }
-                },
-            )
+            .filter_map(|(d, _, is_neighbor)| if *is_neighbor { Some(*d) } else { None })
             .take(k)
-            .filter(|nn_dist| *nn_dist <= d.0)
+            .filter(|nn_dist| *nn_dist <= d)
             .count();
         k - cnt_smaller
     }
@@ -310,6 +302,12 @@ impl SubsequenceNeighborhood {
         match self {
             Self::Evolving { neighborhood: _ } => true,
             _ => false,
+        }
+    }
+    pub fn count_larger_than(&mut self, k: usize, exclusion_zone: usize, d: OrdF64) -> usize {
+        match self {
+            Self::Evolving { neighborhood } => neighborhood.count_larger_than(k, exclusion_zone, d),
+            _ => unreachable!(),
         }
     }
     pub fn extents(&mut self, exclusion_zone: usize, out: &mut [OrdF64]) {

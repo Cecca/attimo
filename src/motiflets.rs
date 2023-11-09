@@ -93,6 +93,14 @@ pub fn brute_force_motiflets(
     let fft_data = FFTData::new(&ts);
     let n = ts.num_subsequences();
 
+    eprintln!(
+        "Average pairwise distance: {}, maximum pairwise distance: {}",
+        ts.average_pairwise_distance(1234, exclusion_zone),
+        ts.maximum_distance()
+    );
+
+    let pl = indicatif::ProgressBar::new(n as u64);
+
     // initialize some auxiliary buffers, which will be cloned on a
     // per-thread basis.
     let mut indices = Vec::new();
@@ -106,6 +114,7 @@ pub fn brute_force_motiflets(
     let (extent, indices, root) = (0..n)
         .into_par_iter()
         .map_with((indices, distances, buf), |(indices, distances, buf), i| {
+            pl.inc(1);
             let (extent, indices) = k_nearest_neighbors_bf(
                 ts,
                 i,
@@ -120,6 +129,7 @@ pub fn brute_force_motiflets(
         })
         .min()
         .unwrap();
+    pl.finish_and_clear();
     eprintln!("Root of motiflet is {root}");
     (extent.0, indices)
 }
@@ -245,7 +255,18 @@ impl MotifletsIterator {
         let max_k = self.max_k;
         let pools = &self.pools;
         let ts = &self.ts;
+        let neighborhoods = &mut self.neighborhoods;
+        eprintln!(
+            "[{}@{}] number of neighborhoods: {}/{}, of which exact {}",
+            rep,
+            prefix,
+            neighborhoods.len(),
+            n,
+            neighborhoods.values().filter(|n| !n.is_evolving()).count()
+        );
+        eprintln!("[{}@{}] {:?}", rep, prefix, self.best_motiflet);
 
+        let mut cnt_distances = 0;
         self.pools
             .group_subsequences(prefix, rep, exclusion_zone, &mut self.buffers, false);
         if let Some(mut enumerator) = self.buffers.enumerator() {
@@ -257,7 +278,15 @@ impl MotifletsIterator {
                     .for_each(|(a, b, dist)| {
                         let a = *a as usize;
                         let b = *b as usize;
-                        if let Some(first_colliding_repetition) =
+                        // TODO: keep track of the evolving and exact neighborhoods separately
+                        if neighborhoods.contains_key(&a)
+                            && neighborhoods.contains_key(&b)
+                            && !(neighborhoods[&a].is_evolving() && neighborhoods[&b].is_evolving())
+                        {
+                            // just skip the computation if both neighborhoods were already
+                            // resolved
+                            *dist = OrdF64(std::f64::INFINITY);
+                        } else if let Some(first_colliding_repetition) =
                             pools.first_collision(a, b, prefix)
                         {
                             if first_colliding_repetition == rep
@@ -265,6 +294,7 @@ impl MotifletsIterator {
                                     .map(|prefix| pools.first_collision(a, b, prefix).is_none())
                                     .unwrap_or(true)
                             {
+                                cnt_distances += 1;
                                 *dist = OrdF64(zeucl(ts, a, b));
                             }
                         }
@@ -276,11 +306,11 @@ impl MotifletsIterator {
                     if dist.0.is_finite() {
                         let a = *a as usize;
                         let b = *b as usize;
-                        self.neighborhoods
+                        neighborhoods
                             .entry(a)
                             .or_insert_with(|| SubsequenceNeighborhood::evolving(max_k, a))
                             .update(*dist, b);
-                        self.neighborhoods
+                        neighborhoods
                             .entry(b)
                             .or_insert_with(|| SubsequenceNeighborhood::evolving(max_k, b))
                             .update(*dist, a);
@@ -288,6 +318,7 @@ impl MotifletsIterator {
                 }
             }
         } // while there are collisions
+        eprintln!("[{}@{}] computed {} distances", rep, prefix, cnt_distances);
     }
 
     /// Brute forces the most promising neighborhoods
@@ -320,14 +351,13 @@ impl MotifletsIterator {
                 self.rep, self.prefix, num_to_brute_force
             );
         }
+        let minimum_brute_force = self.threads;
         let mut cnt_brute_forced = 0;
         let mut some_updated = false;
         for k in 1..self.max_k {
             if !self.best_motiflet[k].2 {
                 while let Some((Reverse(extent_lower_bound), idx)) = to_brute_force[k].pop() {
                     if extent_lower_bound.0 > (self.best_motiflet[k].0).0 {
-                        // Don't consider candidate neighborhoods that cannot improve the
-                        // current best motiflet at k
                         break;
                     }
                     let neighborhood = self.neighborhoods.get_mut(&idx).unwrap();
@@ -361,27 +391,88 @@ impl MotifletsIterator {
                 }
             }
         }
+        if cnt_brute_forced < minimum_brute_force {
+            let target_brute_force = minimum_brute_force - cnt_brute_forced;
+            let mut to_brute_force = BinaryHeap::new();
+
+            for (idx, neighborhood) in self.neighborhoods.iter_mut() {
+                if neighborhood.is_evolving() {
+                    neighborhood.extents(exclusion_zone, &mut exts);
+                    let k = 1;
+                    to_brute_force.push((exts[k], *idx));
+                }
+                while to_brute_force.len() > target_brute_force {
+                    to_brute_force.pop();
+                }
+            }
+
+            while let Some((_, idx)) = to_brute_force.pop() {
+                let neighborhood = self.neighborhoods.get_mut(&idx).unwrap();
+                if neighborhood.is_evolving() {
+                    cnt_brute_forced += 1;
+                    // eprintln!("[{}@{}] Brute forcing {}", self.rep, self.prefix, idx,);
+                    neighborhood.brute_force(
+                        ts,
+                        &self.fft_data,
+                        self.max_k,
+                        &mut self.support_buffers,
+                    );
+                }
+                neighborhood.extents(exclusion_zone, &mut exts);
+                // tentatively update all extents
+                for k in 1..self.max_k {
+                    if !self.best_motiflet[k].2 && exts[k] <= self.best_motiflet[k].0 {
+                        // eprintln!("{} is updating at {} with {}", idx, k, exts[k]);
+                        self.best_motiflet[k] = (exts[k], idx, false);
+                        some_updated = true;
+                    }
+                }
+            }
+        }
         if cnt_brute_forced > 0 {
-            eprintln!("Brute forced: {}", cnt_brute_forced);
+            eprintln!(
+                "[{}@{}] Brute forced: {}",
+                self.rep, self.prefix, cnt_brute_forced
+            );
         }
         if some_updated {
-            eprintln!("Updated motiflets: {:?}", self.best_motiflet);
+            eprintln!(
+                "[{}@{}] Updated motiflets: {:?}",
+                self.rep, self.prefix, self.best_motiflet
+            );
         }
     }
 
     /// adds to `self.to_return` the motiflets that can
     /// be confirmed in this iteration
     fn emit_confirmed(&mut self) {
+        let exclusion_zone = self.exclusion_zone;
         let prefix = self.prefix;
         let previous_prefix = self.previous_prefix;
         let rep = self.rep;
+        let mut failure_probabilities = vec![0.0; self.max_k];
+        let mut min_to_replace = vec![0; self.max_k];
         for k in 1..self.max_k {
             let (extent, root_idx, emitted) = self.best_motiflet[k];
             if !emitted {
+                min_to_replace[k] = self
+                    .neighborhoods
+                    .values_mut()
+                    .filter_map(|neighborhood| {
+                        if neighborhood.is_evolving() {
+                            Some(neighborhood.count_larger_than(k, exclusion_zone, extent))
+                        } else {
+                            None
+                        }
+                    })
+                    .min()
+                    .unwrap_or(k);
+                assert!(min_to_replace[k] > 0);
                 let fp = self
                     .hasher
-                    .failure_probability(extent.0, rep, prefix, previous_prefix);
-                // .powi(k as i32);
+                    .failure_probability_independent(extent.0, rep, prefix, previous_prefix)
+                    .powi(min_to_replace[k] as i32);
+                failure_probabilities[k] = fp;
                 if fp < self.delta {
                     eprintln!(
                         "[{}@{}] Failure probability for k={} is {} (extent {}, threshold {})",
@@ -395,6 +486,11 @@ impl MotifletsIterator {
                 }
             }
         }
+        eprintln!("[{}@{}] min_to_replace {:?}", rep, prefix, min_to_replace);
+        eprintln!(
+            "[{}@{}] Failure probabilities {:?}",
+            rep, prefix, failure_probabilities
+        );
     }
 }
 
