@@ -266,6 +266,8 @@ impl MotifletsIterator {
         );
         eprintln!("[{}@{}] {:?}", rep, prefix, self.best_motiflet);
 
+        let threshold = self.best_motiflet[self.max_k - 1].0;
+
         let mut cnt_distances = 0;
         self.pools
             .group_subsequences(prefix, rep, exclusion_zone, &mut self.buffers, false);
@@ -295,7 +297,14 @@ impl MotifletsIterator {
                                     .unwrap_or(true)
                             {
                                 cnt_distances += 1;
-                                *dist = OrdF64(zeucl(ts, a, b));
+                                let d = OrdF64(zeucl(ts, a, b));
+                                if d <= threshold {
+                                    // we only schedule the pair to update the respective
+                                    // neighborhoods if it can result in a better motiflet.
+                                    *dist = d;
+                                } else {
+                                    *dist = OrdF64(std::f64::INFINITY);
+                                }
                             }
                         }
                     });

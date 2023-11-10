@@ -644,7 +644,7 @@ impl Hasher {
         let p = self.collision_probability_at(zeucl_dist);
         let cur_fail = (1.0 - p.powi(prefix as i32)).powi(reps as i32);
         let prev_fail = prev_prefix
-            .map(|prefix| (1.0 - p.powi(prefix as i32)).powi(reps as i32))
+            .map(|prefix| (1.0 - p.powi(prefix as i32)).powi((self.repetitions - reps) as i32))
             .unwrap_or(1.0);
         cur_fail * prev_fail
     }

@@ -77,6 +77,18 @@ impl EvolvingNeighborhood {
         }
     }
     fn update(&mut self, dist: OrdF64, neigh: usize) {
+        if let Some(kth_dist) = self
+            .neighbors
+            .iter()
+            .filter_map(|tup| if tup.2 { Some(tup.0) } else { None })
+            .nth(self.max_k)
+        {
+            if dist > kth_dist {
+                // no point in adding this distance, it would
+                // be removed on the next call of `clean`
+                return;
+            }
+        }
         self.dirty = true;
         let tuple = (dist, neigh, false);
         let mut i = 0;
@@ -91,16 +103,23 @@ impl EvolvingNeighborhood {
         if !self.dirty {
             return;
         }
-        self.neighbors.truncate((self.max_k + 1) * (self.max_k + 1));
         for tup in self.neighbors.iter_mut() {
             tup.2 = false;
         }
         let mut i = 0;
+        let mut cnt_neighbors = 0;
+        let mut farthest_idx = 0;
         while i < self.neighbors.len() {
             if !self.neighbors[i].overlaps(&self.neighbors[..i], exclusion_zone) {
                 self.neighbors[i].2 = true;
+                cnt_neighbors += 1;
+                farthest_idx = i;
             }
             i += 1;
+        }
+        if cnt_neighbors == self.max_k {
+            // Remove all the subsequences after the k-th nearest neighbor
+            self.neighbors.truncate(farthest_idx + 1);
         }
         self.dirty = false;
     }
