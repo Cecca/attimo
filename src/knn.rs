@@ -3,33 +3,48 @@ use crate::{
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 
-#[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
-// TODO: turn this struct into a `Distance` struct with [From] and [Into] impls for `f64`
-pub struct OrdF64(pub f64);
-impl Eq for OrdF64 {}
-impl Ord for OrdF64 {
+#[derive(PartialEq, PartialOrd, Clone, Copy)]
+pub struct Distance(pub f64);
+impl Eq for Distance {}
+impl Ord for Distance {
     #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.0.partial_cmp(&other.0).unwrap()
     }
 }
 
-impl std::fmt::Display for OrdF64 {
+impl From<f64> for Distance {
+    fn from(value: f64) -> Self {
+        Self(value)
+    }
+}
+impl Into<f64> for Distance {
+    fn into(self) -> f64 {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for Distance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl std::fmt::Display for Distance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl Overlaps<(OrdF64, usize)> for (OrdF64, usize) {
-    fn overlaps(&self, other: (OrdF64, usize), exclusion_zone: usize) -> bool {
+impl Overlaps<(Distance, usize)> for (Distance, usize) {
+    fn overlaps(&self, other: (Distance, usize), exclusion_zone: usize) -> bool {
         self.1.overlaps(other.1, exclusion_zone)
     }
 }
 
 /// A triple where the third element denotes whether the corresponding tuple is "active"
 /// overlaps with another one only if the other one is active and their indices overlap
-impl Overlaps<(OrdF64, usize, bool)> for (OrdF64, usize, bool) {
-    fn overlaps(&self, other: (OrdF64, usize, bool), exclusion_zone: usize) -> bool {
+impl Overlaps<(Distance, usize, bool)> for (Distance, usize, bool) {
+    fn overlaps(&self, other: (Distance, usize, bool), exclusion_zone: usize) -> bool {
         other.2 && self.1.overlaps(other.1, exclusion_zone)
     }
 }
@@ -65,7 +80,7 @@ pub struct EvolvingNeighborhood {
     /// For each neighbor we consider its distance, its index and whether it is currently
     /// part of the k-nearest neighbors, i.e. if it overlaps with any othe preceding
     /// selected neighbors
-    neighbors: Vec<(OrdF64, usize, bool)>,
+    neighbors: Vec<(Distance, usize, bool)>,
 }
 impl EvolvingNeighborhood {
     fn new(subsequence: usize, max_k: usize) -> Self {
@@ -76,7 +91,7 @@ impl EvolvingNeighborhood {
             neighbors: Vec::with_capacity(max_k),
         }
     }
-    fn update(&mut self, dist: OrdF64, neigh: usize) {
+    fn update(&mut self, dist: Distance, neigh: usize) {
         if let Some(kth_dist) = self
             .neighbors
             .iter()
@@ -124,14 +139,14 @@ impl EvolvingNeighborhood {
         self.dirty = false;
     }
     /// Returns an upper bound to the extent of this neighborhood
-    fn extent(&mut self, k: usize, exclusion_zone: usize) -> OrdF64 {
+    fn extent(&mut self, k: usize, exclusion_zone: usize) -> Distance {
         self.clean(exclusion_zone);
         let ext = self
             .neighbors
             .iter()
             .filter_map(|(d, _, is_neighbor)| {
                 if *is_neighbor {
-                    Some(OrdF64(2.0 * d.0))
+                    Some(Distance(2.0 * d.0))
                 } else {
                     None
                 }
@@ -140,16 +155,16 @@ impl EvolvingNeighborhood {
             // storing the subsequence itself in the
             // neighbors array
             .nth(k - 1)
-            .unwrap_or(OrdF64(f64::INFINITY));
+            .unwrap_or(Distance(f64::INFINITY));
         ext
     }
-    fn extents(&mut self, exclusion_zone: usize, out: &mut [OrdF64]) {
+    fn extents(&mut self, exclusion_zone: usize, out: &mut [Distance]) {
         assert_eq!(out.len(), self.max_k);
         self.clean(exclusion_zone);
 
         let n = self.neighbors.len();
-        out.fill(OrdF64(std::f64::INFINITY));
-        out[0] = OrdF64(0.0);
+        out.fill(Distance(std::f64::INFINITY));
+        out[0] = Distance(0.0);
         let mut i = 1;
         let mut nn = 0;
         while i < self.max_k && nn < n {
@@ -162,7 +177,7 @@ impl EvolvingNeighborhood {
         }
     }
     /// Counts how many neighbors have a distance _strictly_ larger than the given distance
-    fn count_larger_than(&mut self, k: usize, exclusion_zone: usize, d: OrdF64) -> usize {
+    fn count_larger_than(&mut self, k: usize, exclusion_zone: usize, d: Distance) -> usize {
         self.clean(exclusion_zone);
         let cnt_smaller = self
             .neighbors
@@ -181,7 +196,7 @@ pub enum SubsequenceNeighborhood {
     /// it has been computed exactly. It ignores any proposed update.
     Exact {
         subsequence: usize,
-        extents: Vec<OrdF64>,
+        extents: Vec<Distance>,
         ids: Vec<usize>,
     },
     /// This neighborhood can be updated by adding new points that might possibly
@@ -223,14 +238,14 @@ impl SubsequenceNeighborhood {
         // Find the likely candidates by a (partial) indirect sort of
         // the indices by increasing distance.
         let n_candidates = (2 * k * exclusion_zone).min(ts.num_subsequences());
-        indices.select_nth_unstable_by_key(n_candidates, |j| OrdF64(distances[*j]));
+        indices.select_nth_unstable_by_key(n_candidates, |j| Distance(distances[*j]));
 
         // Sort the candidate indices by increasing distance (the previous step)
         // only partitioned the indices in two groups with the guarantee that the first
         // `n_candidates` indices are the ones at shortest distance from the `from` point,
         // but they are not guaranteed to be sorted
         let indices = &mut indices[..n_candidates];
-        indices.sort_unstable_by_key(|j| OrdF64(distances[*j]));
+        indices.sort_unstable_by_key(|j| Distance(distances[*j]));
 
         // Pick the k-neighborhood skipping overlapping subsequences
         let mut ids = Vec::new();
@@ -254,14 +269,15 @@ impl SubsequenceNeighborhood {
         }
         assert_eq!(ids.len(), k + 1);
 
-        let mut extents = vec![OrdF64(0.0); k];
+        let mut extents = vec![Distance(0.0); k];
         for i in 0..k {
             let mut extent = 0.0f64;
             for j in 0..i {
                 let d = zeucl(ts, ids[i], ids[j]);
                 extent = extent.max(d);
             }
-            extents[i] = OrdF64(extent).max(*extents[0..i].iter().max().unwrap_or(&OrdF64(0.0)));
+            extents[i] =
+                Distance(extent).max(*extents[0..i].iter().max().unwrap_or(&Distance(0.0)));
         }
         assert_eq!(extents.len(), k);
 
@@ -323,13 +339,13 @@ impl SubsequenceNeighborhood {
             _ => false,
         }
     }
-    pub fn count_larger_than(&mut self, k: usize, exclusion_zone: usize, d: OrdF64) -> usize {
+    pub fn count_larger_than(&mut self, k: usize, exclusion_zone: usize, d: Distance) -> usize {
         match self {
             Self::Evolving { neighborhood } => neighborhood.count_larger_than(k, exclusion_zone, d),
             _ => unreachable!(),
         }
     }
-    pub fn extents(&mut self, exclusion_zone: usize, out: &mut [OrdF64]) {
+    pub fn extents(&mut self, exclusion_zone: usize, out: &mut [Distance]) {
         match self {
             Self::Evolving { neighborhood } => {
                 neighborhood.extents(exclusion_zone, out);
@@ -342,7 +358,7 @@ impl SubsequenceNeighborhood {
             Self::Discarded { subsequence: _ } => unreachable!(),
         }
     }
-    pub fn extent(&mut self, k: usize, exclusion_zone: usize) -> OrdF64 {
+    pub fn extent(&mut self, k: usize, exclusion_zone: usize) -> Distance {
         match self {
             Self::Evolving { neighborhood } => neighborhood.extent(k, exclusion_zone),
             Self::Exact {
@@ -350,7 +366,7 @@ impl SubsequenceNeighborhood {
                 extents,
                 ids: _,
             } => extents[k],
-            Self::Discarded { subsequence: _ } => OrdF64(std::f64::INFINITY),
+            Self::Discarded { subsequence: _ } => Distance(std::f64::INFINITY),
         }
     }
     pub fn neighbors(&mut self, k: usize) -> Vec<usize> {
@@ -363,7 +379,7 @@ impl SubsequenceNeighborhood {
             _ => panic!(),
         }
     }
-    pub fn update(&mut self, dist: OrdF64, neigh: usize) {
+    pub fn update(&mut self, dist: Distance, neigh: usize) {
         match self {
             Self::Evolving { neighborhood } => {
                 neighborhood.update(dist, neigh);
@@ -377,7 +393,7 @@ impl SubsequenceNeighborhood {
     pub fn failure_probability(
         &mut self,
         k: usize,
-        extent_lower_bound: OrdF64,
+        extent_lower_bound: Distance,
         lower_bound_fp: f64,
         exclusion_zone: usize,
     ) -> f64 {

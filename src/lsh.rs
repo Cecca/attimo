@@ -26,7 +26,7 @@
 //// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
-use crate::knn::OrdF64;
+use crate::knn::Distance;
 use crate::motifs::Motif;
 use crate::sort::*;
 use crate::timeseries::{FFTData, Overlaps, WindowedTimeseries};
@@ -104,7 +104,7 @@ impl<'hashes> CollisionEnumerator<'hashes> {
     /// as `f64::INFINITY`: actual distances must be computed somewhere else
     pub fn next(
         &mut self,
-        output: &mut [(u32, u32, OrdF64)],
+        output: &mut [(u32, u32, Distance)],
         exclusion_zone: usize,
     ) -> Option<usize> {
         let mut idx = 0;
@@ -117,7 +117,7 @@ impl<'hashes> CollisionEnumerator<'hashes> {
                     let a = self.buffers.hashes[self.i].1;
                     let b = self.buffers.hashes[self.j].1;
                     if !a.overlaps(b, exclusion_zone) {
-                        output[idx] = (a.min(b), a.max(b), OrdF64(f64::INFINITY));
+                        output[idx] = (a.min(b), a.max(b), Distance(f64::INFINITY));
                         idx += 1;
                     }
                     self.j += 1;
@@ -167,7 +167,7 @@ fn test_collision_enumerator() {
     let n = buffers.hashes.len();
     buffers.buckets.push(0..n);
     let mut enumerator = buffers.enumerator().unwrap();
-    let mut buf = vec![(0, 0, OrdF64(f64::INFINITY)); buf_size];
+    let mut buf = vec![(0, 0, Distance(f64::INFINITY)); buf_size];
     let ret = enumerator.next(&mut buf, 0);
     println!("{:?}", buf);
     assert_eq!(ret, Some(n * (n - 1) / 2));
@@ -187,7 +187,7 @@ fn test_collision_enumerator() {
     let tot_pairs = n * (n - 1) / 2;
     buffers.buckets.push(0..n);
     let mut enumerator = buffers.enumerator().unwrap();
-    let mut buf = vec![(0, 0, OrdF64(f64::INFINITY)); buf_size];
+    let mut buf = vec![(0, 0, Distance(f64::INFINITY)); buf_size];
     let mut enumerated = 0;
     while let Some(cnt) = enumerator.next(&mut buf, 0) {
         enumerated += cnt;
@@ -209,7 +209,7 @@ fn test_collision_enumerator() {
     buffers.buckets.push(0..4);
     buffers.buckets.push(4..8);
     let mut enumerator = buffers.enumerator().unwrap();
-    let mut buf = vec![(0, 0, OrdF64(f64::INFINITY)); buf_size];
+    let mut buf = vec![(0, 0, Distance(f64::INFINITY)); buf_size];
     let mut enumerated = 0;
     while let Some(cnt) = enumerator.next(&mut buf, 0) {
         enumerated += cnt;

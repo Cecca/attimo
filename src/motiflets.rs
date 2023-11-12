@@ -21,7 +21,7 @@ fn k_nearest_neighbors_bf(
     indices: &mut [usize],
     distances: &mut [f64],
     buf: &mut [f64],
-) -> (OrdF64, Vec<usize>) {
+) -> (Distance, Vec<usize>) {
     // Check that the auxiliary memory buffers are correctly sized
     assert_eq!(indices.len(), ts.num_subsequences());
     assert_eq!(distances.len(), ts.num_subsequences());
@@ -37,14 +37,14 @@ fn k_nearest_neighbors_bf(
     // Find the likely candidates by a (partial) indirect sort of
     // the indices by increasing distance.
     let n_candidates = (k * exclusion_zone).min(ts.num_subsequences());
-    indices.select_nth_unstable_by_key(n_candidates, |j| OrdF64(distances[*j]));
+    indices.select_nth_unstable_by_key(n_candidates, |j| Distance(distances[*j]));
 
     // Sort the candidate indices by increasing distance (the previous step)
     // only partitioned the indices in two groups with the guarantee that the first
     // `n_candidates` indices are the ones at shortest distance from the `from` point,
     // but they are not guaranteed to be sorted
     let indices = &mut indices[..n_candidates];
-    indices.sort_unstable_by_key(|j| OrdF64(distances[*j]));
+    indices.sort_unstable_by_key(|j| Distance(distances[*j]));
 
     // Pick the k-neighborhood skipping overlapping subsequences
     let mut ret = Vec::new();
@@ -77,7 +77,7 @@ fn k_nearest_neighbors_bf(
         }
     }
 
-    (OrdF64(extent), ret)
+    (Distance(extent), ret)
 }
 
 // Find the (approximate) motiflets by brute force: for each subsequence find its
@@ -165,7 +165,7 @@ pub struct MotifletsIterator {
     ts: Arc<WindowedTimeseries>,
     fft_data: FFTData,
     threads: usize,
-    best_motiflet: Vec<(OrdF64, usize, bool)>,
+    best_motiflet: Vec<(Distance, usize, bool)>,
     neighborhoods: HashMap<usize, SubsequenceNeighborhood>,
     to_return: Vec<Motiflet>,
     repetitions: usize,
@@ -174,7 +174,7 @@ pub struct MotifletsIterator {
     hasher: Arc<Hasher>,
     pools: Arc<HashCollection>,
     buffers: ColumnBuffers,
-    pairs_buffer: Vec<(u32, u32, OrdF64)>,
+    pairs_buffer: Vec<(u32, u32, Distance)>,
     support_buffers: SupportBuffers,
     /// the current repetition
     rep: usize,
@@ -215,8 +215,8 @@ impl MotifletsIterator {
         let pools = Arc::new(pools);
         eprintln!("Computed hash values in {:?}", start.elapsed());
 
-        let best_motiflet = vec![(OrdF64(std::f64::INFINITY), 0, false); max_k];
-        let pairs_buffer = vec![(0, 0, OrdF64(0.0)); 65536];
+        let best_motiflet = vec![(Distance(std::f64::INFINITY), 0, false); max_k];
+        let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
         let support_buffers = SupportBuffers::new(&ts);
 
         Self {
@@ -287,7 +287,7 @@ impl MotifletsIterator {
                         {
                             // just skip the computation if both neighborhoods were already
                             // resolved
-                            *dist = OrdF64(std::f64::INFINITY);
+                            *dist = Distance(std::f64::INFINITY);
                         } else if let Some(first_colliding_repetition) =
                             pools.first_collision(a, b, prefix)
                         {
@@ -297,13 +297,13 @@ impl MotifletsIterator {
                                     .unwrap_or(true)
                             {
                                 cnt_distances += 1;
-                                let d = OrdF64(zeucl(ts, a, b));
+                                let d = Distance(zeucl(ts, a, b));
                                 if d <= threshold {
                                     // we only schedule the pair to update the respective
                                     // neighborhoods if it can result in a better motiflet.
                                     *dist = d;
                                 } else {
-                                    *dist = OrdF64(std::f64::INFINITY);
+                                    *dist = Distance(std::f64::INFINITY);
                                 }
                             }
                         }
@@ -336,7 +336,7 @@ impl MotifletsIterator {
         let ts = &self.ts;
 
         // Resolve the most promising candidates
-        let mut exts = vec![OrdF64(0.0); self.max_k];
+        let mut exts = vec![Distance(0.0); self.max_k];
         let mut to_brute_force = vec![BinaryHeap::new(); self.max_k];
         for (idx, neighborhood) in self.neighborhoods.iter_mut() {
             if neighborhood.is_evolving() {

@@ -99,7 +99,7 @@ fn nearest_neighbor_bf(
     exclusion_zone: usize,
     distances: &mut [f64],
     buf: &mut [f64],
-) -> (OrdF64, usize) {
+) -> (Distance, usize) {
     // Check that the auxiliary memory buffers are correctly sized
     assert_eq!(distances.len(), ts.num_subsequences());
     assert_eq!(buf.len(), ts.w);
@@ -118,7 +118,7 @@ fn nearest_neighbor_bf(
             }
         }
     }
-    (OrdF64(nearest), nearest_idx)
+    (Distance(nearest), nearest_idx)
 }
 
 pub fn brute_force_motifs(ts: &WindowedTimeseries, k: usize, exclusion_zone: usize) -> Vec<Motif> {
