@@ -657,8 +657,6 @@ impl Hasher {
         prev_prefix: Option<usize>,
     ) -> f64 {
         let p = self.collision_probability_at(zeucl_dist);
-        // FIXME: do not use prefix + 1 as a default, but rather use 1.0 as the previous failure
-        // probability
 
         // TODO: precompute all these numbers
         let cur_left_bits = (prefix as f64 / 2.0).floor() as i32;
@@ -701,6 +699,37 @@ impl Hasher {
             * (1.0 - collide_low_left_prev * collide_low_right_prev)
             * (1.0 - collide_up_left_prev * collide_low_right_prev)
             * (1.0 - collide_low_left_prev * collide_up_right_prev)
+    }
+
+    /// Given a failure probability, returns a vectors of the distances
+    /// achieving that failure probability for each prefix length and
+    /// repetition.
+    pub fn inverse_failure_probability(
+        &self,
+        ts: &WindowedTimeseries,
+        delta: f64,
+    ) -> Vec<(usize, usize, f64)> {
+        let max_dist = ts.maximum_distance();
+        let step = max_dist / 1000000.0;
+        eprintln!("Step is {}", step);
+
+        let mut res = Vec::new();
+        let mut dist = 0.0;
+        let mut previous_prefix = None;
+        for prefix in (1..K).rev() {
+            eprintln!("prefix {prefix}");
+            for rep in 0..self.repetitions {
+                while self.failure_probability(dist, rep, prefix, previous_prefix) < delta
+                    && dist < max_dist
+                {
+                    dist += step;
+                }
+                res.push((prefix, rep, dist));
+            }
+            previous_prefix.replace(prefix);
+        }
+
+        res
     }
 
     pub fn compute_width(ts: &WindowedTimeseries) -> f64 {
@@ -853,6 +882,48 @@ mod test {
                     );
                     // todo!()
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn distance_progression_gap() {
+        use std::io::prelude::*;
+        let delta = 0.01;
+        let w = 600;
+        let ts = crate::load::loadts("data/GAP.csv.gz", Some(10000)).expect("problem loading data");
+        let ts = crate::timeseries::WindowedTimeseries::new(ts, w, true);
+
+        let repetitions = 1024;
+
+        let width = Hasher::compute_width(&ts);
+        let hasher = Arc::new(Hasher::new(w, repetitions, width, 1245));
+
+        let dists = hasher.inverse_failure_probability(&ts, delta);
+        let mut f = std::fs::File::create("dists-gap.csv").unwrap();
+        writeln!(f, "prefix, rep, dist").unwrap();
+        for (prefix, rep, dist) in dists {
+            writeln!(f, "{prefix}, {rep}, {dist}").unwrap();
+        }
+    }
+
+    #[test]
+    fn distance_progression_ecg() {
+        use std::io::prelude::*;
+        let delta = 0.01;
+        let w = 1000;
+        let ts = crate::load::loadts("data/ECG.csv.gz", Some(10000)).expect("problem loading data");
+        let ts = crate::timeseries::WindowedTimeseries::new(ts, w, true);
+
+        let width = Hasher::compute_width(&ts);
+
+        for repetitions in [1024, 4096] {
+            let hasher = Arc::new(Hasher::new(w, repetitions, width, 1245));
+            let dists = hasher.inverse_failure_probability(&ts, delta);
+            let mut f = std::fs::File::create(format!("dists-ecg-{}.csv", repetitions)).unwrap();
+            writeln!(f, "prefix, rep, dist").unwrap();
+            for (prefix, rep, dist) in dists {
+                writeln!(f, "{prefix}, {rep}, {dist}").unwrap();
             }
         }
     }
