@@ -14,7 +14,7 @@ impl Ord for Distance {
 }
 
 impl Distance {
-    fn infinity() -> Self {
+    pub fn infinity() -> Self {
         Self(f64::INFINITY)
     }
 }
@@ -87,7 +87,7 @@ impl<'neighs> NeighborhoodPairsIterator<'neighs> {
         assert!(neighborhood[0].2);
         Self {
             neighborhood,
-            i: 0,
+            i: 1,
             j: 0,
         }
     }
@@ -97,6 +97,14 @@ impl<'neighs> Iterator for NeighborhoodPairsIterator<'neighs> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.i >= self.neighborhood.len() {
             return None;
+        }
+        // go to the first neighbor that is actually selected
+        while self.i < self.neighborhood.len() && !self.neighborhood[self.i].2 {
+            self.i += 1;
+        }
+        // pick the other one
+        while self.j < self.i && !self.neighborhood[self.j].2 {
+            self.j += 1;
         }
         if self.j >= self.i {
             self.j = 0;
@@ -149,6 +157,10 @@ impl KnnGraph {
         from: usize,
         to: usize,
     ) -> Option<Distance> {
+        // dbg!(from);
+        // dbg!(to);
+        // dbg!(&neighborhoods[from]);
+        // dbg!(&neighborhoods[to]);
         neighborhoods[from]
             .iter()
             .find(|tup| tup.1 == to)
@@ -162,6 +174,7 @@ impl KnnGraph {
 
     /// Mark the neighbors that are not overlapped by others
     fn fix_flags(&mut self) {
+        eprintln!("Fix flags");
         for idx in 0..self.dirty.len() {
             if !self.dirty[idx] {
                 continue;
@@ -180,37 +193,70 @@ impl KnnGraph {
             // TODO: remove points that are overlapped by sufficiently many others
             self.dirty[idx] = false;
         }
+        eprintln!("done fix flags");
     }
 
-    fn missing_distances(&self) -> Vec<(usize, usize, Distance)> {
-        self.neighborhoods
+    // fn missing_distances(&self) -> Vec<(u32, u32, Distance)> {
+    //     eprintln!("getting missing distances");
+    //     let mut missing = Vec::new();
+    //     for neighborhood in self.neighborhoods.iter() {
+    //         if !neighborhood.is_empty() {
+    //             for i in 0..neighborhood.len() {
+    //                 let ii = neighborhood[i].1;
+    //                 for j in 0..i {
+    //                     let jj = neighborhood[j].1;
+    //                     if self.distance(ii, jj).is_none() {
+    //                         missing.push((ii as u32, jj as u32, Distance::infinity()));
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    //     missing
+    // }
+
+    pub fn extents(&self, idx: usize, output: &mut [Distance]) {
+        assert_eq!(output.len(), self.max_k);
+        output.copy_from_slice(&self.extents[idx])
+    }
+
+    pub fn min_count_above(&self, threshold: Distance) -> usize {
+        dbg!(threshold);
+        let below = self
+            .neighborhoods
             .iter()
-            .flat_map(|neighborhood| NeighborhoodPairsIterator::new(&neighborhood))
-            .filter_map(|(i, j)| {
-                if self.distance(i, j).is_none() {
-                    Some((i, j, Distance::infinity()))
-                } else {
-                    None
+            .map(|neighborhood| {
+                let cnt = neighborhood
+                    .iter()
+                    .filter(|tup| tup.2 && tup.0 <= threshold)
+                    .count();
+                if cnt == self.max_k {
+                    dbg!(&neighborhood);
                 }
+                cnt
             })
-            .collect()
+            .max()
+            .unwrap();
+        self.max_k - below
     }
 
     pub fn update_extents(&mut self, ts: &WindowedTimeseries) {
+        eprintln!("updating the extents");
         let max_k = self.max_k;
         // TODO: do the computation only for neighborhoods that changed since last call
         self.fix_flags();
 
         // First we compute any distance that might be missing to compute the extents
-        let mut resolved_distances: Vec<(usize, usize, Distance)> = self.missing_distances();
-
-        eprintln!("{} distances to resolve", resolved_distances.len());
-        resolved_distances.iter_mut().for_each(|(i, j, dist)| {
-            *dist = Distance(zeucl(ts, *i, *j));
-        });
-
-        self.update_batch(&mut resolved_distances);
-        self.fix_flags();
+        // let mut resolved_distances: Vec<(u32, u32, Distance)> = self.missing_distances();
+        //
+        // eprintln!("{} distances to resolve", resolved_distances.len());
+        // resolved_distances.iter_mut().for_each(|(i, j, dist)| {
+        //     *dist = Distance(zeucl(ts, *i as usize, *j as usize));
+        // });
+        //
+        // eprintln!("Batch update: {:?}", resolved_distances);
+        // self.update_batch(&mut resolved_distances);
+        // self.fix_flags();
 
         let neighborhoods = &self.neighborhoods;
 
@@ -220,16 +266,52 @@ impl KnnGraph {
             .iter_mut()
             .zip(neighborhoods)
             .for_each(|(extents, neighborhood)| {
-                assert_eq!(extents.len(), max_k);
-                for (k, tup) in neighborhood.iter().filter(|tup| tup.2).enumerate() {
-                    extents[k] = tup.0;
-                    for (_, j, _) in neighborhood.iter().filter(|tup| tup.2).take(k) {
-                        let d = Self::get_distance(&neighborhoods, tup.1, *j)
-                            .expect("distance should be known at this point");
-                        extents[k] = extents[k].min(d);
+                if !neighborhood.is_empty() {
+                    extents.resize(max_k, Distance::infinity());
+                    assert_eq!(extents.len(), max_k);
+                    let mut k = 0;
+                    for i in 0..neighborhood.len() {
+                        if k >= max_k {
+                            break;
+                        }
+                        if neighborhood[i].2 {
+                            extents[k] = neighborhood[i].0;
+                            for j in 0..i {
+                                if neighborhood[j].2 {
+                                    let ii = neighborhood[i].1;
+                                    let jj = neighborhood[j].1;
+                                    let d = Self::get_distance(&neighborhoods, ii, jj)
+                                        .unwrap_or_else(|| Distance(zeucl(ts, ii, jj)));
+                                    extents[k] = extents[k].max(d);
+                                }
+                            }
+                            k += 1;
+                        }
                     }
                 }
             });
+    }
+
+    pub fn min_extents(&self) -> Vec<(Distance, usize)> {
+        let mut minima = vec![(Distance::infinity(), 0); self.max_k];
+
+        for (idx, extents) in self.extents.iter().enumerate() {
+            for k in 0..extents.len() {
+                if extents[k] < minima[k].0 {
+                    minima[k] = (extents[k], idx);
+                }
+            }
+        }
+
+        minima
+    }
+
+    pub fn get(&self, idx: usize, k: usize) -> Vec<usize> {
+        self.neighborhoods[idx]
+            .iter()
+            .filter_map(|tup| if tup.2 { Some(tup.1) } else { None })
+            .take(k)
+            .collect()
     }
 
     fn prune(neighborhood: &mut Vec<(Distance, usize, bool)>, max_k: usize, exclusion_zone: usize) {
@@ -240,19 +322,22 @@ impl KnnGraph {
         }
     }
 
-    pub fn update_batch(&mut self, batch: &mut [(usize, usize, Distance)]) {
-        fn do_insert<K: Fn(&(usize, usize, Distance)) -> (usize, usize)>(
+    pub fn update_batch(&mut self, batch: &mut [(u32, u32, Distance)]) {
+        fn do_insert<K: Fn(&(u32, u32, Distance)) -> (usize, usize)>(
             max_k: usize,
             exclusion_zone: usize,
             neighborhoods: &mut [Vec<(Distance, usize, bool)>],
             dirty: &mut [bool],
-            batch: &[(usize, usize, Distance)],
+            batch: &[(u32, u32, Distance)],
             extract: K,
         ) {
             // TODO: batch accesses to the same neighborhood
             for tup in batch {
                 let (src, dst) = extract(tup);
                 let d = tup.2;
+                if d.0.is_infinite() {
+                    continue;
+                }
                 // find the place in the neighborhood of `src` to insert `dst`, by distance
                 let neighborhood = &mut neighborhoods[src];
                 let mut i = 0;
@@ -260,7 +345,7 @@ impl KnnGraph {
                     i += 1;
                 }
                 // TODO: also skip inserting if the distance is too large
-                if neighborhood[i].1 == dst {
+                if i < neighborhood.len() && neighborhood[i].1 == dst {
                     // continue with the next tuple, the element is already inserted
                     continue;
                 }
@@ -269,6 +354,8 @@ impl KnnGraph {
                 dirty[src] = true;
             }
         }
+        eprintln!("Updating with batch of {} points", batch.len());
+
         // run in sorted order (twice) through `batch` to optimize memory locality
         batch.sort_unstable_by_key(|tup| tup.0);
         do_insert(
@@ -277,7 +364,7 @@ impl KnnGraph {
             &mut self.neighborhoods,
             &mut self.dirty,
             &batch,
-            |tup| (tup.0, tup.1),
+            |tup| (tup.0 as usize, tup.1 as usize),
         );
 
         batch.sort_unstable_by_key(|tup| tup.1);
@@ -287,7 +374,7 @@ impl KnnGraph {
             &mut self.neighborhoods,
             &mut self.dirty,
             &batch,
-            |tup| (tup.1, tup.0),
+            |tup| (tup.1 as usize, tup.0 as usize),
         );
     }
 }
