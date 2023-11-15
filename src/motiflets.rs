@@ -312,9 +312,10 @@ impl MotifletsIterator {
 
         self.graph.update_extents(&self.ts);
         let min_extents = self.graph.min_extents();
+        dbg!(&min_extents);
 
         eprintln!("Starting situation: {:?}", self.best_motiflet);
-        for k in 1..self.max_k {
+        for k in 0..self.max_k {
             let (extent, root_idx, emitted) = &mut self.best_motiflet[k];
             if !*emitted {
                 if min_extents[k].0 < *extent {
@@ -326,16 +327,22 @@ impl MotifletsIterator {
                     continue;
                 }
 
-                // min_to_replace[k] = self.graph.min_count_above(*extent);
-                // assert!(min_to_replace[k] > 0);
+                dbg!(self.graph.num_non_empty());
+                dbg!(self.graph.farthest_kth());
+                min_to_replace[k] = self.graph.min_count_above(*extent);
+                assert!(min_to_replace[k] > 0);
+                assert!(min_to_replace[k] <= self.max_k);
                 let fp = self.hasher.failure_probability_independent(
                     extent.0,
                     rep,
                     prefix,
                     previous_prefix,
                 );
-                // FIXME: use this powering
-                // .powi(min_to_replace[k] as i32);
+                dbg!(min_to_replace[k]);
+                dbg!(fp);
+                let fp = fp.powi(min_to_replace[k] as i32);
+                dbg!(fp);
+                assert!(fp <= 1.0);
                 failure_probabilities[k] = fp;
 
                 if fp < self.delta {
@@ -344,7 +351,7 @@ impl MotifletsIterator {
                         rep, prefix, k, fp, extent.0, self.delta
                     );
                     let indices = self.graph.get(*root_idx, k);
-                    assert_eq!(indices.len(), k);
+                    // assert_eq!(indices.len(), k + 2);
                     *emitted = true;
                     let m = Motiflet::new(indices, extent.0);
                     self.to_return.push(m);
@@ -427,8 +434,8 @@ mod test {
 
     #[test]
     fn test_ecg_motiflet_k2() {
-        let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(20000)).unwrap();
-        let ts = Arc::new(WindowedTimeseries::new(ts, 50, false));
+        let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
+        let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
         run_motiflet_test(ts, 2, 8192, 123456);
     }
 

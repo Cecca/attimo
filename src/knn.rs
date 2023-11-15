@@ -77,52 +77,78 @@ impl SupportBuffers {
     }
 }
 
-struct NeighborhoodPairsIterator<'neighs> {
-    neighborhood: &'neighs [(Distance, usize, bool)],
+// struct NeighborhoodPairsIterator<'neighs> {
+//     neighborhood: &'neighs [(Distance, usize, bool)],
+//     i: usize,
+//     j: usize,
+// }
+// impl<'neighs> NeighborhoodPairsIterator<'neighs> {
+//     fn new(neighborhood: &'neighs [(Distance, usize, bool)]) -> Self {
+//         assert!(neighborhood[0].2);
+//         Self {
+//             neighborhood,
+//             i: 1,
+//             j: 0,
+//         }
+//     }
+// }
+// impl<'neighs> Iterator for NeighborhoodPairsIterator<'neighs> {
+//     type Item = (usize, usize);
+//     fn next(&mut self) -> Option<Self::Item> {
+//         if self.i >= self.neighborhood.len() {
+//             return None;
+//         }
+//         // go to the first neighbor that is actually selected
+//         while self.i < self.neighborhood.len() && !self.neighborhood[self.i].2 {
+//             self.i += 1;
+//         }
+//         // pick the other one
+//         while self.j < self.i && !self.neighborhood[self.j].2 {
+//             self.j += 1;
+//         }
+//         if self.j >= self.i {
+//             self.j = 0;
+//             while self.i < self.neighborhood.len() && !self.neighborhood[self.i].2 {
+//                 self.i += 1;
+//             }
+//             if self.i == self.neighborhood.len() {
+//                 return None;
+//             }
+//         }
+//         let ret = (self.neighborhood[self.j].1, self.neighborhood[self.i].1);
+//
+//         // set up next iteration
+//         while self.j < self.i && !self.neighborhood[self.j].2 {
+//             self.j += 1;
+//         }
+//
+//         Some(ret)
+//     }
+// }
+
+/// An iterator over the elements of a neighborhood that are not shadowed by others
+struct ActiveNeighborhood<'neighs> {
     i: usize,
-    j: usize,
+    neighborhood: &'neighs [(Distance, usize, bool)],
 }
-impl<'neighs> NeighborhoodPairsIterator<'neighs> {
+impl<'neighs> ActiveNeighborhood<'neighs> {
     fn new(neighborhood: &'neighs [(Distance, usize, bool)]) -> Self {
-        assert!(neighborhood[0].2);
-        Self {
-            neighborhood,
-            i: 1,
-            j: 0,
-        }
+        Self { i: 0, neighborhood }
     }
 }
-impl<'neighs> Iterator for NeighborhoodPairsIterator<'neighs> {
-    type Item = (usize, usize);
+impl<'neighs> Iterator for ActiveNeighborhood<'neighs> {
+    type Item = (Distance, usize);
     fn next(&mut self) -> Option<Self::Item> {
-        if self.i >= self.neighborhood.len() {
-            return None;
-        }
-        // go to the first neighbor that is actually selected
         while self.i < self.neighborhood.len() && !self.neighborhood[self.i].2 {
             self.i += 1;
         }
-        // pick the other one
-        while self.j < self.i && !self.neighborhood[self.j].2 {
-            self.j += 1;
+        if self.i < self.neighborhood.len() {
+            let (dist, idx, _) = self.neighborhood[self.i];
+            self.i += 1;
+            Some((dist, idx))
+        } else {
+            None
         }
-        if self.j >= self.i {
-            self.j = 0;
-            while self.i < self.neighborhood.len() && !self.neighborhood[self.i].2 {
-                self.i += 1;
-            }
-            if self.i == self.neighborhood.len() {
-                return None;
-            }
-        }
-        let ret = (self.neighborhood[self.j].1, self.neighborhood[self.i].1);
-
-        // set up next iteration
-        while self.j < self.i && !self.neighborhood[self.j].2 {
-            self.j += 1;
-        }
-
-        Some(ret)
     }
 }
 
@@ -145,12 +171,12 @@ impl KnnGraph {
         }
     }
 
-    fn distance(&self, from: usize, to: usize) -> Option<Distance> {
-        self.neighborhoods[from]
-            .iter()
-            .find(|tup| tup.1 == to)
-            .map(|tup| tup.0)
-    }
+    // fn distance(&self, from: usize, to: usize) -> Option<Distance> {
+    //     self.neighborhoods[from]
+    //         .iter()
+    //         .find(|tup| tup.1 == to)
+    //         .map(|tup| tup.0)
+    // }
 
     fn get_distance(
         neighborhoods: &[Vec<(Distance, usize, bool)>],
@@ -215,28 +241,52 @@ impl KnnGraph {
     //     missing
     // }
 
-    pub fn extents(&self, idx: usize, output: &mut [Distance]) {
-        assert_eq!(output.len(), self.max_k);
-        output.copy_from_slice(&self.extents[idx])
+    pub fn num_non_empty(&self) -> usize {
+        self.neighborhoods.len()
+    }
+
+    /// Return the maximum distance of the k-th neighbor in
+    /// this graph.
+    pub fn farthest_kth(&self) -> Option<Distance> {
+        self.neighborhoods
+            .iter()
+            .filter_map(|nn| {
+                let mut active = ActiveNeighborhood::new(&nn);
+                // nn.iter()
+                //     .filter(|tup| tup.2)
+                active.nth(self.max_k).map(|tup| tup.0)
+            })
+            .max()
+    }
+
+    pub fn extents(&self, idx: usize) -> &[Distance] {
+        &self.extents[idx]
     }
 
     pub fn min_count_above(&self, threshold: Distance) -> usize {
-        dbg!(threshold);
-        let below = self
+        assert!(!self.neighborhoods.is_empty());
+        let (below, _data) = self
             .neighborhoods
             .iter()
             .map(|neighborhood| {
-                let cnt = neighborhood
-                    .iter()
-                    .filter(|tup| tup.2 && tup.0 <= threshold)
+                let active = ActiveNeighborhood::new(neighborhood);
+                let cnt = active
+                    .filter(|tup| tup.0 <= threshold)
+                    .take(self.max_k - 1)
                     .count();
-                if cnt == self.max_k {
-                    dbg!(&neighborhood);
-                }
-                cnt
+                // let cnt = neighborhood
+                //     .iter()
+                //     .filter(|tup| tup.2 && tup.0 <= threshold)
+                //     .take(self.max_k - 1)
+                //     .count();
+                (cnt, neighborhood)
             })
-            .max()
+            .max_by_key(|tup| tup.0)
             .unwrap();
+        // dbg!(threshold);
+        // dbg!(below);
+        // dbg!(data);
+        assert!(below <= self.max_k);
         self.max_k - below
     }
 
@@ -269,23 +319,15 @@ impl KnnGraph {
                 if !neighborhood.is_empty() {
                     extents.resize(max_k, Distance::infinity());
                     assert_eq!(extents.len(), max_k);
-                    let mut k = 0;
-                    for i in 0..neighborhood.len() {
-                        if k >= max_k {
-                            break;
-                        }
-                        if neighborhood[i].2 {
-                            extents[k] = neighborhood[i].0;
-                            for j in 0..i {
-                                if neighborhood[j].2 {
-                                    let ii = neighborhood[i].1;
-                                    let jj = neighborhood[j].1;
-                                    let d = Self::get_distance(&neighborhoods, ii, jj)
-                                        .unwrap_or_else(|| Distance(zeucl(ts, ii, jj)));
-                                    extents[k] = extents[k].max(d);
-                                }
-                            }
-                            k += 1;
+                    for (k, (dist, i)) in ActiveNeighborhood::new(neighborhood)
+                        .enumerate()
+                        .take(max_k)
+                    {
+                        extents[k] = dist;
+                        for (_, j) in ActiveNeighborhood::new(neighborhood).take(k) {
+                            let d = Self::get_distance(&neighborhoods, i, j)
+                                .unwrap_or_else(|| Distance(zeucl(ts, i, j)));
+                            extents[k] = extents[k].max(d);
                         }
                     }
                 }
@@ -302,16 +344,29 @@ impl KnnGraph {
                 }
             }
         }
-
+        for ext in &minima {
+            assert!(
+                ext.0 > Distance(0.0),
+                "Got a 0 extent for {}, whose neighbors are {:?}",
+                ext.1,
+                self.neighborhoods[ext.1]
+            );
+        }
         minima
     }
 
     pub fn get(&self, idx: usize, k: usize) -> Vec<usize> {
-        self.neighborhoods[idx]
+        let mut indices: Vec<usize> = self.neighborhoods[idx]
             .iter()
             .filter_map(|tup| if tup.2 { Some(tup.1) } else { None })
             .take(k)
-            .collect()
+            .collect();
+        let mut indices: Vec<usize> = ActiveNeighborhood::new(&self.neighborhoods[idx])
+            .map(|tup| tup.1)
+            .take(k + 1)
+            .collect();
+        indices.push(idx);
+        indices
     }
 
     fn prune(neighborhood: &mut Vec<(Distance, usize, bool)>, max_k: usize, exclusion_zone: usize) {
@@ -335,7 +390,7 @@ impl KnnGraph {
             for tup in batch {
                 let (src, dst) = extract(tup);
                 let d = tup.2;
-                if d.0.is_infinite() {
+                if d.0.is_infinite() || src.overlaps(dst, exclusion_zone) {
                     continue;
                 }
                 // find the place in the neighborhood of `src` to insert `dst`, by distance
