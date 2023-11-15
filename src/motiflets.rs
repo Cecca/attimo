@@ -69,15 +69,16 @@ fn k_nearest_neighbors_bf(
     }
     assert_eq!(ret.len(), k);
 
-    let mut extent = 0.0f64;
-    for i in 0..k {
-        for j in (i + 1)..k {
-            let d = zeucl(ts, ret[i], ret[j]);
-            extent = extent.max(d);
-        }
-    }
-
-    (Distance(extent), ret)
+    // let mut extent = 0.0f64;
+    // for i in 0..k {
+    //     for j in (i + 1)..k {
+    //         let d = zeucl(ts, ret[i], ret[j]);
+    //         extent = extent.max(d);
+    //     }
+    // }
+    //
+    // (Distance(extent), ret)
+    (compute_extent(ts, &ret), ret)
 }
 
 // Find the (approximate) motiflets by brute force: for each subsequence find its
@@ -257,7 +258,7 @@ impl MotifletsIterator {
         let pools = &self.pools;
         let ts = &self.ts;
         let graph = &mut self.graph;
-        eprintln!("[{}@{}] {:?}", rep, prefix, self.best_motiflet);
+        // eprintln!("[{}@{}] {:?}", rep, prefix, self.best_motiflet);
 
         let threshold = self.best_motiflet[self.max_k - 1].0;
 
@@ -298,7 +299,7 @@ impl MotifletsIterator {
                 graph.update_batch(self.pairs_buffer.as_mut_slice());
             }
         } // while there are collisions
-        eprintln!("[{}@{}] computed {} distances", rep, prefix, cnt_distances);
+          // eprintln!("[{}@{}] computed {} distances", rep, prefix, cnt_distances);
     }
 
     /// adds to `self.to_return` the motiflets that can
@@ -307,14 +308,13 @@ impl MotifletsIterator {
         let prefix = self.prefix;
         let previous_prefix = self.previous_prefix;
         let rep = self.rep;
-        let mut failure_probabilities = vec![0.0; self.max_k];
+        let mut failure_probabilities = vec![1.0; self.max_k];
         let mut min_to_replace = vec![0; self.max_k];
 
         self.graph.update_extents(&self.ts);
         let min_extents = self.graph.min_extents();
-        dbg!(&min_extents);
 
-        eprintln!("Starting situation: {:?}", self.best_motiflet);
+        // eprintln!("min extents: {:?}", min_extents);
         for k in 0..self.max_k {
             let (extent, root_idx, emitted) = &mut self.best_motiflet[k];
             if !*emitted {
@@ -322,13 +322,10 @@ impl MotifletsIterator {
                     *extent = min_extents[k].0;
                     *root_idx = min_extents[k].1;
                 }
-                dbg!(k);
                 if (min_extents[k].0).0.is_infinite() {
                     continue;
                 }
 
-                dbg!(self.graph.num_non_empty());
-                dbg!(self.graph.farthest_kth());
                 min_to_replace[k] = self.graph.min_count_above(*extent);
                 assert!(min_to_replace[k] > 0);
                 assert!(min_to_replace[k] <= self.max_k);
@@ -338,31 +335,34 @@ impl MotifletsIterator {
                     prefix,
                     previous_prefix,
                 );
-                dbg!(min_to_replace[k]);
-                dbg!(fp);
                 let fp = fp.powi(min_to_replace[k] as i32);
-                dbg!(fp);
                 assert!(fp <= 1.0);
                 failure_probabilities[k] = fp;
 
                 if fp < self.delta {
-                    eprintln!(
-                        "[{}@{}] Failure probability for k={} is {} (extent {}, threshold {})",
-                        rep, prefix, k, fp, extent.0, self.delta
-                    );
+                    // eprintln!(
+                    //     "[{}@{}] Failure probability for k={} is {} (extent {}, threshold {})",
+                    //     rep, prefix, k, fp, extent.0, self.delta
+                    // );
                     let indices = self.graph.get(*root_idx, k);
                     // assert_eq!(indices.len(), k + 2);
                     *emitted = true;
+                    assert_eq!(
+                        extent,
+                        &compute_extent(&self.ts, &indices),
+                        "extent is wrong for subsequence whose computed extents are {:?}",
+                        self.graph.extents(*root_idx)
+                    );
                     let m = Motiflet::new(indices, extent.0);
                     self.to_return.push(m);
                 }
             }
         }
-        eprintln!("[{}@{}] min_to_replace {:?}", rep, prefix, min_to_replace);
-        eprintln!(
-            "[{}@{}] Failure probabilities {:?}",
-            rep, prefix, failure_probabilities
-        );
+        // eprintln!("[{}@{}] min_to_replace {:?}", rep, prefix, min_to_replace);
+        // eprintln!(
+        //     "[{}@{}] Failure probabilities {:?}",
+        //     rep, prefix, failure_probabilities
+        // );
     }
 }
 
@@ -421,6 +421,10 @@ mod test {
             let motiflet = &motiflets[&k];
             let mut motiflet_indices = motiflet.indices();
             eprintln!("Extent of discovered motiflet {}", motiflet.extent());
+            assert_eq!(
+                motiflet.extent(),
+                compute_extent(&ts, &motiflet_indices).into()
+            );
             motiflet_indices.sort();
 
             let (ground_extent, mut ground_indices): (f64, Vec<usize>) =
