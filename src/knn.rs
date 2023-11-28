@@ -302,8 +302,6 @@ impl KnnGraph {
     }
 
     pub fn update_extents(&mut self, ts: &WindowedTimeseries) {
-        use std::fmt::Write;
-        // eprintln!("updating the extents");
         let max_k = self.max_k;
         // TODO: do the computation only for neighborhoods that changed since last call
         self.fix_flags();
@@ -328,18 +326,9 @@ impl KnnGraph {
             .iter_mut()
             .zip(neighborhoods)
             .enumerate()
-            .for_each(|(subsequence_idx, (extents, neighborhood))| {
+            .for_each(|(_subsequence_idx, (extents, neighborhood))| {
                 if !neighborhood.is_empty() {
-                    let mut trace = String::new();
                     extents.resize(max_k, Distance::infinity());
-                    writeln!(trace, "Subsequence {} ====", subsequence_idx).unwrap();
-                    writeln!(trace, "initial extents {:?}", extents).unwrap();
-                    writeln!(
-                        trace,
-                        "neighborhood {:#?}",
-                        ActiveNeighborhood::new(neighborhood).collect::<Vec<(Distance, usize)>>()
-                    );
-                    // extents.fill(Distance::infinity());
                     assert_eq!(extents.len(), max_k);
                     for (k, (dist, i)) in ActiveNeighborhood::new(neighborhood)
                         .enumerate()
@@ -350,15 +339,13 @@ impl KnnGraph {
                         } else {
                             extents[k] = dist.max(extents[k - 1]);
                         }
-                        writeln!(trace, "iteration k={}, initial extent {}", k, extents[k]);
                         for (_, j) in ActiveNeighborhood::new(neighborhood).take(k) {
                             let d = Self::get_distance(&neighborhoods, i, j)
                                 .unwrap_or_else(|| Distance(zeucl(ts, i, j)));
                             extents[k] = extents[k].max(d);
-                            writeln!(trace, "pair {}, {} -> {}", i, j, extents[k]);
                         }
                     }
-                    assert!(extents.is_sorted(), "\n{}", trace);
+                    assert!(extents.is_sorted());
                 }
             });
     }
@@ -418,7 +405,6 @@ impl KnnGraph {
             // TODO: batch accesses to the same neighborhood
             for tup in batch {
                 let (src, dst) = extract(tup);
-                let show = src == 5106;
                 let d = tup.2;
                 if d.0.is_infinite() || src.overlaps(dst, exclusion_zone) {
                     continue;
@@ -439,13 +425,10 @@ impl KnnGraph {
                 // in the removal of some points that should have been kept
                 // KnnGraph::prune(neighborhood, max_k, exclusion_zone);
                 assert!(neighborhood.is_sorted());
-                if show {
-                    eprintln!("Neighborhood for {}: {:?}", src, neighborhood);
-                }
+
                 dirty[src] = true;
             }
         }
-        // eprintln!("Updating with batch of {} points", batch.len());
 
         // run in sorted order (twice) through `batch` to optimize memory locality
         batch.sort_unstable_by_key(|tup| tup.0);
