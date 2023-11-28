@@ -138,6 +138,7 @@ impl<'neighs> ActiveNeighborhood<'neighs> {
 }
 impl<'neighs> Iterator for ActiveNeighborhood<'neighs> {
     type Item = (Distance, usize);
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         while self.i < self.neighborhood.len() && !self.neighborhood[self.i].2 {
             self.i += 1;
@@ -172,6 +173,7 @@ pub struct KnnGraph {
     neighborhoods: Vec<Vec<(Distance, usize, bool)>>,
     extents: Vec<Vec<Distance>>,
     dirty: Vec<bool>,
+    changed: Vec<bool>,
 }
 
 impl KnnGraph {
@@ -182,6 +184,7 @@ impl KnnGraph {
             neighborhoods: vec![Vec::new(); n],
             dirty: vec![false; n],
             extents: vec![Vec::new(); n],
+            changed: vec![false; n],
         }
     }
 
@@ -212,23 +215,29 @@ impl KnnGraph {
     fn fix_flags(&mut self) {
         for idx in 0..self.dirty.len() {
             if !self.dirty[idx] {
+                self.changed[idx] = false;
                 continue;
             }
             let neighborhood = &mut self.neighborhoods[idx];
             let prev_cnt = neighborhood.iter().filter(|tup| tup.2).count();
-            for tup in neighborhood.iter_mut() {
-                tup.2 = false;
-            }
+            // for tup in neighborhood.iter_mut() {
+            //     tup.2 = false;
+            // }
             let mut i = 0;
+            let mut changed = false;
             while i < neighborhood.len() {
-                if !neighborhood[i].overlaps(&neighborhood[..i], self.exclusion_zone) {
-                    neighborhood[i].2 = true;
-                }
+                // is the subsequence shadowed because it overlaps with an earlier one?
+                let shadowed = neighborhood[i].overlaps(&neighborhood[..i], self.exclusion_zone);
+                // store if we are flipping the flag
+                changed |= neighborhood[i].2 != !shadowed;
+                // possibly flip the flag
+                neighborhood[i].2 = !shadowed;
                 i += 1;
             }
+            self.changed[idx] = changed;
             let new_cnt = neighborhood.iter().filter(|tup| tup.2).count();
             assert!(prev_cnt <= new_cnt);
-            // TODO: remove points that are overlapped by sufficiently many others
+            // FIXME: remove points that are overlapped by sufficiently many others
             self.dirty[idx] = false;
         }
     }
@@ -276,7 +285,7 @@ impl KnnGraph {
 
     pub fn min_count_above(&self, threshold: Distance) -> usize {
         assert!(!self.neighborhoods.is_empty());
-        let (below, _data) = self
+        let below = self
             .neighborhoods
             .iter()
             .map(|neighborhood| {
@@ -285,49 +294,28 @@ impl KnnGraph {
                     .filter(|tup| tup.0 <= threshold)
                     .take(self.max_k - 1)
                     .count();
-                // let cnt = neighborhood
-                //     .iter()
-                //     .filter(|tup| tup.2 && tup.0 <= threshold)
-                //     .take(self.max_k - 1)
-                //     .count();
-                (cnt, neighborhood)
+                cnt
             })
-            .max_by_key(|tup| tup.0)
+            .max()
             .unwrap();
-        // dbg!(threshold);
-        // dbg!(below);
-        // dbg!(data);
         assert!(below <= self.max_k);
         self.max_k - below
     }
 
     pub fn update_extents(&mut self, ts: &WindowedTimeseries) {
-        let max_k = self.max_k;
-        // TODO: do the computation only for neighborhoods that changed since last call
         self.fix_flags();
 
-        // First we compute any distance that might be missing to compute the extents
-        // let mut resolved_distances: Vec<(u32, u32, Distance)> = self.missing_distances();
-        //
-        // eprintln!("{} distances to resolve", resolved_distances.len());
-        // resolved_distances.iter_mut().for_each(|(i, j, dist)| {
-        //     *dist = Distance(zeucl(ts, *i as usize, *j as usize));
-        // });
-        //
-        // eprintln!("Batch update: {:?}", resolved_distances);
-        // self.update_batch(&mut resolved_distances);
-        // self.fix_flags();
-
+        let max_k = self.max_k;
         let neighborhoods = &self.neighborhoods;
 
         // now we can compute the extents
-        // TODO: skip computations if neighborhood not updated
         self.extents
             .iter_mut()
             .zip(neighborhoods)
+            .zip(&self.changed)
             .enumerate()
-            .for_each(|(_subsequence_idx, (extents, neighborhood))| {
-                if !neighborhood.is_empty() {
+            .for_each(|(_subsequence_idx, ((extents, neighborhood), changed))| {
+                if !neighborhood.is_empty() && *changed {
                     extents.resize(max_k, Distance::infinity());
                     assert_eq!(extents.len(), max_k);
                     for (k, (dist, i)) in ActiveNeighborhood::new(neighborhood)
@@ -430,8 +418,6 @@ impl KnnGraph {
             }
         }
 
-        // run in sorted order (twice) through `batch` to optimize memory locality
-        batch.sort_unstable_by_key(|tup| tup.0);
         do_insert(
             self.max_k,
             self.exclusion_zone,
@@ -441,7 +427,6 @@ impl KnnGraph {
             |tup| (tup.0 as usize, tup.1 as usize),
         );
 
-        batch.sort_unstable_by_key(|tup| tup.1);
         do_insert(
             self.max_k,
             self.exclusion_zone,
