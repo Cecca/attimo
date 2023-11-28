@@ -5,7 +5,7 @@ use crate::{
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 use rayon::prelude::*;
-use std::{cmp::Reverse, collections::BinaryHeap, collections::HashMap, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 
 /// Find the `k` nearest neighbors of the given `from` subsequence, respecting the
 /// given `exclusion_zone`. Returns a pair where the first element is the extent
@@ -69,15 +69,6 @@ fn k_nearest_neighbors_bf(
     }
     assert_eq!(ret.len(), k);
 
-    // let mut extent = 0.0f64;
-    // for i in 0..k {
-    //     for j in (i + 1)..k {
-    //         let d = zeucl(ts, ret[i], ret[j]);
-    //         extent = extent.max(d);
-    //     }
-    // }
-    //
-    // (Distance(extent), ret)
     (compute_extent(ts, &ret), ret)
 }
 
@@ -164,8 +155,6 @@ impl Motiflet {
 pub struct MotifletsIterator {
     pub max_k: usize,
     ts: Arc<WindowedTimeseries>,
-    fft_data: FFTData,
-    threads: usize,
     best_motiflet: Vec<(Distance, usize, bool)>,
     graph: KnnGraph,
     to_return: Vec<Motiflet>,
@@ -176,7 +165,6 @@ pub struct MotifletsIterator {
     pools: Arc<HashCollection>,
     buffers: ColumnBuffers,
     pairs_buffer: Vec<(u32, u32, Distance)>,
-    support_buffers: SupportBuffers,
     /// the current repetition
     rep: usize,
     /// the current hash prefix
@@ -219,12 +207,9 @@ impl MotifletsIterator {
 
         let best_motiflet = vec![(Distance(std::f64::INFINITY), 0, false); max_k];
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
-        let support_buffers = SupportBuffers::new(&ts);
 
         Self {
             ts,
-            fft_data,
-            threads,
             best_motiflet,
             graph: KnnGraph::new(max_k, n, exclusion_zone),
             max_k,
@@ -236,7 +221,6 @@ impl MotifletsIterator {
             pools,
             buffers: ColumnBuffers::default(),
             pairs_buffer,
-            support_buffers,
             rep: 0,
             prefix: lsh::K,
             previous_prefix: None,
@@ -249,16 +233,13 @@ impl MotifletsIterator {
 
     /// Update the neighborhoods with collisions
     fn update_neighborhoods(&mut self) {
-        let n = self.ts.num_subsequences();
         let prefix = self.prefix;
         let previous_prefix = self.previous_prefix;
         let rep = self.rep;
         let exclusion_zone = self.exclusion_zone;
-        let max_k = self.max_k;
         let pools = &self.pools;
         let ts = &self.ts;
         let graph = &mut self.graph;
-        // eprintln!("[{}@{}] {:?}", rep, prefix, self.best_motiflet);
 
         let threshold = self.best_motiflet[self.max_k - 1].0;
 
@@ -299,7 +280,6 @@ impl MotifletsIterator {
                 graph.update_batch(self.pairs_buffer.as_mut_slice());
             }
         } // while there are collisions
-          // eprintln!("[{}@{}] computed {} distances", rep, prefix, cnt_distances);
     }
 
     /// adds to `self.to_return` the motiflets that can
@@ -309,12 +289,11 @@ impl MotifletsIterator {
         let previous_prefix = self.previous_prefix;
         let rep = self.rep;
         let mut failure_probabilities = vec![1.0; self.max_k];
-        let mut min_to_replace = vec![0; self.max_k];
 
+        // first we update the best motiflets
         self.graph.update_extents(&self.ts);
         let min_extents = self.graph.min_extents();
-
-        // eprintln!("min extents: {:?}", min_extents);
+        let mut thresholds = Vec::with_capacity(self.max_k);
         for k in 0..self.max_k {
             let (extent, root_idx, emitted) = &mut self.best_motiflet[k];
             if !*emitted {
@@ -322,11 +301,19 @@ impl MotifletsIterator {
                     *extent = min_extents[k].0;
                     *root_idx = min_extents[k].1;
                 }
-                if (min_extents[k].0).0.is_infinite() {
-                    continue;
-                }
+                thresholds.push(*extent);
+            } else {
+                thresholds.push(Distance::infinity());
+            }
+        }
 
-                min_to_replace[k] = self.graph.min_count_above(*extent);
+        // then, we populate the min_to replace vector
+        let min_to_replace = self.graph.min_count_above_many(&thresholds);
+
+        // finally, we possibly output the points
+        for k in 0..self.max_k {
+            let (extent, root_idx, emitted) = &mut self.best_motiflet[k];
+            if !*emitted && extent.0.is_finite() {
                 assert!(min_to_replace[k] > 0);
                 assert!(min_to_replace[k] <= self.max_k);
                 let fp = self.hasher.failure_probability_independent(
@@ -340,10 +327,6 @@ impl MotifletsIterator {
                 failure_probabilities[k] = fp;
 
                 if fp < self.delta {
-                    // eprintln!(
-                    //     "[{}@{}] Failure probability for k={} is {} (extent {}, threshold {})",
-                    //     rep, prefix, k, fp, extent.0, self.delta
-                    // );
                     let indices = self.graph.get(*root_idx, k);
                     *emitted = true;
                     let m = Motiflet::new(indices, extent.0);
@@ -365,8 +348,11 @@ impl Iterator for MotifletsIterator {
             }
 
             self.update_neighborhoods();
-            // self.resolve_most_promising();
             self.emit_confirmed();
+
+            if self.rep % 128 == 0 {
+                eprintln!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
+            }
 
             // Advance
             self.rep += 1;
@@ -385,10 +371,11 @@ impl Iterator for MotifletsIterator {
 mod test {
     use super::*;
     use crate::load::loadts;
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     fn run_motiflet_test(ts: Arc<WindowedTimeseries>, k: usize, repetitions: usize, seed: u64) {
-        let failure_probability = 0.1; // / (k as f64);
+        let failure_probability = 0.1;
         let exclusion_zone = ts.w;
 
         let iter = MotifletsIterator::new(
@@ -400,7 +387,6 @@ mod test {
             seed,
             false,
         );
-        // let result: Vec<Motiflet> = iter.collect();
         let motiflets: HashMap<usize, Motiflet> = iter.map(|m| (m.support(), m)).collect();
         dbg!(&motiflets);
 

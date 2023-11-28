@@ -1,6 +1,6 @@
 use crate::{
     distance::zeucl,
-    timeseries::{overlap_count, FFTData, Overlaps, WindowedTimeseries},
+    timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
@@ -77,55 +77,6 @@ impl SupportBuffers {
     }
 }
 
-// struct NeighborhoodPairsIterator<'neighs> {
-//     neighborhood: &'neighs [(Distance, usize, bool)],
-//     i: usize,
-//     j: usize,
-// }
-// impl<'neighs> NeighborhoodPairsIterator<'neighs> {
-//     fn new(neighborhood: &'neighs [(Distance, usize, bool)]) -> Self {
-//         assert!(neighborhood[0].2);
-//         Self {
-//             neighborhood,
-//             i: 1,
-//             j: 0,
-//         }
-//     }
-// }
-// impl<'neighs> Iterator for NeighborhoodPairsIterator<'neighs> {
-//     type Item = (usize, usize);
-//     fn next(&mut self) -> Option<Self::Item> {
-//         if self.i >= self.neighborhood.len() {
-//             return None;
-//         }
-//         // go to the first neighbor that is actually selected
-//         while self.i < self.neighborhood.len() && !self.neighborhood[self.i].2 {
-//             self.i += 1;
-//         }
-//         // pick the other one
-//         while self.j < self.i && !self.neighborhood[self.j].2 {
-//             self.j += 1;
-//         }
-//         if self.j >= self.i {
-//             self.j = 0;
-//             while self.i < self.neighborhood.len() && !self.neighborhood[self.i].2 {
-//                 self.i += 1;
-//             }
-//             if self.i == self.neighborhood.len() {
-//                 return None;
-//             }
-//         }
-//         let ret = (self.neighborhood[self.j].1, self.neighborhood[self.i].1);
-//
-//         // set up next iteration
-//         while self.j < self.i && !self.neighborhood[self.j].2 {
-//             self.j += 1;
-//         }
-//
-//         Some(ret)
-//     }
-// }
-
 /// An iterator over the elements of a neighborhood that are not shadowed by others
 struct ActiveNeighborhood<'neighs> {
     i: usize,
@@ -167,6 +118,14 @@ pub fn compute_extent(ts: &WindowedTimeseries, indices: &[usize]) -> Distance {
     Distance(extent)
 }
 
+/// this structure reports some statistics, mainly for debugging purposes
+#[derive(Debug, Clone, Copy, Default)]
+pub struct KnnGraphStats {
+    total_neighbors: usize,
+    max_neighbors: usize,
+    mean_neighbors: f64,
+}
+
 pub struct KnnGraph {
     max_k: usize,
     exclusion_zone: usize,
@@ -188,12 +147,18 @@ impl KnnGraph {
         }
     }
 
-    // fn distance(&self, from: usize, to: usize) -> Option<Distance> {
-    //     self.neighborhoods[from]
-    //         .iter()
-    //         .find(|tup| tup.1 == to)
-    //         .map(|tup| tup.0)
-    // }
+    pub fn stats(&self) -> KnnGraphStats {
+        let mut stats = KnnGraphStats::default();
+
+        for neighborhood in &self.neighborhoods {
+            let n_neighs = neighborhood.len();
+            stats.total_neighbors += n_neighs;
+            stats.max_neighbors = stats.max_neighbors.max(n_neighs);
+        }
+        stats.mean_neighbors = stats.total_neighbors as f64 / self.neighborhoods.len() as f64;
+
+        stats
+    }
 
     fn get_distance(
         neighborhoods: &[Vec<(Distance, usize, bool)>],
@@ -281,6 +246,36 @@ impl KnnGraph {
 
     pub fn extents(&self, idx: usize) -> &[Distance] {
         &self.extents[idx]
+    }
+
+    pub fn min_count_above_many(&self, thresholds: &[Distance]) -> Vec<usize> {
+        assert!(!self.neighborhoods.is_empty());
+        let mut output = vec![0; thresholds.len()];
+        let mut local_counts = vec![0; thresholds.len()];
+
+        self.neighborhoods.iter().for_each(|neighborhood| {
+            local_counts.fill(0);
+            for (i, tup) in ActiveNeighborhood::new(neighborhood)
+                .take(self.max_k - 1)
+                .enumerate()
+            {
+                if tup.0 <= thresholds[i] {
+                    local_counts[i] += 1;
+                }
+            }
+
+            for (below, cnt) in output.iter_mut().zip(local_counts.iter()) {
+                if cnt > below {
+                    *below = *cnt;
+                }
+            }
+        });
+
+        for below in output.iter_mut() {
+            assert!(*below <= self.max_k);
+            *below = self.max_k - *below;
+        }
+        output
     }
 
     pub fn min_count_above(&self, threshold: Distance) -> usize {
@@ -373,17 +368,8 @@ impl KnnGraph {
         indices
     }
 
-    fn prune(neighborhood: &mut Vec<(Distance, usize, bool)>, max_k: usize, exclusion_zone: usize) {
-        for i in (max_k..neighborhood.len()).rev() {
-            if overlap_count(&neighborhood[i], &neighborhood[..i], exclusion_zone) > max_k + 1 {
-                neighborhood.remove(i);
-            }
-        }
-    }
-
     pub fn update_batch(&mut self, batch: &mut [(u32, u32, Distance)]) {
         fn do_insert<K: Fn(&(u32, u32, Distance)) -> (usize, usize)>(
-            max_k: usize,
             exclusion_zone: usize,
             neighborhoods: &mut [Vec<(Distance, usize, bool)>],
             dirty: &mut [bool],
@@ -409,9 +395,6 @@ impl KnnGraph {
                     continue;
                 }
                 neighborhood.insert(i, (d, dst, false));
-                // FIXME: The pruning is at times too aggressive and might result
-                // in the removal of some points that should have been kept
-                // KnnGraph::prune(neighborhood, max_k, exclusion_zone);
                 assert!(neighborhood.is_sorted());
 
                 dirty[src] = true;
@@ -419,7 +402,6 @@ impl KnnGraph {
         }
 
         do_insert(
-            self.max_k,
             self.exclusion_zone,
             &mut self.neighborhoods,
             &mut self.dirty,
@@ -428,7 +410,6 @@ impl KnnGraph {
         );
 
         do_insert(
-            self.max_k,
             self.exclusion_zone,
             &mut self.neighborhoods,
             &mut self.dirty,
