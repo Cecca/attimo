@@ -399,22 +399,29 @@ impl HashCollection {
         (k_left, k_right)
     }
 
+    fn hash32(input: [u8; K], prefix: usize) -> u32 {
+        let mut a = [0u8; K_HALF];
+        let mut b = [0u8; K_HALF];
+        if prefix <= K_HALF {
+            a[..prefix].copy_from_slice(&input[..prefix]);
+            u32::from_be_bytes(a)
+        } else {
+            a.copy_from_slice(&input[..K_HALF]);
+            b[..prefix - K_HALF].copy_from_slice(&input[K_HALF..prefix]);
+            let a = u32::from_be_bytes(a);
+            let b = u32::from_be_bytes(b);
+            a * 31 + b
+        }
+    }
+
     pub fn hash_value(&self, i: usize, prefix: usize, repetition: usize) -> HashValue {
-        let mut hv: [u8; 32] = [0; 32];
+        let mut hv: [u8; K] = [0; K];
         let (l, r) = self.half_hashes(i, repetition);
         for h in 0..usize::div_ceil(prefix, 2) {
             hv[2 * h] = l[h];
             hv[2 * h + 1] = r[h];
         }
-        HashValue(xxhash_rust::xxh32::xxh32(&hv[..prefix], 1234))
-        // let mut bytes: [u8; 8] = [0; 8];
-        // let (l, r) = self.half_hashes(i, repetition);
-        // for h in 0..usize::div_ceil(prefix, 2) {
-        //     bytes[2 * h] = l[h];
-        //     bytes[2 * h + 1] = r[h];
-        // }
-
-        // HashValue(u64::from_be_bytes(bytes))
+        HashValue(Self::hash32(hv, prefix))
     }
 
     #[cfg(test)]

@@ -1,3 +1,6 @@
+test:
+  cargo nextest run --release
+
 release-build:
   cargo build --release
 
@@ -7,11 +10,11 @@ hyperfine: release-build
 
 profile: release-build
   perf record -F 999 --call-graph dwarf -g target/release/attimo \
-    data/ECG.csv.gz \
+    data/GAP.csv.gz \
     --failure-probability 0.01 \
     --repetitions 8192 \
-    --window 1000 \
-    --motiflets 10
+    --window 600 \
+    --motiflets 3
 
 live-profile:
   perf record -F 999 --call-graph dwarf -g -p $(pgrep attimo)
