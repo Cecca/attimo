@@ -258,8 +258,7 @@ impl MotifletsIterator {
             });
 
         let mut cnt_candidates = 0;
-        for (tid, buffer) in self.buffers.iter().enumerate() {
-            let rep = base_rep + tid;
+        for buffer in self.buffers.iter() {
             if let Some(mut enumerator) = buffer.enumerator() {
                 while let Some(cnt) =
                     enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone)
@@ -271,24 +270,20 @@ impl MotifletsIterator {
                         .for_each(|(a, b, dist)| {
                             let a = *a as usize;
                             let b = *b as usize;
-                            if let Some(first_colliding_repetition) =
-                                pools.first_collision(a, b, prefix)
+                            if previous_prefix
+                                .map(|prefix| pools.first_collision(a, b, prefix).is_none())
+                                .unwrap_or(true)
                             {
-                                if first_colliding_repetition == rep
-                                    && previous_prefix
-                                        .map(|prefix| pools.first_collision(a, b, prefix).is_none())
-                                        .unwrap_or(true)
-                                {
-                                    let d = Distance(zeucl(ts, a, b));
-                                    if d <= threshold {
-                                        // we only schedule the pair to update the respective
-                                        // neighborhoods if it can result in a better motiflet.
-                                        *dist = d;
-                                    } else {
-                                        *dist = Distance(std::f64::INFINITY);
-                                    }
+                                let d = Distance(zeucl(ts, a, b));
+                                if d <= threshold {
+                                    // we only schedule the pair to update the respective
+                                    // neighborhoods if it can result in a better motiflet.
+                                    *dist = d;
+                                } else {
+                                    *dist = Distance(std::f64::INFINITY);
                                 }
                             }
+                            // }
                         });
 
                     // Update the neighborhoods
@@ -368,8 +363,9 @@ impl Iterator for MotifletsIterator {
             self.update_neighborhoods();
             self.emit_confirmed();
 
-            if self.rep % 128 == 0 {
+            if self.rep % 512 == 0 {
                 eprintln!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
+                eprintln!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             }
 
             // Advance
