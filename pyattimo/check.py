@@ -1,6 +1,9 @@
 # A scratch Python file to try out the API
 import pyattimo
 import time
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 ts = pyattimo.load_dataset("ecg")
 

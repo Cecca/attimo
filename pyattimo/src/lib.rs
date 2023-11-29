@@ -299,6 +299,7 @@ pub fn motiflet_brute_force(
 
 #[pymodule]
 fn pyattimo(_py: Python, m: &PyModule) -> PyResult<()> {
+    pyo3_log::init();
     m.add_function(wrap_pyfunction!(motiflet_brute_force, m)?)?;
     m.add_class::<MotifsIterator>()?;
     m.add_class::<MotifletsIterator>()?;

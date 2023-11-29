@@ -12,3 +12,4 @@ crate-type = ["cdylib"]
 anyhow = "1.0"
 pyo3 = { version = "0.19", features = ["extension-module", "anyhow", "abi3", "abi3-py37"] }
 attimo = { path = ".." }
+pyo3-log = "0.9.0"
