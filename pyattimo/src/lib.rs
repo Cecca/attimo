@@ -1,4 +1,3 @@
-use attimo::motiflets::probabilistic_motiflets;
 use attimo::motifs::{MotifsEnumerator, PairMotifState};
 use attimo::timeseries::WindowedTimeseries;
 use pyo3::prelude::*;
@@ -41,14 +40,6 @@ pub struct KMotiflet {
 }
 
 impl KMotiflet {
-    fn with_context(m: attimo::motiflets::Motiflet, ts: Arc<WindowedTimeseries>) -> Self {
-        Self {
-            support: m.support(),
-            indices: m.indices(),
-            extent: m.extent(),
-            ts,
-        }
-    }
     fn new(extent: f64, indices: Vec<usize>, support: usize, ts: Arc<WindowedTimeseries>) -> Self {
         Self {
             support,
@@ -248,7 +239,7 @@ struct MotifletsIterator {
 #[pymethods]
 impl MotifletsIterator {
     #[new]
-    #[pyo3(signature=(ts, w, max_k = 100, exclusion_zone=None, repetitions=1000, delta = 0.05, seed = 1234))]
+    #[pyo3(signature=(ts, w, max_k = 10, exclusion_zone=None, repetitions=4096, delta = 0.05, seed = 1234))]
     fn new(
         ts: Vec<f64>,
         w: usize,
@@ -276,14 +267,13 @@ impl MotifletsIterator {
         slf
     }
 
-    fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<KMotiflet> {
-        slf.inner
-            .next()
-            .map(|m| KMotiflet::new(m.extent(), m.indices(), m.support(), slf.inner.get_ts()))
-    }
-
-    fn __len__(&self) -> usize {
-        self.inner.max_k
+    fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<KMotiflet>> {
+        let py = slf.py();
+        let res = slf
+            .inner
+            .next_interruptible(|| Python::check_signals(py))?
+            .map(|m| KMotiflet::new(m.extent(), m.indices(), m.support(), slf.inner.get_ts()));
+        Ok(res)
     }
 }
 

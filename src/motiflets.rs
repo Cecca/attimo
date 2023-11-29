@@ -348,16 +348,18 @@ impl MotifletsIterator {
             }
         }
     }
-}
 
-impl Iterator for MotifletsIterator {
-    type Item = Motiflet;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    pub fn next_interruptible<E, F: FnMut() -> Result<(), E>>(
+        &mut self,
+        mut f: F,
+    ) -> Result<Option<Motiflet>, E> {
         while self.to_return.is_empty() {
+            // Give the chance to the caller to interrupt the computation
+            // by returning an `Err` in this call
+            f()?;
             // check the stopping condition: everything is confirmed
             if self.best_motiflet[1..].iter().all(|tup| tup.2) {
-                return None;
+                return Ok(None);
             }
 
             self.update_neighborhoods();
@@ -377,7 +379,16 @@ impl Iterator for MotifletsIterator {
             }
         }
 
-        self.to_return.pop()
+        Ok(self.to_return.pop())
+    }
+}
+
+impl Iterator for MotifletsIterator {
+    type Item = Motiflet;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // call the interruptive iterator, without interrupting
+        self.next_interruptible(|| Ok::<(), ()>(())).unwrap()
     }
 }
 

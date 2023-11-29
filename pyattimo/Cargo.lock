@@ -84,7 +84,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "argh",
- "crossbeam-skiplist",
  "fast-float",
  "flate2",
  "indicatif",
@@ -101,7 +100,6 @@ dependencies = [
  "slog-scope",
  "statrs",
  "thread_local",
- "xxhash-rust",
 ]
 
 [[package]]
@@ -243,18 +241,6 @@ dependencies = [
  "cfg-if",
  "crossbeam-utils",
  "memoffset",
- "scopeguard",
-]
-
-[[package]]
-name = "crossbeam-skiplist"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "883a5821d7d079fcf34ac55f27a833ee61678110f6b97637cc74513c0d0b42fc"
-dependencies = [
- "cfg-if",
- "crossbeam-epoch",
- "crossbeam-utils",
  "scopeguard",
 ]
 
@@ -1554,9 +1540,3 @@ name = "windows_x86_64_msvc"
 version = "0.48.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed94fce61571a4006852b7389a063ab983c02eb1bb37b47f8272ce92d06d9538"
-
-[[package]]
-name = "xxhash-rust"
-version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "735a71d46c4d68d71d4b24d03fdc2b98e38cea81730595801db779c04fe80d70"

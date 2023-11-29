@@ -1,3 +1,6 @@
+check: maturin-dev
+  python check.py
+
 bench-motiflet: maturin-dev
   python bench.py
 
