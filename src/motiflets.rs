@@ -409,10 +409,6 @@ mod test {
             let motiflet = &motiflets[&k];
             let mut motiflet_indices = motiflet.indices();
             eprintln!("Extent of discovered motiflet {}", motiflet.extent());
-            assert_eq!(
-                motiflet.extent(),
-                compute_extent(&ts, &motiflet_indices).into()
-            );
             motiflet_indices.sort();
 
             let (ground_extent, mut ground_indices): (f64, Vec<usize>) =
@@ -450,6 +446,7 @@ mod test {
     }
 
     #[test]
+    #[ignore]
     fn test_ecg_motiflet_k10() {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(20000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 50, false));

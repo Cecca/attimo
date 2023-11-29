@@ -3,10 +3,10 @@ release-build:
 
 profile: release-build
   perf record -F 999 --call-graph dwarf -g target/release/attimo \
-    data/ASTRO.csv.gz \
+    data/ECG.csv.gz \
     --failure-probability 0.01 \
     --repetitions 8192 \
-    --window 100 \
+    --window 1000 \
     --motiflets 10
 
 live-profile:
