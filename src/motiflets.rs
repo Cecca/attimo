@@ -163,7 +163,7 @@ pub struct MotifletsIterator {
     exclusion_zone: usize,
     hasher: Arc<Hasher>,
     pools: Arc<HashCollection>,
-    buffers: ColumnBuffers,
+    buffers: Vec<ColumnBuffers>,
     pairs_buffer: Vec<(u32, u32, Distance)>,
     /// the current repetition
     rep: usize,
@@ -171,6 +171,8 @@ pub struct MotifletsIterator {
     prefix: usize,
     /// the previous prefix
     previous_prefix: Option<usize>,
+    /// the number of threads used
+    threads: usize,
 }
 
 impl MotifletsIterator {
@@ -207,6 +209,10 @@ impl MotifletsIterator {
 
         let best_motiflet = vec![(Distance(std::f64::INFINITY), 0, false); max_k];
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
+        let mut buffers = Vec::with_capacity(threads);
+        for _ in 0..threads {
+            buffers.push(ColumnBuffers::default());
+        }
 
         Self {
             ts,
@@ -219,11 +225,12 @@ impl MotifletsIterator {
             exclusion_zone,
             hasher,
             pools,
-            buffers: ColumnBuffers::default(),
+            buffers,
             pairs_buffer,
             rep: 0,
             prefix: lsh::K,
             previous_prefix: None,
+            threads,
         }
     }
 
@@ -235,7 +242,7 @@ impl MotifletsIterator {
     fn update_neighborhoods(&mut self) {
         let prefix = self.prefix;
         let previous_prefix = self.previous_prefix;
-        let rep = self.rep;
+        let base_rep = self.rep;
         let exclusion_zone = self.exclusion_zone;
         let pools = &self.pools;
         let ts = &self.ts;
@@ -243,43 +250,54 @@ impl MotifletsIterator {
 
         let threshold = self.best_motiflet[self.max_k - 1].0;
 
-        let mut cnt_distances = 0;
-        self.pools
-            .group_subsequences(prefix, rep, exclusion_zone, &mut self.buffers, false);
-        if let Some(mut enumerator) = self.buffers.enumerator() {
-            while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone)
-            {
-                // Fixup the distances
-                self.pairs_buffer[0..cnt]
-                    .iter_mut()
-                    .for_each(|(a, b, dist)| {
-                        let a = *a as usize;
-                        let b = *b as usize;
-                        if let Some(first_colliding_repetition) =
-                            pools.first_collision(a, b, prefix)
-                        {
-                            if first_colliding_repetition == rep
-                                && previous_prefix
-                                    .map(|prefix| pools.first_collision(a, b, prefix).is_none())
-                                    .unwrap_or(true)
+        (base_rep..base_rep + self.threads)
+            .into_par_iter()
+            .zip(&mut self.buffers)
+            .for_each(|(rep, buffer)| {
+                pools.group_subsequences(prefix, rep, exclusion_zone, buffer, false);
+            });
+
+        let mut cnt_candidates = 0;
+        for (tid, buffer) in self.buffers.iter().enumerate() {
+            let rep = base_rep + tid;
+            if let Some(mut enumerator) = buffer.enumerator() {
+                while let Some(cnt) =
+                    enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone)
+                {
+                    cnt_candidates += cnt;
+                    // Fixup the distances
+                    self.pairs_buffer[0..cnt]
+                        .par_iter_mut()
+                        .for_each(|(a, b, dist)| {
+                            let a = *a as usize;
+                            let b = *b as usize;
+                            if let Some(first_colliding_repetition) =
+                                pools.first_collision(a, b, prefix)
                             {
-                                cnt_distances += 1;
-                                let d = Distance(zeucl(ts, a, b));
-                                if d <= threshold {
-                                    // we only schedule the pair to update the respective
-                                    // neighborhoods if it can result in a better motiflet.
-                                    *dist = d;
-                                } else {
-                                    *dist = Distance(std::f64::INFINITY);
+                                if first_colliding_repetition == rep
+                                    && previous_prefix
+                                        .map(|prefix| pools.first_collision(a, b, prefix).is_none())
+                                        .unwrap_or(true)
+                                {
+                                    let d = Distance(zeucl(ts, a, b));
+                                    if d <= threshold {
+                                        // we only schedule the pair to update the respective
+                                        // neighborhoods if it can result in a better motiflet.
+                                        *dist = d;
+                                    } else {
+                                        *dist = Distance(std::f64::INFINITY);
+                                    }
                                 }
                             }
-                        }
-                    });
+                        });
 
-                // Update the neighborhoods
-                graph.update_batch(self.pairs_buffer.as_mut_slice());
+                    // Update the neighborhoods
+                    graph.update_batch(self.pairs_buffer.as_mut_slice());
+                }
             }
-        } // while there are collisions
+            // while there are collisions
+        }
+        eprintln!("Candidate pairs {}", cnt_candidates);
     }
 
     /// adds to `self.to_return` the motiflets that can
@@ -355,7 +373,7 @@ impl Iterator for MotifletsIterator {
             }
 
             // Advance
-            self.rep += 1;
+            self.rep += self.threads;
             if self.rep >= self.repetitions {
                 self.rep = 0;
                 self.previous_prefix.replace(self.prefix);

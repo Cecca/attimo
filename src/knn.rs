@@ -123,7 +123,6 @@ pub fn compute_extent(ts: &WindowedTimeseries, indices: &[usize]) -> Distance {
 pub struct KnnGraphStats {
     total_neighbors: usize,
     max_neighbors: usize,
-    mean_neighbors: f64,
 }
 
 pub struct KnnGraph {
@@ -155,7 +154,6 @@ impl KnnGraph {
             stats.total_neighbors += n_neighs;
             stats.max_neighbors = stats.max_neighbors.max(n_neighs);
         }
-        stats.mean_neighbors = stats.total_neighbors as f64 / self.neighborhoods.len() as f64;
 
         stats
     }
