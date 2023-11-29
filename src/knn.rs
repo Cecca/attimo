@@ -274,6 +274,7 @@ impl KnnGraph {
     }
 
     pub fn update_extents(&mut self, ts: &WindowedTimeseries) {
+        use rayon::prelude::*;
         self.fix_flags();
 
         let max_k = self.max_k;
@@ -281,7 +282,7 @@ impl KnnGraph {
 
         // now we can compute the extents
         self.extents
-            .iter_mut()
+            .par_iter_mut()
             .zip(neighborhoods)
             .zip(&self.changed)
             .enumerate()
