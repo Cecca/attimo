@@ -4,6 +4,7 @@ use crate::{
     lsh::{self, ColumnBuffers, HashCollection, Hasher},
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
+use log::*;
 use rayon::prelude::*;
 use std::{sync::Arc, time::Instant};
 
@@ -85,7 +86,7 @@ pub fn brute_force_motiflets(
     let fft_data = FFTData::new(&ts);
     let n = ts.num_subsequences();
 
-    eprintln!(
+    info!(
         "Average pairwise distance: {}, maximum pairwise distance: {}",
         ts.average_pairwise_distance(1234, exclusion_zone),
         ts.maximum_distance()
@@ -122,7 +123,7 @@ pub fn brute_force_motiflets(
         .min()
         .unwrap();
     pl.finish_and_clear();
-    eprintln!("Root of motiflet is {root}");
+    info!("Root of motiflet is {root}");
     (extent.0, indices)
 }
 
@@ -190,7 +191,7 @@ impl MotifletsIterator {
         let fft_data = FFTData::new(&ts);
 
         let hasher_width = Hasher::compute_width(&ts);
-        eprintln!(
+        info!(
             "Average pairwise distance: {}",
             ts.average_pairwise_distance(seed, exclusion_zone)
         );
@@ -205,7 +206,7 @@ impl MotifletsIterator {
         let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
         let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
         let pools = Arc::new(pools);
-        eprintln!("Computed hash values in {:?}", start.elapsed());
+        info!("Computed hash values in {:?}", start.elapsed());
 
         let best_motiflet = vec![(Distance(std::f64::INFINITY), 0, false); max_k];
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
@@ -292,7 +293,7 @@ impl MotifletsIterator {
             }
             // while there are collisions
         }
-        eprintln!("Candidate pairs {}", cnt_candidates);
+        info!("Candidate pairs {}", cnt_candidates);
     }
 
     /// adds to `self.to_return` the motiflets that can
@@ -366,8 +367,8 @@ impl MotifletsIterator {
             self.emit_confirmed();
 
             if self.rep % 512 == 0 {
-                eprintln!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
-                eprintln!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
+                info!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
+                info!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             }
 
             // Advance
@@ -419,13 +420,13 @@ mod test {
             dbg!(k);
             let motiflet = &motiflets[&k];
             let mut motiflet_indices = motiflet.indices();
-            eprintln!("Extent of discovered motiflet {}", motiflet.extent());
+            info!("Extent of discovered motiflet {}", motiflet.extent());
             motiflet_indices.sort();
 
             let (ground_extent, mut ground_indices): (f64, Vec<usize>) =
                 brute_force_motiflets(&ts, k, exclusion_zone);
-            eprintln!("Ground distance of {} motiflet: {}", k, ground_extent);
-            eprintln!("Motiflet is {:?}", ground_indices);
+            info!("Ground distance of {} motiflet: {}", k, ground_extent);
+            info!("Motiflet is {:?}", ground_indices);
             ground_indices.sort();
             // check that the indices of the motiflet found are not too far away from
             // the true ones.

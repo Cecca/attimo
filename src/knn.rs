@@ -200,29 +200,9 @@ impl KnnGraph {
             self.changed[idx] = changed;
             let new_cnt = neighborhood.iter().filter(|tup| tup.2).count();
             assert!(prev_cnt <= new_cnt);
-            // FIXME: remove points that are overlapped by sufficiently many others
             self.dirty[idx] = false;
         }
     }
-
-    // fn missing_distances(&self) -> Vec<(u32, u32, Distance)> {
-    //     eprintln!("getting missing distances");
-    //     let mut missing = Vec::new();
-    //     for neighborhood in self.neighborhoods.iter() {
-    //         if !neighborhood.is_empty() {
-    //             for i in 0..neighborhood.len() {
-    //                 let ii = neighborhood[i].1;
-    //                 for j in 0..i {
-    //                     let jj = neighborhood[j].1;
-    //                     if self.distance(ii, jj).is_none() {
-    //                         missing.push((ii as u32, jj as u32, Distance::infinity()));
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     missing
-    // }
 
     pub fn num_non_empty(&self) -> usize {
         self.neighborhoods.len()
@@ -235,8 +215,6 @@ impl KnnGraph {
             .iter()
             .filter_map(|nn| {
                 let mut active = ActiveNeighborhood::new(&nn);
-                // nn.iter()
-                //     .filter(|tup| tup.2)
                 active.nth(self.max_k).map(|tup| tup.0)
             })
             .max()

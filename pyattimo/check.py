@@ -1,11 +1,16 @@
 # A scratch Python file to try out the API
 import pyattimo
+import time
 
 ts = pyattimo.load_dataset("ecg")
 
+start = time.time()
 m_iter = pyattimo.MotifletsIterator(
-    ts, w=1000, max_k=10
+    ts, w=1000, max_k=30
 )
 
 for m in m_iter:
     print(m)
+
+end = time.time()
+print("Discovered motiflets in", end - start, "seconds")

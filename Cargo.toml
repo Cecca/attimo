@@ -22,11 +22,12 @@ rustfft = "6.1"
 indicatif = "0.16"
 statrs = "0.16"
 argh = "0.1"
-log = "0.4"
-slog = "2.7"
-slog-json = "2.4"
-slog-scope = "4.4"
-slog-async = "2.7"
+log = {version = "0.4", features = ["kv_unstable"] }
+env_logger = "0.10.1"
+# slog = "2.7"
+# slog-json = "2.4"
+# slog-scope = "4.4"
+# slog-async = "2.7"
 flate2 = "1"
 pprof = {version = "0.12.1", features = ["cpp", "prost", "prost-codec"]}
 

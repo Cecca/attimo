@@ -11,8 +11,8 @@ use crate::lsh::*;
 use crate::timeseries::*;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
+use log::*;
 use rayon::prelude::*;
-use slog_scope::info;
 use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -511,16 +511,13 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
         let fft_data = FFTData::new(&ts);
 
         let hasher_width = Hasher::compute_width(&ts);
-        info!("Computed hasher width"; "hasher_width" => hasher_width);
+        debug!("hasher_width" = hasher_width; "computed hasher width");
 
-        info!("hash computation"; "tag" => "phase");
         let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
         let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
         let pools = Arc::new(pools);
-        eprintln!("Computed hash values in {:?}", start.elapsed());
+        info!("Computed hash values in {:?}", start.elapsed());
         drop(fft_data);
-
-        info!("tries exploration"; "tag" => "phase");
 
         let pbar = if show_progress {
             Some(Self::build_progress_bar(K, repetitions))

@@ -3,7 +3,6 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::path::Path;
-use std::time::Instant;
 
 pub fn loadts<P: AsRef<Path>>(path: P, prefix: Option<usize>) -> Result<Vec<f64>> {
     if path
@@ -27,7 +26,6 @@ pub fn loadts<P: AsRef<Path>>(path: P, prefix: Option<usize>) -> Result<Vec<f64>
 }
 
 fn load_from<R: BufRead>(mut reader: R, prefix: Option<usize>) -> Result<Vec<f64>> {
-    let start = Instant::now();
     let to_take = prefix.unwrap_or(usize::MAX);
     let mut res: Vec<f64> = Vec::with_capacity(10000000);
     let mut buf = String::new();
@@ -50,6 +48,5 @@ fn load_from<R: BufRead>(mut reader: R, prefix: Option<usize>) -> Result<Vec<f64
         }
         cnt += 1;
     }
-    slog_scope::info!("input reading"; "tag" => "profiling", "time_s" => start.elapsed().as_secs_f64());
     Ok(res)
 }

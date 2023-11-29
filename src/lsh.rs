@@ -30,11 +30,11 @@ use crate::knn::Distance;
 use crate::motifs::Motif;
 use crate::sort::*;
 use crate::timeseries::{FFTData, Overlaps, WindowedTimeseries};
+use log::info;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
-use slog_scope::info;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
 use std::ops::Range;
 use std::time::Duration;
@@ -341,9 +341,10 @@ impl HashCollection {
             .collect();
 
         let elapsed = timer.elapsed();
-        info!("tensor pool building";
-            "tag" => "profiling",
-            "time_s" => elapsed.as_secs_f64()
+        info!(
+            "tag" = "profiling",
+            "time_s" = elapsed.as_secs_f64();
+            "tensor pool building"
         );
 
         let trep = hasher.tensor_repetitions;
@@ -557,16 +558,17 @@ impl HashCollection {
             }
         }
         let elapsed_boundaries = timer.elapsed();
-        info!("grouping subsequences";
-            "tag" => "profiling",
-            "repetition" => repetition,
-            "depth" => depth,
-            "largest_bucket" => largest_bucket,
-            "n_buckets" => output.len(),
-            "time_bounds_s" => elapsed_boundaries.as_secs_f64(),
-            "time_hashes_s" => elapsed_hashes.as_secs_f64(),
-            "time_sort_s" => elapsed_sort.as_secs_f64(),
-            "time_s" => (elapsed_hashes + elapsed_sort + elapsed_boundaries).as_secs_f64()
+        info!(
+            "tag" = "profiling",
+            "repetition" = repetition,
+            "depth" = depth,
+            "largest_bucket" = largest_bucket,
+            "n_buckets" = output.len(),
+            "time_bounds_s" = elapsed_boundaries.as_secs_f64(),
+            "time_hashes_s" = elapsed_hashes.as_secs_f64(),
+            "time_sort_s" = elapsed_sort.as_secs_f64(),
+            "time_s" = (elapsed_hashes + elapsed_sort + elapsed_boundaries).as_secs_f64();
+            "grouping subsequences"
         );
     }
 }
@@ -758,8 +760,6 @@ impl Hasher {
         min_dist: Option<f64>,
         seed: u64,
     ) -> f64 {
-        let timer = Instant::now();
-
         // Determine a good first guess
         let n = ts.num_subsequences();
         let subsequence_norm = (ts.w as f64).sqrt();
@@ -827,7 +827,6 @@ impl Hasher {
                 r *= 2.0;
             }
             drop(probe_collection);
-            info!("width estimation"; "time_s" => timer.elapsed().as_secs_f64(), "width" => r, "tag" => "profiling");
         }
 
         return r;

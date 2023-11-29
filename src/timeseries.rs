@@ -1,7 +1,7 @@
 use crate::distance::{zdot, zeucl};
 use rand_distr::num_traits::Zero;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
-use std::{cell::RefCell, convert::TryFrom, fmt::Display, sync::Arc, time::Instant};
+use std::{cell::RefCell, convert::TryFrom, fmt::Display, sync::Arc};
 use thread_local::ThreadLocal;
 
 pub trait Overlaps<T> {
@@ -61,8 +61,6 @@ impl WindowedTimeseries {
     pub fn new(ts: Vec<f64>, w: usize, precise: bool) -> Self {
         assert!(w <= ts.len());
 
-        let timer = Instant::now();
-
         //// First we compute rolling statistics
         let (rolling_avg, rolling_sd) = if precise {
             // println!("Compute slow rolling statistics");
@@ -71,11 +69,6 @@ impl WindowedTimeseries {
             // println!("Computing fast rolling statistics");
             rolling_stat(&ts, w)
         };
-
-        slog_scope::info!("stats computation";
-            "tag" => "profiling",
-            "time_s" => timer.elapsed().as_secs_f64()
-        );
 
         WindowedTimeseries {
             data: ts,

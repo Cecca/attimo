@@ -5,9 +5,6 @@ use attimo::load::*;
 use attimo::motiflets::{brute_force_motiflets, Motiflet, MotifletsIterator};
 use attimo::motifs::{motifs, Motif};
 use attimo::timeseries::*;
-use slog::*;
-use slog_scope::GlobalLoggerGuard;
-use std::fs::OpenOptions;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -61,10 +58,6 @@ struct Config {
     /// wether meand and std computations should be at the best precision, at the expense of running time
     pub precise: bool,
 
-    #[argh(option, default = "default_log_path()")]
-    /// the file in which to store the detailed execution log
-    pub log_path: String,
-
     #[argh(option, default = "default_output()")]
     /// path to the output file
     pub output: String,
@@ -78,12 +71,9 @@ fn default_output() -> String {
     "motifs.csv".to_owned()
 }
 
-fn default_log_path() -> String {
-    ".trace.json".to_owned()
-}
-
 fn main() -> Result<()> {
     debug_assert!(false, "This executable should be run in release mode");
+    env_logger::init();
     let total_timer = Instant::now();
     if std::env::args().filter(|arg| arg == "--version").count() == 1 {
         println!("{}", VERSION);
@@ -96,27 +86,25 @@ fn main() -> Result<()> {
     let monitor_flag = Arc::new(AtomicBool::new(true));
     let monitor = allocator::monitor(Duration::from_millis(200), Arc::clone(&monitor_flag));
 
-    let _guard = setup_logger(&config.log_path)?;
-    slog_scope::info!("input reading"; "tag" => "phase");
     let path = config.path.clone();
     let w = config.window;
     let timer = Instant::now();
     let ts: Vec<f64> = loadts(path, config.prefix)?;
-    println!("Loaded raw data in {:?}", timer.elapsed());
+    log::info!("Loaded raw data in {:?}", timer.elapsed());
     let timer = Instant::now();
     let mem_before = allocated();
     let ts = WindowedTimeseries::new(ts, w, config.precise);
     let ts_bytes = allocated() - mem_before;
     let input_elapsed = timer.elapsed();
-    println!(
+    log::info!(
         "Create windowed time series with {} subsequences in {:?}, taking {}",
         ts.num_subsequences(),
         input_elapsed,
         PrettyBytes(ts_bytes)
     );
-    slog_scope::info!("input reading";
-        "tag" => "profiling",
-        "time_s" => input_elapsed.as_secs_f64()
+    log::debug!(
+        "time_s" = input_elapsed.as_secs_f64();
+        "input reading"
     );
 
     let profiler = if config.profile {
@@ -204,25 +192,4 @@ fn output_csv<P: AsRef<Path>>(path: P, motifs: &[Motif]) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn setup_logger(log_path: &str) -> Result<GlobalLoggerGuard> {
-    let file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(log_path)
-        .unwrap();
-
-    let drain = slog_json::Json::new(file)
-        .set_pretty(false)
-        .add_default_keys()
-        .build()
-        .fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    let logger = slog::Logger::root(drain, o!());
-
-    let guard = slog_scope::set_global_logger(logger);
-
-    Ok(guard)
 }

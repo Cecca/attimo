@@ -1,4 +1,3 @@
-use slog_scope::info;
 /// This module implements a thin wrapper around the system allocator
 /// that allows to count how many bytes are allocated.
 ///
@@ -8,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub struct CountingAllocator;
 
@@ -36,12 +35,9 @@ pub fn allocated() -> usize {
 pub fn monitor(period: Duration, flag: Arc<AtomicBool>) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let mut last = 0;
-        let start = Instant::now();
         while flag.load(SeqCst) {
             let mem = allocated();
             if mem != last {
-                let elapsed = start.elapsed().as_millis();
-                info!("memory"; "tag" => "memory", "elapsed_ms" => elapsed, "mem_bytes" => allocated());
                 last = mem;
             }
             std::thread::sleep(period);
@@ -52,18 +48,10 @@ pub fn monitor(period: Duration, flag: Arc<AtomicBool>) -> JoinHandle<()> {
 
 #[macro_export]
 macro_rules! alloc_cnt {
-    ($what:literal; $body:block) => {
-        {
-            let __mem_before = allocated() as isize;
-            let r = $body;
-            let __mem_after = allocated() as isize;
-            info!(
-                "allocated";
-                "what" => $what,
-                "memory_bytes" => __mem_after - __mem_before,
-                "memory_gb" => (__mem_after - __mem_before) as f64 / (1024.0 * 1024.0 * 1024.0),
-            );
-            r
-        }
-    };
+    ($what:literal; $body:block) => {{
+        let __mem_before = allocated() as isize;
+        let r = $body;
+        let __mem_after = allocated() as isize;
+        r
+    }};
 }
