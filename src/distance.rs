@@ -64,22 +64,23 @@ pub fn zdot(a: &[f64], ma: f64, sda: f64, b: &[f64], mb: f64, sdb: f64) -> f64 {
     if sda == 0.0 || sdb == 0.0 {
         return f64::NAN;
     }
-    use std::simd::f64x8;
-    let ac = a.chunks_exact(8);
-    let bc = b.chunks_exact(8);
+    use std::simd::Simd;
+    const LANES: usize = 4;
+    let ac = a.chunks_exact(LANES);
+    let bc = b.chunks_exact(LANES);
     let rem = ac
         .remainder()
         .iter()
         .zip(bc.remainder().iter())
         .map(|(a, b)| (a - ma) * (b - mb))
         .sum::<f64>() as f64;
-    let ma = f64x8::splat(ma);
-    let mb = f64x8::splat(mb);
+    let ma = Simd::<f64, LANES>::splat(ma);
+    let mb = Simd::<f64, LANES>::splat(mb);
     let part = ac
-        .map(f64x8::from_slice)
-        .zip(bc.map(f64x8::from_slice))
+        .map(Simd::<f64, LANES>::from_slice)
+        .zip(bc.map(Simd::<f64, LANES>::from_slice))
         .map(|(a, b)| (a - ma) * (b - mb))
-        .sum::<f64x8>()
+        .sum::<Simd<f64, LANES>>()
         .as_array()
         .iter()
         .sum::<f64>();
