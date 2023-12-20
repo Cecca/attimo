@@ -182,7 +182,6 @@ impl KnnGraph {
                 continue;
             }
             let neighborhood = &mut self.neighborhoods[idx];
-            let prev_cnt = neighborhood.iter().filter(|tup| tup.2).count();
             // for tup in neighborhood.iter_mut() {
             //     tup.2 = false;
             // }
@@ -198,8 +197,6 @@ impl KnnGraph {
                 i += 1;
             }
             self.changed[idx] = changed;
-            let new_cnt = neighborhood.iter().filter(|tup| tup.2).count();
-            assert!(prev_cnt <= new_cnt);
             self.dirty[idx] = false;
         }
     }
@@ -289,6 +286,7 @@ impl KnnGraph {
             .for_each(|(_subsequence_idx, ((extents, neighborhood), changed))| {
                 if !neighborhood.is_empty() && *changed {
                     extents.resize(max_k, Distance::infinity());
+                    extents.fill(Distance::infinity());
                     assert_eq!(extents.len(), max_k);
                     for (k, (dist, i)) in ActiveNeighborhood::new(neighborhood)
                         .enumerate()
