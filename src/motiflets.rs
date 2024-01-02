@@ -37,7 +37,8 @@ fn k_nearest_neighbors_bf(
     }
     // Find the likely candidates by a (partial) indirect sort of
     // the indices by increasing distance.
-    let n_candidates = (k * exclusion_zone).min(ts.num_subsequences());
+    let n_candidates = (k * exclusion_zone).min(indices.len() - 1);
+    assert!(n_candidates <= indices.len());
     indices.select_nth_unstable_by_key(n_candidates, |j| Distance(distances[*j]));
 
     // Sort the candidate indices by increasing distance (the previous step)
@@ -293,7 +294,7 @@ impl MotifletsIterator {
             }
             // while there are collisions
         }
-        info!("Candidate pairs {}", cnt_candidates);
+        debug!("Candidate pairs {}", cnt_candidates);
     }
 
     /// adds to `self.to_return` the motiflets that can

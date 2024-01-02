@@ -30,7 +30,7 @@ use crate::knn::Distance;
 use crate::motifs::Motif;
 use crate::sort::*;
 use crate::timeseries::{FFTData, Overlaps, WindowedTimeseries};
-use log::info;
+use log::{debug, info};
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -558,7 +558,7 @@ impl HashCollection {
             }
         }
         let elapsed_boundaries = timer.elapsed();
-        info!(
+        debug!(
             "tag" = "profiling",
             "repetition" = repetition,
             "depth" = depth,
