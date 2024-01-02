@@ -411,7 +411,7 @@ impl HashCollection {
             b[..prefix - K_HALF].copy_from_slice(&input[K_HALF..prefix]);
             let a = u32::from_be_bytes(a);
             let b = u32::from_be_bytes(b);
-            a * 31 + b
+            a.wrapping_mul(31).wrapping_add(b)
         }
     }
 
