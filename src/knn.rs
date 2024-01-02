@@ -370,7 +370,7 @@ impl KnnGraph {
                     continue;
                 }
                 neighborhood.insert(i, (d, dst, false));
-                assert!(neighborhood.is_sorted());
+                assert!(neighborhood.is_sorted_by_key(|tup| tup.0));
 
                 dirty[src] = true;
             }
