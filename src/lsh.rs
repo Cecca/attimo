@@ -43,8 +43,21 @@ use std::{cell::UnsafeCell, sync::Arc, time::Instant};
 pub const K: usize = 8;
 pub const K_HALF: usize = K / 2;
 
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Default)]
-pub struct HashValue(pub u32);
+#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Default)]
+pub struct HashValue(pub u64);
+
+impl From<[u8; K]> for HashValue {
+    fn from(value: [u8; K]) -> Self {
+        let hash = u64::from_le_bytes(value);
+        Self(hash)
+    }
+}
+impl std::fmt::Debug for HashValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let bytes = self.0.to_le_bytes();
+        f.debug_list().entries(bytes.iter()).finish()
+    }
+}
 
 impl GetByte for HashValue {
     fn num_bytes(&self) -> usize {
@@ -108,6 +121,7 @@ impl<'hashes> CollisionEnumerator<'hashes> {
         exclusion_zone: usize,
     ) -> Option<usize> {
         let mut idx = 0;
+        output.fill((0, 0, Distance(0.0)));
         while self.current_bucket < self.buffers.buckets.len() {
             let range = self.buffers.buckets[self.current_bucket].clone();
             while self.i < range.end {
@@ -401,32 +415,45 @@ impl HashCollection {
         (k_left, k_right)
     }
 
-    fn hash32(input: [u8; K], prefix: usize) -> u32 {
-        let mut a = [0u8; K_HALF];
-        let mut b = [0u8; K_HALF];
-        if prefix <= K_HALF {
-            a[..prefix].copy_from_slice(&input[..prefix]);
-            u32::from_be_bytes(a)
-        } else {
-            a.copy_from_slice(&input[..K_HALF]);
-            b[..prefix - K_HALF].copy_from_slice(&input[K_HALF..prefix]);
-            let a = u32::from_be_bytes(a);
-            let b = u32::from_be_bytes(b);
-            a.wrapping_mul(31).wrapping_add(b)
-        }
-    }
+    // fn hash32(input: [u8; K], prefix: usize) -> u32 {
+    //     let mut a = [0u8; K_HALF];
+    //     let mut b = [0u8; K_HALF];
+    //     if prefix <= K_HALF {
+    //         a[..prefix].copy_from_slice(&input[..prefix]);
+    //         u32::from_be_bytes(a)
+    //     } else {
+    //         a.copy_from_slice(&input[..K_HALF]);
+    //         b[..prefix - K_HALF].copy_from_slice(&input[K_HALF..prefix]);
+    //         let a = u32::from_be_bytes(a);
+    //         let b = u32::from_be_bytes(b);
+    //         a.wrapping_mul(31).wrapping_add(b)
+    //     }
+    // }
 
     pub fn hash_value(&self, i: usize, prefix: usize, repetition: usize) -> HashValue {
-        use xxhash_rust::xxh32::xxh32;
         let mut hv: [u8; K] = [0; K];
         let (l, r) = self.half_hashes(i, repetition);
-        for h in 0..usize::div_ceil(prefix, 2) {
+        for h in 0..(prefix / 2) {
             hv[2 * h] = l[h];
             hv[2 * h + 1] = r[h];
         }
-        let hash = xxh32(&hv[..prefix], 1234);
-        // HashValue(Self::hash32(hv, prefix))
+        if prefix % 2 != 0 {
+            let h = prefix / 2;
+            hv[2 * h] = l[h];
+        }
+        let hash = u64::from_le_bytes(hv);
         HashValue(hash)
+    }
+
+    pub fn empirical_collision_probability(&self, i: usize, j: usize, prefix: usize) -> f64 {
+        let collisions = (0..self.hasher.repetitions)
+            .filter(|&rep| {
+                let hi = self.hash_value(i, prefix, rep);
+                let hj = self.hash_value(j, prefix, rep);
+                hi == hj
+            })
+            .count();
+        collisions as f64 / self.hasher.repetitions as f64
     }
 
     #[cfg(test)]
@@ -443,6 +470,32 @@ impl HashCollection {
     fn get_minimal_repetition(&self, lindex: usize, rindex: usize) -> Option<usize> {
         let idx = lindex * self.hasher.tensor_repetitions + rindex;
         self.minimal_repetition_table[idx]
+    }
+
+    pub fn num_collisions(&self, i: usize, j: usize, prefix: usize) -> usize {
+        let (k_left, k_right) = Self::k_pair(prefix);
+
+        let mut lcolls = 0;
+        let mut rcolls = 0;
+
+        for trep in 0..self.hasher.tensor_repetitions {
+            let (ipool_left, ipool_right) = &self.pools[trep][i];
+            let (jpool_left, jpool_right) = &self.pools[trep][j];
+            // check left
+            let hi = &ipool_left[0..k_left];
+            let hj = &jpool_left[0..k_left];
+            if hi == hj {
+                lcolls += 1;
+            }
+            // check right
+            let hi = &ipool_right[0..k_right];
+            let hj = &jpool_right[0..k_right];
+            if hi == hj {
+                rcolls += 1;
+            }
+        }
+
+        lcolls * rcolls
     }
 
     pub fn first_collision(&self, i: usize, j: usize, prefix: usize) -> Option<usize> {
@@ -533,8 +586,10 @@ impl HashCollection {
         if parallel {
             buffer.par_sort_unstable();
         } else {
-            let mut scratch = vec![Default::default(); buffer.len()];
-            sort_hash_pairs(buffer, &mut scratch);
+            // TODO: re-enable bucket sort here
+            buffer.sort_unstable();
+            // let mut scratch = vec![Default::default(); buffer.len()];
+            // sort_hash_pairs(buffer, &mut scratch);
         }
         let elapsed_sort = start.elapsed();
         debug_assert!(buffer.is_sorted_by_key(|pair| pair.0.clone()));
@@ -867,7 +922,29 @@ impl Hasher {
 
 #[cfg(test)]
 mod test {
-    use crate::lsh::*;
+    use crate::{distance::zeucl, lsh::*};
+
+    #[test]
+    fn test_collision_probability() {
+        let w = 25;
+        let ts = crate::load::loadts("data/npo141.csv", None).expect("problem loading data");
+        let ts = crate::timeseries::WindowedTimeseries::new(ts, w, true);
+        let fft_data = FFTData::new(&ts);
+
+        let repetitions = 1 << 10;
+
+        let width = Hasher::compute_width(&ts);
+        let hasher = Arc::new(Hasher::new(w, repetitions, width, 12453));
+        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
+
+        let prefix = 7;
+        let (i, j) = (75066, 186391);
+        let d = zeucl(&ts, i, j);
+        let p = hasher.collision_probability_at(d).powi(prefix as i32);
+        let empirical = pools.empirical_collision_probability(i, j, prefix);
+        println!("d={} p={} ep={}", d, p, empirical);
+        assert!((empirical - p).abs() / p <= 0.1);
+    }
 
     #[test]
     fn test_first_collision() {

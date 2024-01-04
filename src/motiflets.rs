@@ -263,8 +263,7 @@ impl MotifletsIterator {
         let mut cnt_candidates = 0;
         let mut sum_dist = 0.0;
         let mut cnt_distances = 0;
-        for (offset_rep, buffer) in self.buffers.iter().enumerate() {
-            let rep = base_rep + offset_rep;
+        for buffer in self.buffers.iter() {
             if let Some(mut enumerator) = buffer.enumerator() {
                 while let Some(cnt) =
                     enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone)
@@ -276,12 +275,10 @@ impl MotifletsIterator {
                         .map(|(a, b, dist)| {
                             let a = *a as usize;
                             let b = *b as usize;
-                            let ha = &pools.extended_hash_value(a, rep)[..prefix];
-                            let hb = &pools.extended_hash_value(b, rep)[..prefix];
-                            assert_eq!(ha, hb);
                             if previous_prefix
                                 .map(|prefix| pools.first_collision(a, b, prefix).is_none())
                                 .unwrap_or(true)
+                            // TODO: maybe skip pairs with only one collision
                             {
                                 let d = Distance(zeucl(ts, a, b));
                                 if d <= threshold {
@@ -310,12 +307,16 @@ impl MotifletsIterator {
             }
             // while there are collisions
         }
+        let average_distance = sum_dist / cnt_distances as f64;
+        let average_distance_probability = self
+            .hasher
+            .collision_probability_at(average_distance)
+            .powi(prefix as i32);
         debug!(
-            "Candidate pairs {}, distances computed {}, average distance {}",
-            cnt_candidates,
-            cnt_distances,
-            sum_dist / cnt_distances as f64
+            "Candidate pairs {}, distances computed {}, average distance {} (p={})",
+            cnt_candidates, cnt_distances, average_distance, average_distance_probability
         );
+        // assert!(average_distance_probability.is_nan() || average_distance_probability >= 0.000001);
     }
 
     /// adds to `self.to_return` the motiflets that can

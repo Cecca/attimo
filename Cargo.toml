@@ -24,7 +24,6 @@ statrs = "0.16"
 argh = "0.1"
 log = {version = "0.4", features = ["kv_unstable"] }
 env_logger = "0.10.1"
-xxhash-rust = {version = "0.8.5", features = [ "xxh32" ]}
 # slog = "2.7"
 # slog-json = "2.4"
 # slog-scope = "4.4"

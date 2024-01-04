@@ -309,7 +309,7 @@ fn test_radix_sort_hash_pairs() {
     use rand_xoshiro::Xoshiro256PlusPlus;
 
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(12435);
-    let unif = Uniform::new_inclusive(u32::MIN, u32::MAX);
+    let unif = Uniform::new_inclusive(u64::MIN, u64::MAX);
     let v: Vec<(HashValue, u32)> = unif
         .sample_iter(&mut rng)
         .take(100000)
