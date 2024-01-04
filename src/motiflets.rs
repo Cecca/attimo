@@ -193,8 +193,9 @@ impl MotifletsIterator {
 
         let hasher_width = Hasher::compute_width(&ts);
         info!(
-            "Average pairwise distance: {}",
-            ts.average_pairwise_distance(seed, exclusion_zone)
+            "Average pairwise distance: {}, maximum pairwise distance: {}",
+            ts.average_pairwise_distance(1234, exclusion_zone),
+            ts.maximum_distance()
         );
 
         let threads = rayon::current_num_threads();
@@ -260,18 +261,24 @@ impl MotifletsIterator {
             });
 
         let mut cnt_candidates = 0;
-        for buffer in self.buffers.iter() {
+        let mut sum_dist = 0.0;
+        let mut cnt_distances = 0;
+        for (offset_rep, buffer) in self.buffers.iter().enumerate() {
+            let rep = base_rep + offset_rep;
             if let Some(mut enumerator) = buffer.enumerator() {
                 while let Some(cnt) =
                     enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone)
                 {
                     cnt_candidates += cnt;
                     // Fixup the distances
-                    self.pairs_buffer[0..cnt]
+                    let (d, c): (f64, usize) = self.pairs_buffer[0..cnt]
                         .par_iter_mut()
-                        .for_each(|(a, b, dist)| {
+                        .map(|(a, b, dist)| {
                             let a = *a as usize;
                             let b = *b as usize;
+                            let ha = &pools.extended_hash_value(a, rep)[..prefix];
+                            let hb = &pools.extended_hash_value(b, rep)[..prefix];
+                            assert_eq!(ha, hb);
                             if previous_prefix
                                 .map(|prefix| pools.first_collision(a, b, prefix).is_none())
                                 .unwrap_or(true)
@@ -284,9 +291,18 @@ impl MotifletsIterator {
                                 } else {
                                     *dist = Distance(std::f64::INFINITY);
                                 }
+                                (d.0, 1)
+                            } else {
+                                (0.0, 0)
                             }
-                            // }
-                        });
+                        })
+                        .reduce(
+                            || (0.0f64, 0usize),
+                            |accum, pair| (accum.0 + pair.0, accum.1 + pair.1),
+                        );
+
+                    sum_dist += d;
+                    cnt_distances += c;
 
                     // Update the neighborhoods
                     graph.update_batch(self.pairs_buffer.as_mut_slice());
@@ -294,7 +310,12 @@ impl MotifletsIterator {
             }
             // while there are collisions
         }
-        debug!("Candidate pairs {}", cnt_candidates);
+        debug!(
+            "Candidate pairs {}, distances computed {}, average distance {}",
+            cnt_candidates,
+            cnt_distances,
+            sum_dist / cnt_distances as f64
+        );
     }
 
     /// adds to `self.to_return` the motiflets that can

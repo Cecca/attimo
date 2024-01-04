@@ -5,10 +5,11 @@ import logging
 
 logging.basicConfig(level=logging.DEBUG)
 
-ts = pyattimo.load_dataset("ecg", 30000)
-
+ts = pyattimo.load_dataset("ecg", 1500)
+w = 25
+k = 30
 start = time.time()
-m_iter = pyattimo.MotifletsIterator(ts, w=1000, max_k=30)
+m_iter = pyattimo.MotifletsIterator(ts, w=w, max_k=k)
 
 for m in m_iter:
     print(m)

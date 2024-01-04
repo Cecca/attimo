@@ -30,7 +30,7 @@ use crate::knn::Distance;
 use crate::motifs::Motif;
 use crate::sort::*;
 use crate::timeseries::{FFTData, Overlaps, WindowedTimeseries};
-use log::{debug, info};
+use log::info;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -114,8 +114,9 @@ impl<'hashes> CollisionEnumerator<'hashes> {
                 while self.j < range.end {
                     assert!(range.contains(&self.i));
                     assert!(range.contains(&self.j));
-                    let a = self.buffers.hashes[self.i].1;
-                    let b = self.buffers.hashes[self.j].1;
+                    let (ha, a) = self.buffers.hashes[self.i];
+                    let (hb, b) = self.buffers.hashes[self.j];
+                    assert_eq!(ha, hb);
                     if !a.overlaps(b, exclusion_zone) {
                         output[idx] = (a.min(b), a.max(b), Distance(f64::INFINITY));
                         idx += 1;
@@ -380,7 +381,7 @@ impl HashCollection {
         (l, r)
     }
 
-    #[cfg(test)]
+    // #[cfg(test)]
     pub fn extended_hash_value(&self, i: usize, repetition: usize) -> [u8; K] {
         let mut output = [0; K];
         let (l, r) = self.half_hashes(i, repetition);
@@ -416,13 +417,16 @@ impl HashCollection {
     }
 
     pub fn hash_value(&self, i: usize, prefix: usize, repetition: usize) -> HashValue {
+        use xxhash_rust::xxh32::xxh32;
         let mut hv: [u8; K] = [0; K];
         let (l, r) = self.half_hashes(i, repetition);
         for h in 0..usize::div_ceil(prefix, 2) {
             hv[2 * h] = l[h];
             hv[2 * h + 1] = r[h];
         }
-        HashValue(Self::hash32(hv, prefix))
+        let hash = xxh32(&hv[..prefix], 1234);
+        // HashValue(Self::hash32(hv, prefix))
+        HashValue(hash)
     }
 
     #[cfg(test)]
@@ -529,7 +533,6 @@ impl HashCollection {
         if parallel {
             buffer.par_sort_unstable();
         } else {
-            // buffer.sort_unstable();
             let mut scratch = vec![Default::default(); buffer.len()];
             sort_hash_pairs(buffer, &mut scratch);
         }
@@ -558,7 +561,7 @@ impl HashCollection {
             }
         }
         let elapsed_boundaries = timer.elapsed();
-        debug!(
+        log::trace!(
             "tag" = "profiling",
             "repetition" = repetition,
             "depth" = depth,

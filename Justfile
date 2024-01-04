@@ -17,7 +17,7 @@ profile: release-build
     --motiflets 3
 
 live-profile:
-  perf record -F 999 --call-graph dwarf -g -p $(pgrep attimo)
+  perf record -F 999 -g -p $(pgrep attimo)
 
 speedscope-perf:
   perf script -i perf.data | speedscope -

@@ -251,6 +251,11 @@ impl MotifletsIterator {
     ) -> Self {
         let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
         let exclusion_zone = exclusion_zone.unwrap_or(w);
+        assert!(
+            max_k * exclusion_zone <= ts.num_subsequences(),
+            "max_k * exclusion_zone should be less than the number of subsequences. We have instead {} * {} > {}",
+            max_k, exclusion_zone, ts.num_subsequences()
+        );
         let inner = attimo::motiflets::MotifletsIterator::new(
             ts,
             max_k,
@@ -288,6 +293,11 @@ pub fn motiflet_brute_force(
     use attimo::motiflets::*;
     let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
     let exclusion_zone = exclusion_zone.unwrap_or(w / 2);
+    assert!(
+        support * exclusion_zone <= ts.num_subsequences(),
+        "support * exclusion_zone should be less than the number of subsequences. We have instead {} * {} > {}",
+        support, exclusion_zone, ts.num_subsequences()
+    );
     let (extent, indices) = brute_force_motiflets(&ts, support, exclusion_zone);
     KMotiflet {
         support,
