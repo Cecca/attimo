@@ -383,6 +383,18 @@ impl MotifletsIterator {
                         "[{}@{}] failure probability for k={}: {}",
                         rep, prefix, k, fp
                     );
+                    info!(
+                        "[{}@{}] costs to confirm {}: {:?}",
+                        rep,
+                        prefix,
+                        *extent,
+                        self.pools_stats.costs_to_confirm(
+                            prefix,
+                            *extent,
+                            self.delta,
+                            &self.hasher
+                        )
+                    );
                 }
             }
         }

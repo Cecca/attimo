@@ -686,6 +686,7 @@ impl HashCollectionStats {
             *c /= nreps as f64;
         }
         expected_collisions[0] = f64::INFINITY; // just to signal that we don't want to go to prefix 0
+        repetition_setup_cost /= repetition_setup_cost_experiments as f64;
 
         // now we estimate the cost of running a handful of distance computations,
         // as a proxy for the cost of handling the collisions.
@@ -752,6 +753,46 @@ impl HashCollectionStats {
             .next()
             .unwrap()
             .0
+    }
+
+    /// For each prefix length, compute the cost to confirm a pair at
+    /// the given distance.
+    pub fn costs_to_confirm(
+        &self,
+        max_prefix: usize,
+        d: Distance,
+        delta: f64,
+        hasher: &Hasher,
+    ) -> Vec<(f64, usize)> {
+        let p = hasher.collision_probability_at(d.0);
+        self.expected_collisions[..=max_prefix]
+            .iter()
+            .enumerate()
+            .map(|(prefix, collisions)| {
+                // FIXME: upper bound with the number of repetitions that
+                // can be done with the available memory
+                let maxreps = 1 << 16;
+                let nreps = {
+                    let mut nreps = 0;
+                    let mut fp = 1.0;
+                    while fp > delta && nreps < maxreps {
+                        // FIXME: use the actual failure probability, which
+                        // however depends on the number of repetitions which
+                        // cannot be exceeded.
+                        fp = (1.0 - p.powi(prefix as i32)).powi(nreps as i32);
+                        nreps += 1;
+                    }
+                    nreps
+                };
+                if nreps >= maxreps {
+                    return (f64::INFINITY, maxreps);
+                }
+                (
+                    nreps as f64 * (self.collision_cost * collisions + self.repetition_setup_cost),
+                    nreps,
+                )
+            })
+            .collect()
     }
 }
 
