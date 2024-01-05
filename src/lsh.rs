@@ -238,6 +238,7 @@ fn test_collision_enumerator() {
 //// We use it only in one place, when building the hash pools, when accesses to the arrays
 //// are by construction non-overlapping.
 #[derive(Copy, Clone)]
+#[deprecated]
 pub struct UnsafeSlice<'a, T> {
     slice: &'a [UnsafeCell<T>],
 }
@@ -472,30 +473,48 @@ impl HashCollection {
         self.minimal_repetition_table[idx]
     }
 
-    pub fn num_collisions(&self, i: usize, j: usize, prefix: usize) -> usize {
-        let (k_left, k_right) = Self::k_pair(prefix);
-
-        let mut lcolls = 0;
-        let mut rcolls = 0;
-
-        for trep in 0..self.hasher.tensor_repetitions {
-            let (ipool_left, ipool_right) = &self.pools[trep][i];
-            let (jpool_left, jpool_right) = &self.pools[trep][j];
-            // check left
-            let hi = &ipool_left[0..k_left];
-            let hj = &jpool_left[0..k_left];
-            if hi == hj {
-                lcolls += 1;
+    /// Counts the number of collision at a given repetition and prefix length
+    fn num_collisions(
+        &self,
+        repetition: usize,
+        prefix: usize,
+        exclusion_zone: usize,
+        buffers: &mut ColumnBuffers,
+    ) -> usize {
+        self.group_subsequences(prefix, repetition, exclusion_zone, buffers, false);
+        if let Some(mut enumerator) = buffers.enumerator() {
+            let mut dummy_buffer: [(u32, u32, Distance); 1024] =
+                [(0, 0, Distance::infinity()); 1024];
+            let mut count = 0;
+            while let Some(cnt) = enumerator.next(&mut dummy_buffer, exclusion_zone) {
+                count += cnt;
             }
-            // check right
-            let hi = &ipool_right[0..k_right];
-            let hj = &jpool_right[0..k_right];
-            if hi == hj {
-                rcolls += 1;
+            count
+        } else {
+            0
+        }
+    }
+
+    /// Estimates the number of collisions per prefix length and puts
+    /// them in a vector. Uses only the first few repetitions to do the
+    /// estimate
+    pub fn average_num_collisions(
+        &self,
+        exclusion_zone: usize,
+        buffers: &mut ColumnBuffers,
+    ) -> Vec<f64> {
+        let nreps = 8;
+        let mut output = vec![0.0; K + 1];
+        for prefix in (1..=K).rev() {
+            for rep in 0..nreps {
+                output[prefix] += self.num_collisions(rep, prefix, exclusion_zone, buffers) as f64;
             }
         }
-
-        lcolls * rcolls
+        for c in output.iter_mut() {
+            *c /= nreps as f64;
+        }
+        output[0] = f64::INFINITY; // just to signal that we don't want to go to prefix 0
+        output
     }
 
     pub fn first_collision(&self, i: usize, j: usize, prefix: usize) -> Option<usize> {

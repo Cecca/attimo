@@ -87,9 +87,10 @@ pub fn brute_force_motiflets(
     let fft_data = FFTData::new(&ts);
     let n = ts.num_subsequences();
 
+    let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
     info!(
         "Average pairwise distance: {}, maximum pairwise distance: {}",
-        ts.average_pairwise_distance(1234, exclusion_zone),
+        average_pairwise_distance,
         ts.maximum_distance()
     );
 
@@ -192,11 +193,6 @@ impl MotifletsIterator {
         let fft_data = FFTData::new(&ts);
 
         let hasher_width = Hasher::compute_width(&ts);
-        info!(
-            "Average pairwise distance: {}, maximum pairwise distance: {}",
-            ts.average_pairwise_distance(1234, exclusion_zone),
-            ts.maximum_distance()
-        );
 
         let threads = rayon::current_num_threads();
         assert!(
@@ -210,12 +206,25 @@ impl MotifletsIterator {
         let pools = Arc::new(pools);
         info!("Computed hash values in {:?}", start.elapsed());
 
+        let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
+        info!(
+            "Average pairwise distance: {}, maximum pairwise distance: {}",
+            average_pairwise_distance,
+            ts.maximum_distance(),
+        );
+
         let best_motiflet = vec![(Distance(std::f64::INFINITY), 0, false); max_k];
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
         let mut buffers = Vec::with_capacity(threads);
         for _ in 0..threads {
             buffers.push(ColumnBuffers::default());
         }
+
+        let average_collisions = pools.average_num_collisions(exclusion_zone, &mut buffers[0]);
+        info!(
+            "Average number of collisions per level: {:?}",
+            average_collisions
+        );
 
         Self {
             ts,
@@ -368,6 +377,11 @@ impl MotifletsIterator {
                     *emitted = true;
                     let m = Motiflet::new(indices, extent.0);
                     self.to_return.push(m);
+                } else if rep % 512 == 0 {
+                    info!(
+                        "[{}@{}] failure probability for k={}: {}",
+                        rep, prefix, k, fp
+                    );
                 }
             }
         }
