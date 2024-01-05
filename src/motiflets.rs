@@ -1,7 +1,7 @@
 use crate::{
     distance::zeucl,
     knn::*,
-    lsh::{self, ColumnBuffers, HashCollection, Hasher},
+    lsh::{self, ColumnBuffers, HashCollection, HashCollectionStats, Hasher},
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 use log::*;
@@ -166,6 +166,7 @@ pub struct MotifletsIterator {
     exclusion_zone: usize,
     hasher: Arc<Hasher>,
     pools: Arc<HashCollection>,
+    pools_stats: HashCollectionStats,
     buffers: Vec<ColumnBuffers>,
     pairs_buffer: Vec<(u32, u32, Distance)>,
     /// the current repetition
@@ -220,11 +221,9 @@ impl MotifletsIterator {
             buffers.push(ColumnBuffers::default());
         }
 
-        let average_collisions = pools.average_num_collisions(exclusion_zone, &mut buffers[0]);
-        info!(
-            "Average number of collisions per level: {:?}",
-            average_collisions
-        );
+        let pools_stats = pools.stats(&ts, exclusion_zone);
+        info!("Pools stats: {:?}", pools_stats);
+        let first_meaningful_prefix = pools_stats.first_meaningful_prefix();
 
         Self {
             ts,
@@ -237,10 +236,12 @@ impl MotifletsIterator {
             exclusion_zone,
             hasher,
             pools,
+            pools_stats,
             buffers,
             pairs_buffer,
             rep: 0,
-            prefix: lsh::K,
+            // this way we avoid meaningless repetitions that have no collisions
+            prefix: first_meaningful_prefix,
             previous_prefix: None,
             threads,
         }

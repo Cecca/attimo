@@ -26,6 +26,7 @@
 //// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
+use crate::distance::zeucl;
 use crate::knn::Distance;
 use crate::motifs::Motif;
 use crate::sort::*;
@@ -647,6 +648,110 @@ impl HashCollection {
             "time_s" = (elapsed_hashes + elapsed_sort + elapsed_boundaries).as_secs_f64();
             "grouping subsequences"
         );
+    }
+
+    pub fn stats(&self, ts: &WindowedTimeseries, exclusion_zone: usize) -> HashCollectionStats {
+        HashCollectionStats::new(self, ts, exclusion_zone)
+    }
+}
+
+/// A few statistics on a hash pool so to be able to estimate the cost of
+/// running repetitions at a given prefix length.
+#[derive(Debug, Clone)]
+pub struct HashCollectionStats {
+    /// the expected number of collisions for each prefix length
+    expected_collisions: Vec<f64>,
+    /// the cost of setting up a repetition
+    repetition_setup_cost: f64,
+    /// the cost of evaluating a collision
+    collision_cost: f64,
+}
+impl HashCollectionStats {
+    fn new(pool: &HashCollection, ts: &WindowedTimeseries, exclusion_zone: usize) -> Self {
+        let mut repetition_setup_cost = 0.0;
+        let mut repetition_setup_cost_experiments = 0;
+        let mut buffers = ColumnBuffers::default();
+        let nreps = 8;
+        let mut expected_collisions = vec![0.0; K + 1];
+        for prefix in (1..=K).rev() {
+            for rep in 0..nreps {
+                let (collisions, setup_cost) =
+                    Self::num_collisions(pool, rep, prefix, exclusion_zone, &mut buffers);
+                expected_collisions[prefix] += collisions as f64;
+                repetition_setup_cost += setup_cost;
+                repetition_setup_cost_experiments += 1;
+            }
+        }
+        for c in expected_collisions.iter_mut() {
+            *c /= nreps as f64;
+        }
+        expected_collisions[0] = f64::INFINITY; // just to signal that we don't want to go to prefix 0
+
+        // now we estimate the cost of running a handful of distance computations,
+        // as a proxy for the cost of handling the collisions.
+        // TODO: maybe update this as we collect information during the execution?
+        let mut collision_cost = 0.0;
+        for (prefix, estimated_collisions) in expected_collisions.iter().enumerate().rev() {
+            if *estimated_collisions > 100.0 {
+                let mut cnt_dists = 0;
+                pool.group_subsequences(prefix, 0, exclusion_zone, &mut buffers, false);
+                let t_start = Instant::now();
+                let mut dists_buf = [(0, 0, Distance::infinity()); 1024];
+                let mut enumerator = buffers.enumerator().unwrap();
+                while let Some(cnt) = enumerator.next(&mut dists_buf, exclusion_zone) {
+                    for (i, j, d) in &mut dists_buf[..cnt] {
+                        *d = Distance(zeucl(ts, *i as usize, *j as usize));
+                    }
+                    cnt_dists += cnt;
+                }
+                let elapsed = Instant::now() - t_start;
+                collision_cost = elapsed.as_secs_f64() / cnt_dists as f64;
+                break;
+            }
+        }
+
+        Self {
+            expected_collisions,
+            repetition_setup_cost,
+            collision_cost,
+        }
+    }
+
+    /// Counts the number of collision at a given repetition and prefix length,
+    /// and the cost of setting up the repetition
+    fn num_collisions(
+        pool: &HashCollection,
+        repetition: usize,
+        prefix: usize,
+        exclusion_zone: usize,
+        buffers: &mut ColumnBuffers,
+    ) -> (usize, f64) {
+        let t_start = Instant::now();
+        pool.group_subsequences(prefix, repetition, exclusion_zone, buffers, false);
+        let t_elapsed = Instant::now() - t_start;
+        let count = if let Some(mut enumerator) = buffers.enumerator() {
+            let mut dummy_buffer: [(u32, u32, Distance); 1024] =
+                [(0, 0, Distance::infinity()); 1024];
+            let mut count = 0;
+            while let Some(cnt) = enumerator.next(&mut dummy_buffer, exclusion_zone) {
+                count += cnt;
+            }
+            count
+        } else {
+            0
+        };
+        (count, t_elapsed.as_secs_f64())
+    }
+
+    pub fn first_meaningful_prefix(&self) -> usize {
+        self.expected_collisions
+            .iter()
+            .enumerate()
+            .rev()
+            .skip_while(|(_prefix, collisions)| **collisions < 1.0)
+            .next()
+            .unwrap()
+            .0
     }
 }
 
