@@ -30,7 +30,7 @@ use crate::distance::zeucl;
 use crate::knn::Distance;
 use crate::motifs::Motif;
 use crate::sort::*;
-use crate::timeseries::{FFTData, Overlaps, WindowedTimeseries};
+use crate::timeseries::{FFTData, Overlaps, PrettyBytes, WindowedTimeseries};
 use log::info;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
@@ -314,19 +314,11 @@ pub struct HashCollection {
 }
 
 impl HashCollection {
-    //// LSH schemes usually have at least two parameters: the number of concatenations `K` and
-    //// the number or repetitions `L`. We fix the first parameter in the constant `K` at the top of
-    //// this source file. As for the second, with this function we allow the user to get an estimate of the
-    //// memory that would be needed to run the given number or `repetitions`. Hence,
-    //// it can be used to tune the LSH data structure to the available memory.
-    pub fn required_memory(ts: &WindowedTimeseries, repetitions: usize) -> usize {
+    /// How much memory would it be required to store information for these many repetitions?
+    pub fn required_memory(ts: &WindowedTimeseries, repetitions: usize) -> PrettyBytes {
         let tensor_repetitions = (repetitions as f64).sqrt().ceil() as usize;
-        //// This is the memory required by the hash pools
-        let mem_pools = tensor_repetitions * K_HALF * ts.num_subsequences() * 2;
-        //// And this is the memory eventually required by the hash matrix, when all the columns are materialized
-        let mem_matrix = ts.num_subsequences() * (K + std::mem::size_of::<usize>()) * repetitions;
-
-        mem_pools + mem_matrix
+        let bytes = tensor_repetitions * K * ts.num_subsequences() * 8;
+        PrettyBytes(bytes)
     }
 
     //// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
@@ -665,9 +657,22 @@ pub struct HashCollectionStats {
     repetition_setup_cost: f64,
     /// the cost of evaluating a collision
     collision_cost: f64,
+    /// the maximum number of repetitions, fitting in the memory limit
+    max_repetitions: usize,
 }
 impl HashCollectionStats {
     fn new(pool: &HashCollection, ts: &WindowedTimeseries, exclusion_zone: usize) -> Self {
+        let max_memory = PrettyBytes(1024 * 1024 * 1024 * 8);
+        let mut max_repetitions = 16;
+        while HashCollection::required_memory(ts, 2 * max_repetitions) <= max_memory {
+            max_repetitions *= 2;
+        }
+        info!(
+            "Maximum repetitions {} which would require {}",
+            max_repetitions,
+            HashCollection::required_memory(ts, max_repetitions)
+        );
+
         let mut repetition_setup_cost = 0.0;
         let mut repetition_setup_cost_experiments = 0;
         let mut buffers = ColumnBuffers::default();
@@ -715,6 +720,7 @@ impl HashCollectionStats {
             expected_collisions,
             repetition_setup_cost,
             collision_cost,
+            max_repetitions,
         }
     }
 
@@ -769,9 +775,7 @@ impl HashCollectionStats {
             .iter()
             .enumerate()
             .map(|(prefix, collisions)| {
-                // FIXME: upper bound with the number of repetitions that
-                // can be done with the available memory
-                let maxreps = 1 << 16;
+                let maxreps = self.max_repetitions;
                 let nreps = {
                     let mut nreps = 0;
                     let mut fp = 1.0;

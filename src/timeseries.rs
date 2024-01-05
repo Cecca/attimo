@@ -370,6 +370,7 @@ impl WindowedTimeseries {
     }
 }
 
+#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy)]
 pub struct PrettyBytes(pub usize);
 
 impl Display for PrettyBytes {
