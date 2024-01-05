@@ -80,7 +80,7 @@ impl GetByte for (HashValue, u32) {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ColumnBuffers {
     pub hashes: Vec<(HashValue, u32)>,
     pub buckets: Vec<Range<usize>>,
@@ -163,6 +163,41 @@ impl<'hashes> CollisionEnumerator<'hashes> {
         } else {
             return Some(idx);
         }
+    }
+
+    pub fn estimate_num_collisions(mut self, exclusion_zone: usize) -> usize {
+        let mut cnt = 0;
+        while self.current_bucket < self.buffers.buckets.len() {
+            let range = self.buffers.buckets[self.current_bucket].clone();
+            if range.len() as f64 > (self.buffers.hashes.len() as f64).sqrt() {
+                // the bucket if _very_ large (relative to the number of subsequences),
+                // so we just pick the square of its size in order to avoid spending
+                // forever in iterating over pairs checking for overlaps
+                log::trace!("Large bucket detected: {}", range.len());
+                cnt += range.len() * range.len();
+            } else {
+                let mut i = range.start;
+                while i < range.end {
+                    let mut j = i + 1;
+                    while j < range.end {
+                        assert!(range.contains(&i));
+                        assert!(range.contains(&j));
+                        let (ha, a) = self.buffers.hashes[i];
+                        let (hb, b) = self.buffers.hashes[j];
+                        assert_eq!(ha, hb);
+                        if !a.overlaps(b, exclusion_zone) {
+                            cnt += 1;
+                        }
+                        j += 1;
+                    }
+                    i += 1;
+                }
+            }
+
+            self.current_bucket += 1;
+        }
+
+        cnt
     }
 }
 
@@ -676,22 +711,28 @@ impl HashCollectionStats {
         let mut repetition_setup_cost = 0.0;
         let mut repetition_setup_cost_experiments = 0;
         let mut buffers = ColumnBuffers::default();
-        let nreps = 8;
+        let nreps = 4;
         let mut expected_collisions = vec![0.0; K + 1];
-        for prefix in (1..=K).rev() {
-            for rep in 0..nreps {
+        let dat: Vec<(usize, usize, usize, f64)> = (1..=K)
+            .into_par_iter()
+            .flat_map(|prefix| (0..nreps).into_par_iter().map(move |rep| (prefix, rep)))
+            .map_with(ColumnBuffers::default(), |mut buffers, (prefix, rep)| {
                 let (collisions, setup_cost) =
                     Self::num_collisions(pool, rep, prefix, exclusion_zone, &mut buffers);
-                expected_collisions[prefix] += collisions as f64;
-                repetition_setup_cost += setup_cost;
-                repetition_setup_cost_experiments += 1;
-            }
+                (prefix, rep, collisions, setup_cost)
+            })
+            .collect();
+        for (prefix, _rep, collisions, setup_cost) in dat {
+            expected_collisions[prefix] += collisions as f64;
+            repetition_setup_cost += setup_cost;
+            repetition_setup_cost_experiments += 1;
         }
         for c in expected_collisions.iter_mut() {
             *c /= nreps as f64;
         }
         expected_collisions[0] = f64::INFINITY; // just to signal that we don't want to go to prefix 0
         repetition_setup_cost /= repetition_setup_cost_experiments as f64;
+        dbg!(repetition_setup_cost);
 
         // now we estimate the cost of running a handful of distance computations,
         // as a proxy for the cost of handling the collisions.
@@ -699,6 +740,7 @@ impl HashCollectionStats {
         let mut collision_cost = 0.0;
         for (prefix, estimated_collisions) in expected_collisions.iter().enumerate().rev() {
             if *estimated_collisions > 100.0 {
+                dbg!(estimated_collisions);
                 let mut cnt_dists = 0;
                 pool.group_subsequences(prefix, 0, exclusion_zone, &mut buffers, false);
                 let t_start = Instant::now();
@@ -736,17 +778,10 @@ impl HashCollectionStats {
         let t_start = Instant::now();
         pool.group_subsequences(prefix, repetition, exclusion_zone, buffers, false);
         let t_elapsed = Instant::now() - t_start;
-        let count = if let Some(mut enumerator) = buffers.enumerator() {
-            let mut dummy_buffer: [(u32, u32, Distance); 1024] =
-                [(0, 0, Distance::infinity()); 1024];
-            let mut count = 0;
-            while let Some(cnt) = enumerator.next(&mut dummy_buffer, exclusion_zone) {
-                count += cnt;
-            }
-            count
-        } else {
-            0
-        };
+        let count = buffers
+            .enumerator()
+            .unwrap()
+            .estimate_num_collisions(exclusion_zone);
         (count, t_elapsed.as_secs_f64())
     }
 
