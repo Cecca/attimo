@@ -29,7 +29,6 @@
 use crate::distance::zeucl;
 use crate::knn::Distance;
 use crate::motifs::Motif;
-use crate::sort::*;
 use crate::timeseries::{FFTData, Overlaps, PrettyBytes, WindowedTimeseries};
 use log::info;
 use rand::prelude::*;
@@ -39,7 +38,7 @@ use rayon::prelude::*;
 use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
 use std::ops::Range;
 use std::time::Duration;
-use std::{cell::UnsafeCell, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 
 pub const K: usize = 8;
 pub const K_HALF: usize = K / 2;
@@ -57,26 +56,6 @@ impl std::fmt::Debug for HashValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let bytes = self.0.to_le_bytes();
         f.debug_list().entries(bytes.iter()).finish()
-    }
-}
-
-impl GetByte for HashValue {
-    fn num_bytes(&self) -> usize {
-        4
-    }
-    #[inline(always)]
-    fn get_byte(&self, i: usize) -> u8 {
-        (self.0 >> (8 * (std::mem::size_of::<u32>() - i - 1)) & 0xFF) as u8
-    }
-}
-
-impl GetByte for (HashValue, u32) {
-    fn num_bytes(&self) -> usize {
-        4
-    }
-    #[inline(always)]
-    fn get_byte(&self, i: usize) -> u8 {
-        self.0.get_byte(i)
     }
 }
 
@@ -266,42 +245,6 @@ fn test_collision_enumerator() {
         enumerated += cnt;
     }
     assert_eq!(enumerated, tot_pairs);
-}
-
-//// This data structure is taken from [this StackOverflow answer](https://stackoverflow.com/questions/65178245/how-do-i-write-to-a-mutable-slice-from-multiple-threads-at-arbitrary-indexes-wit).
-//// It is simply a wrapper around a mutable slice, providing (unsafe) concurrent mutable
-//// access to its elements, without the need for synchronization primitives.
-//// We use it only in one place, when building the hash pools, when accesses to the arrays
-//// are by construction non-overlapping.
-#[derive(Copy, Clone)]
-#[deprecated]
-pub struct UnsafeSlice<'a, T> {
-    slice: &'a [UnsafeCell<T>],
-}
-unsafe impl<'a, T: Send + Sync> Send for UnsafeSlice<'a, T> {}
-unsafe impl<'a, T: Send + Sync> Sync for UnsafeSlice<'a, T> {}
-
-impl<'a, T> UnsafeSlice<'a, T> {
-    pub fn new(slice: &'a mut [T]) -> Self {
-        let ptr = slice as *mut [T] as *const [UnsafeCell<T>];
-        Self {
-            slice: unsafe { &*ptr },
-        }
-    }
-
-    /// SAFETY: It is UB if two threads write to the same index without
-    /// synchronization.
-    pub unsafe fn write(&self, i: usize, value: T) {
-        let ptr = self.slice[i].get();
-        *ptr = value;
-    }
-
-    /// SAFETY: It is UB if two threads write to the same index without
-    /// synchronization.
-    pub unsafe fn update(&self, i: usize, mut f: impl FnMut(*mut T)) {
-        let ptr = self.slice[i].get();
-        f(ptr);
-    }
 }
 
 fn get_minimal_index_pair(idx: usize) -> (usize, usize) {
