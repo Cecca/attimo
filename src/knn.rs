@@ -17,6 +17,12 @@ impl Distance {
     pub fn infinity() -> Self {
         Self(f64::INFINITY)
     }
+    pub fn is_finite(&self) -> bool {
+        self.0.is_finite()
+    }
+    pub fn is_infinite(&self) -> bool {
+        self.0.is_infinite()
+    }
 }
 
 impl From<f64> for Distance {

@@ -1,7 +1,7 @@
 use crate::{
     distance::zeucl,
     knn::*,
-    lsh::{self, ColumnBuffers, HashCollection, HashCollectionStats, Hasher},
+    lsh::{ColumnBuffers, HashCollection, HashCollectionStats, Hasher},
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 use log::*;
@@ -158,14 +158,15 @@ impl Motiflet {
 pub struct MotifletsIterator {
     pub max_k: usize,
     ts: Arc<WindowedTimeseries>,
+    fft_data: FFTData,
     best_motiflet: Vec<(Distance, usize, bool)>,
     graph: KnnGraph,
     to_return: Vec<Motiflet>,
     repetitions: usize,
     delta: f64,
     exclusion_zone: usize,
-    hasher: Arc<Hasher>,
-    pools: Arc<HashCollection>,
+    // hasher: Arc<Hasher>,
+    pools: HashCollection,
     pools_stats: HashCollectionStats,
     buffers: Vec<ColumnBuffers>,
     pairs_buffer: Vec<(u32, u32, Distance)>,
@@ -204,7 +205,6 @@ impl MotifletsIterator {
 
         let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
         let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
-        let pools = Arc::new(pools);
         info!("Computed hash values in {:?}", start.elapsed());
 
         let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
@@ -227,6 +227,7 @@ impl MotifletsIterator {
 
         Self {
             ts,
+            fft_data,
             best_motiflet,
             graph: KnnGraph::new(max_k, n, exclusion_zone),
             max_k,
@@ -234,7 +235,6 @@ impl MotifletsIterator {
             repetitions,
             delta,
             exclusion_zone,
-            hasher,
             pools,
             pools_stats,
             buffers,
@@ -282,6 +282,7 @@ impl MotifletsIterator {
                     // Fixup the distances
                     let (d, c): (f64, usize) = self.pairs_buffer[0..cnt]
                         .par_iter_mut()
+                        .with_min_len(1024)
                         .map(|(a, b, dist)| {
                             let a = *a as usize;
                             let b = *b as usize;
@@ -319,8 +320,8 @@ impl MotifletsIterator {
         }
         let average_distance = sum_dist / cnt_distances as f64;
         let average_distance_probability = self
-            .hasher
-            .collision_probability_at(average_distance)
+            .pools
+            .collision_probability_at(Distance(average_distance))
             .powi(prefix as i32);
         debug!(
             "Candidate pairs {}, distances computed {}, average distance {} (p={})",
@@ -363,8 +364,8 @@ impl MotifletsIterator {
             if !*emitted && extent.0.is_finite() {
                 assert!(min_to_replace[k] > 0);
                 assert!(min_to_replace[k] <= self.max_k);
-                let fp = self.hasher.failure_probability_independent(
-                    extent.0,
+                let fp = self.pools.failure_probability_independent(
+                    *extent,
                     rep,
                     prefix,
                     previous_prefix,
@@ -382,18 +383,6 @@ impl MotifletsIterator {
                     info!(
                         "[{}@{}] failure probability for k={}: {}",
                         rep, prefix, k, fp
-                    );
-                    info!(
-                        "[{}@{}] costs to confirm {}: {:?}",
-                        rep,
-                        prefix,
-                        *extent,
-                        self.pools_stats.costs_to_confirm(
-                            prefix,
-                            *extent,
-                            self.delta,
-                            &self.hasher
-                        )
                     );
                 }
             }
@@ -421,12 +410,54 @@ impl MotifletsIterator {
                 info!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             }
 
-            // Advance
-            self.rep += self.threads;
-            if self.rep >= self.repetitions {
+            let first_unconfirmed = self
+                .best_motiflet
+                .iter()
+                .filter(|tup| tup.0.is_finite())
+                .find_map(|tup| if !tup.2 { Some(tup.0) } else { None });
+            info!("First non confirmed distance {:?}", first_unconfirmed);
+
+            let best_prefix = if let Some(first_unconfirmed) = first_unconfirmed {
+                let costs = self.pools_stats.costs_to_confirm(
+                    self.prefix,
+                    first_unconfirmed,
+                    self.delta,
+                    &self.pools.get_hasher(),
+                );
+                let (best_prefix, (best_cost, required_repetitions)) = costs
+                    .iter()
+                    .enumerate()
+                    .min_by(|(_, tup1), (_, tup2)| tup1.0.total_cmp(&tup2.0))
+                    .unwrap();
+                info!(
+                    "Best prefix to confirm {} is {} with {} repetitions with cost {}",
+                    first_unconfirmed, best_prefix, required_repetitions, best_cost
+                );
+                if *required_repetitions > self.pools.get_repetitions() {
+                    self.pools.add_repetitions(
+                        &self.ts,
+                        &self.fft_data,
+                        required_repetitions.next_power_of_two(),
+                    );
+                }
+                best_prefix
+            } else {
+                self.prefix
+            };
+
+            if best_prefix >= self.prefix {
+                // Advance on the current prefix
+                self.rep += self.threads;
+                if self.rep >= self.repetitions {
+                    self.rep = 0;
+                    self.previous_prefix.replace(self.prefix);
+                    self.prefix -= 1;
+                }
+            } else {
+                // Go to the suggested prefix, and start from the first repetition there
                 self.rep = 0;
                 self.previous_prefix.replace(self.prefix);
-                self.prefix -= 1;
+                self.prefix = best_prefix;
             }
         }
 

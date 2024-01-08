@@ -239,13 +239,12 @@ struct MotifletsIterator {
 #[pymethods]
 impl MotifletsIterator {
     #[new]
-    #[pyo3(signature=(ts, w, max_k = 10, exclusion_zone=None, repetitions=4096, delta = 0.05, seed = 1234))]
+    #[pyo3(signature=(ts, w, max_k = 10, exclusion_zone=None, delta = 0.05, seed = 1234))]
     fn new(
         ts: Vec<f64>,
         w: usize,
         max_k: usize,
         exclusion_zone: Option<usize>,
-        repetitions: usize,
         delta: f64,
         seed: u64,
     ) -> Self {
@@ -256,10 +255,11 @@ impl MotifletsIterator {
             "max_k * exclusion_zone should be less than the number of subsequences. We have instead {} * {} > {}",
             max_k, exclusion_zone, ts.num_subsequences()
         );
+        let initial_repetitions = 16;
         let inner = attimo::motiflets::MotifletsIterator::new(
             ts,
             max_k,
-            repetitions,
+            initial_repetitions,
             delta,
             exclusion_zone,
             seed,

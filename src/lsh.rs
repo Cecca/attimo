@@ -356,6 +356,30 @@ impl HashCollection {
         PrettyBytes(bytes)
     }
 
+    /// Get how many repetitions are being run
+    pub fn get_repetitions(&self) -> usize {
+        self.hasher.repetitions
+    }
+
+    pub fn collision_probability_at(&self, d: Distance) -> f64 {
+        self.hasher.collision_probability_at(d.0)
+    }
+
+    pub fn failure_probability_independent(
+        &self,
+        d: Distance,
+        reps: usize,
+        prefix: usize,
+        prev_prefix: Option<usize>,
+    ) -> f64 {
+        self.hasher
+            .failure_probability_independent(d.0, reps, prefix, prev_prefix)
+    }
+
+    pub fn get_hasher(&self) -> &Hasher {
+        &self.hasher
+    }
+
     /// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
     /// and a `Hasher`.
 
@@ -413,6 +437,10 @@ impl HashCollection {
         fft_data: &FFTData,
         total_repetitions: usize,
     ) {
+        info!(
+            "Adding new repetitions, up to a total of {}",
+            total_repetitions
+        );
         assert!(total_repetitions.is_power_of_two());
         assert!(total_repetitions > self.hasher.repetitions);
         self.hasher.add_repetitions(total_repetitions);
@@ -442,6 +470,12 @@ impl HashCollection {
                 repdata
             });
         self.pools.par_extend(it);
+
+        let trep = hasher.tensor_repetitions;
+        let reps = hasher.repetitions;
+        self.minimal_repetition_table = (0..trep)
+            .flat_map(|i| (0..trep).map(move |j| get_minimal_repetition(reps, i, j)))
+            .collect();
     }
 
     #[deprecated]
@@ -817,10 +851,9 @@ impl HashCollectionStats {
         let t_start = Instant::now();
         pool.group_subsequences(prefix, repetition, exclusion_zone, buffers, false);
         let t_elapsed = Instant::now() - t_start;
-        let count = buffers
-            .enumerator()
-            .unwrap()
-            .estimate_num_collisions(exclusion_zone);
+        let count = buffers.enumerator().map_or(0, |enumerator| {
+            enumerator.estimate_num_collisions(exclusion_zone)
+        });
         (count, t_elapsed.as_secs_f64())
     }
 
