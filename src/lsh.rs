@@ -338,7 +338,7 @@ fn test_index_pair_round_trip() {
 //// for all the subsequences.
 #[derive(Clone)]
 pub struct HashCollection {
-    pub hasher: Arc<Hasher>,
+    pub hasher: Hasher,
     n_subsequences: usize,
     /// Pools of hash values, we have a vector for each tensor repetition, and each vector has an
     /// entry for the strings of K_HALF hash values, one for the left, and one for the right pool
@@ -356,9 +356,15 @@ impl HashCollection {
         PrettyBytes(bytes)
     }
 
-    //// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
-    //// and a `Hasher`.
-    pub fn from_ts(ts: &WindowedTimeseries, fft_data: &FFTData, hasher: Arc<Hasher>) -> Self {
+    /// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
+    /// and a `Hasher`.
+
+    pub fn from_ts(
+        ts: &WindowedTimeseries,
+        fft_data: &FFTData,
+        // FIXME: remove this Arc
+        hasher: Arc<Hasher>,
+    ) -> Self {
         assert!(ts.num_subsequences() < u32::MAX as usize, "We use 32 bit integers as pointers into subsequences, this timeseries has too many subsequences.");
         let ns = ts.num_subsequences();
 
@@ -385,11 +391,7 @@ impl HashCollection {
             .collect();
 
         let elapsed = timer.elapsed();
-        info!(
-            "tag" = "profiling",
-            "time_s" = elapsed.as_secs_f64();
-            "tensor pool building"
-        );
+        info!("tensor pool building in {:?}", elapsed.as_secs_f64());
 
         let trep = hasher.tensor_repetitions;
         let reps = hasher.repetitions;
@@ -398,11 +400,48 @@ impl HashCollection {
             .collect();
 
         Self {
-            hasher,
+            hasher: (*hasher).clone(),
             n_subsequences: ns,
             pools,
             minimal_repetition_table,
         }
+    }
+
+    pub fn add_repetitions(
+        &mut self,
+        ts: &WindowedTimeseries,
+        fft_data: &FFTData,
+        total_repetitions: usize,
+    ) {
+        assert!(total_repetitions.is_power_of_two());
+        assert!(total_repetitions > self.hasher.repetitions);
+        self.hasher.add_repetitions(total_repetitions);
+
+        let hasher = &self.hasher;
+
+        let ns = ts.num_subsequences();
+
+        let old_tensor_repetitions = self.pools.len();
+
+        let it = (old_tensor_repetitions..hasher.tensor_repetitions)
+            .into_par_iter()
+            .map(|trep| {
+                let mut repdata = vec![([0u8; K_HALF], [0u8; K_HALF]); ns];
+                let mut max_dotp = 0.0f64;
+                for k in 0..K_HALF {
+                    let mdp1 = hasher.hash_all(&ts, fft_data, k, trep, |i, h| {
+                        let h = ((h as i64 & 0xFFi64) as i8) as u8;
+                        repdata[i].0[k] = h;
+                    });
+                    let mdp2 = hasher.hash_all(&ts, fft_data, k + K_HALF, trep, |i, h| {
+                        let h = ((h as i64 & 0xFFi64) as i8) as u8;
+                        repdata[i].1[k] = h;
+                    });
+                    max_dotp = max_dotp.max(mdp1.max(mdp2));
+                }
+                repdata
+            });
+        self.pools.par_extend(it);
     }
 
     #[deprecated]
@@ -846,6 +885,7 @@ pub struct Hasher {
     // And this is organized as a two dimensional matrix
     shifts: Vec<f64>,
     width: f64,
+    rng: Xoshiro256PlusPlus,
 }
 
 impl Hasher {
@@ -856,10 +896,10 @@ impl Hasher {
         let mut shifts = Vec::with_capacity(K * tensor_repetitions);
         let normal = Normal::new(0.0, 1.0).expect("problem instantiating normal distribution");
         let uniform = Uniform::new(0.0, width);
-        for _ in 0..(repetitions * K * dimension) {
+        for _ in 0..(tensor_repetitions * K * dimension) {
             vectors.push(normal.sample(&mut rng));
         }
-        for _ in 0..(repetitions * K) {
+        for _ in 0..(tensor_repetitions * K) {
             shifts.push(uniform.sample(&mut rng));
         }
 
@@ -870,7 +910,27 @@ impl Hasher {
             vectors,
             shifts,
             width,
+            rng,
         }
+    }
+
+    /// add repetitions so that overall we have the required
+    /// `total_repetitions`.
+    pub fn add_repetitions(&mut self, total_repetitions: usize) {
+        assert!(total_repetitions.is_power_of_two());
+        assert!(total_repetitions > self.repetitions);
+        let total_tensor_repetitions = (total_repetitions as f64).sqrt().ceil() as usize;
+        let new_tensor_repetitions = total_tensor_repetitions - self.tensor_repetitions;
+        let normal = Normal::new(0.0, 1.0).expect("problem instantiating normal distribution");
+        let uniform = Uniform::new(0.0, self.width);
+        for _ in 0..(new_tensor_repetitions * K * self.dimension) {
+            self.vectors.push(normal.sample(&mut self.rng));
+        }
+        for _ in 0..(new_tensor_repetitions * K) {
+            self.shifts.push(uniform.sample(&mut self.rng));
+        }
+        self.tensor_repetitions = new_tensor_repetitions;
+        self.repetitions = total_repetitions;
     }
 
     pub fn print_collision_probabilities(&self, max_dist: f64, concatenations: usize) {
