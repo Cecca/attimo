@@ -155,6 +155,11 @@ impl Motiflet {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct MotifletsIteratorStats {
+    cnt_candidates: usize,
+}
+
 pub struct MotifletsIterator {
     pub max_k: usize,
     ts: Arc<WindowedTimeseries>,
@@ -168,7 +173,7 @@ pub struct MotifletsIterator {
     // hasher: Arc<Hasher>,
     pools: HashCollection,
     pools_stats: HashCollectionStats,
-    buffers: Vec<ColumnBuffers>,
+    buffers: ColumnBuffers,
     pairs_buffer: Vec<(u32, u32, Distance)>,
     /// the current repetition
     rep: usize,
@@ -176,8 +181,8 @@ pub struct MotifletsIterator {
     prefix: usize,
     /// the previous prefix
     previous_prefix: Option<usize>,
-    /// the number of threads used
-    threads: usize,
+    /// some statistics on the execution
+    stats: MotifletsIteratorStats,
 }
 
 impl MotifletsIterator {
@@ -196,13 +201,6 @@ impl MotifletsIterator {
 
         let hasher_width = Hasher::compute_width(&ts);
 
-        let threads = rayon::current_num_threads();
-        assert!(
-            repetitions % threads == 0,
-            "The number of repetitions ({}) should be a multiple of the number of available threads ({})", 
-            repetitions, threads
-        );
-
         let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
         let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
         info!("Computed hash values in {:?}", start.elapsed());
@@ -216,10 +214,7 @@ impl MotifletsIterator {
 
         let best_motiflet = vec![(Distance(std::f64::INFINITY), 0, false); max_k];
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
-        let mut buffers = Vec::with_capacity(threads);
-        for _ in 0..threads {
-            buffers.push(ColumnBuffers::default());
-        }
+        let mut buffers = ColumnBuffers::default();
 
         let pools_stats = pools.stats(&ts, exclusion_zone);
         info!("Pools stats: {:?}", pools_stats);
@@ -243,7 +238,7 @@ impl MotifletsIterator {
             // this way we avoid meaningless repetitions that have no collisions
             prefix: first_meaningful_prefix,
             previous_prefix: None,
-            threads,
+            stats: MotifletsIteratorStats::default(),
         }
     }
 
@@ -255,66 +250,60 @@ impl MotifletsIterator {
     fn update_neighborhoods(&mut self) {
         let prefix = self.prefix;
         let previous_prefix = self.previous_prefix;
-        let base_rep = self.rep;
+        let rep = self.rep;
         let exclusion_zone = self.exclusion_zone;
-        let pools = &self.pools;
+        let pools = &mut self.pools;
         let ts = &self.ts;
         let graph = &mut self.graph;
 
         let threshold = self.best_motiflet[self.max_k - 1].0;
 
-        (base_rep..base_rep + self.threads)
-            .into_par_iter()
-            .zip(&mut self.buffers)
-            .for_each(|(rep, buffer)| {
-                pools.group_subsequences(prefix, rep, exclusion_zone, buffer, false);
-            });
+        pools.set_repetition(rep);
+        pools.group_subsequences(prefix, rep, exclusion_zone, &mut self.buffers, true);
 
         let mut cnt_candidates = 0;
         let mut sum_dist = 0.0;
         let mut cnt_distances = 0;
-        for buffer in self.buffers.iter() {
-            if let Some(mut enumerator) = buffer.enumerator() {
-                while let Some(cnt) =
-                    enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone)
-                {
-                    cnt_candidates += cnt;
-                    // Fixup the distances
-                    let (d, c): (f64, usize) = self.pairs_buffer[0..cnt]
-                        .par_iter_mut()
-                        .with_min_len(1024)
-                        .map(|(a, b, dist)| {
-                            let a = *a as usize;
-                            let b = *b as usize;
-                            if previous_prefix
-                                .map(|prefix| pools.first_collision(a, b, prefix).is_none())
-                                .unwrap_or(true)
-                            // TODO: maybe skip pairs with only one collision
-                            {
-                                let d = Distance(zeucl(ts, a, b));
-                                if d <= threshold {
-                                    // we only schedule the pair to update the respective
-                                    // neighborhoods if it can result in a better motiflet.
-                                    *dist = d;
-                                } else {
-                                    *dist = Distance(std::f64::INFINITY);
-                                }
-                                (d.0, 1)
+        if let Some(mut enumerator) = self.buffers.enumerator() {
+            while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone)
+            {
+                cnt_candidates += cnt;
+                self.stats.cnt_candidates += cnt;
+                // Fixup the distances
+                let (d, c): (f64, usize) = self.pairs_buffer[0..cnt]
+                    .par_iter_mut()
+                    .with_min_len(1024)
+                    .map(|(a, b, dist)| {
+                        let a = *a as usize;
+                        let b = *b as usize;
+                        if previous_prefix
+                            .map(|prefix| pools.first_collision(a, b, prefix).is_none())
+                            .unwrap_or(true)
+                        // TODO: maybe skip pairs with only one collision
+                        {
+                            let d = Distance(zeucl(ts, a, b));
+                            if d <= threshold {
+                                // we only schedule the pair to update the respective
+                                // neighborhoods if it can result in a better motiflet.
+                                *dist = d;
                             } else {
-                                (0.0, 0)
+                                *dist = Distance(std::f64::INFINITY);
                             }
-                        })
-                        .reduce(
-                            || (0.0f64, 0usize),
-                            |accum, pair| (accum.0 + pair.0, accum.1 + pair.1),
-                        );
+                            (d.0, 1)
+                        } else {
+                            (0.0, 0)
+                        }
+                    })
+                    .reduce(
+                        || (0.0f64, 0usize),
+                        |accum, pair| (accum.0 + pair.0, accum.1 + pair.1),
+                    );
 
-                    sum_dist += d;
-                    cnt_distances += c;
+                sum_dist += d;
+                cnt_distances += c;
 
-                    // Update the neighborhoods
-                    graph.update_batch(self.pairs_buffer.as_mut_slice());
-                }
+                // Update the neighborhoods
+                graph.update_batch(self.pairs_buffer.as_mut_slice());
             }
             // while there are collisions
         }
@@ -399,6 +388,7 @@ impl MotifletsIterator {
             f()?;
             // check the stopping condition: everything is confirmed
             if self.best_motiflet[1..].iter().all(|tup| tup.2) {
+                info!("Execution stats: {:#?}", self.stats);
                 return Ok(None);
             }
 
@@ -447,7 +437,7 @@ impl MotifletsIterator {
 
             if best_prefix >= self.prefix {
                 // Advance on the current prefix
-                self.rep += self.threads;
+                self.rep += 1;
                 if self.rep >= self.repetitions {
                     self.rep = 0;
                     self.previous_prefix.replace(self.prefix);

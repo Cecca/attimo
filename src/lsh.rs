@@ -289,6 +289,12 @@ pub struct HashCollection {
     /// This table caches, in row-major order, the results of calls to
     /// [get_minimal_repetition] for different pairs i and j
     minimal_repetition_table: Vec<Option<usize>>,
+    /// The repetition the collection is currently pointed at
+    repetition: usize,
+    /// The left tensored repetition
+    l_trep: usize,
+    /// The right tensored repetition
+    r_trep: usize,
 }
 
 impl HashCollection {
@@ -297,6 +303,12 @@ impl HashCollection {
         let tensor_repetitions = (repetitions as f64).sqrt().ceil() as usize;
         let bytes = tensor_repetitions * K * ts.num_subsequences() * 8;
         PrettyBytes(bytes)
+    }
+
+    pub fn set_repetition(&mut self, repetition: usize) {
+        assert!(repetition < self.hasher.repetitions);
+        self.repetition = repetition;
+        (self.l_trep, self.r_trep) = get_minimal_index_pair(repetition);
     }
 
     /// Get how many repetitions are being run
@@ -371,6 +383,9 @@ impl HashCollection {
             n_subsequences: ns,
             pools,
             minimal_repetition_table,
+            repetition: 0,
+            l_trep: 0,
+            r_trep: 0,
         }
     }
 
@@ -421,26 +436,15 @@ impl HashCollection {
             .collect();
     }
 
-    #[deprecated]
-    pub fn left(&self, i: usize, repetition: usize) -> &[u8] {
-        let trep = repetition % self.hasher.tensor_repetitions;
-        &self.pools[trep][i].0
-    }
-
-    #[deprecated]
-    pub fn right(&self, i: usize, repetition: usize) -> &[u8] {
-        let trep = repetition / self.hasher.tensor_repetitions;
-        &self.pools[trep][i].1
-    }
-
+    // FIXME: remove the repetition parameter
     pub fn half_hashes(&self, i: usize, repetition: usize) -> (&[u8], &[u8]) {
-        let (l_trep, r_trep) = get_minimal_index_pair(repetition);
-        let l = &self.pools[l_trep][i].0;
-        let r = &self.pools[r_trep][i].1;
+        // let (l_trep, r_trep) = get_minimal_index_pair(repetition);
+        let l = &self.pools[self.l_trep][i].0;
+        let r = &self.pools[self.r_trep][i].1;
         (l, r)
     }
 
-    // #[cfg(test)]
+    #[cfg(test)]
     pub fn extended_hash_value(&self, i: usize, repetition: usize) -> [u8; K] {
         let mut output = [0; K];
         let (l, r) = self.half_hashes(i, repetition);
@@ -460,21 +464,7 @@ impl HashCollection {
         (k_left, k_right)
     }
 
-    // fn hash32(input: [u8; K], prefix: usize) -> u32 {
-    //     let mut a = [0u8; K_HALF];
-    //     let mut b = [0u8; K_HALF];
-    //     if prefix <= K_HALF {
-    //         a[..prefix].copy_from_slice(&input[..prefix]);
-    //         u32::from_be_bytes(a)
-    //     } else {
-    //         a.copy_from_slice(&input[..K_HALF]);
-    //         b[..prefix - K_HALF].copy_from_slice(&input[K_HALF..prefix]);
-    //         let a = u32::from_be_bytes(a);
-    //         let b = u32::from_be_bytes(b);
-    //         a.wrapping_mul(31).wrapping_add(b)
-    //     }
-    // }
-
+    // FIXME: remove the repetition parameter
     pub fn hash_value(&self, i: usize, prefix: usize, repetition: usize) -> HashValue {
         let mut hv: [u8; K] = [0; K];
         let (l, r) = self.half_hashes(i, repetition);
