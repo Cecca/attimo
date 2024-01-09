@@ -471,7 +471,7 @@ mod test {
     use std::sync::Arc;
 
     fn run_motiflet_test(ts: Arc<WindowedTimeseries>, k: usize, repetitions: usize, seed: u64) {
-        let failure_probability = 0.1;
+        let failure_probability = 0.01;
         let exclusion_zone = ts.w;
 
         let iter = MotifletsIterator::new(
@@ -490,13 +490,13 @@ mod test {
             dbg!(k);
             let motiflet = &motiflets[&k];
             let mut motiflet_indices = motiflet.indices();
-            info!("Extent of discovered motiflet {}", motiflet.extent());
+            eprintln!("Extent of discovered motiflet {}", motiflet.extent());
             motiflet_indices.sort();
 
             let (ground_extent, mut ground_indices): (f64, Vec<usize>) =
                 brute_force_motiflets(&ts, k, exclusion_zone);
-            info!("Ground distance of {} motiflet: {}", k, ground_extent);
-            info!("Motiflet is {:?}", ground_indices);
+            eprintln!("Ground distance of {} motiflet: {}", k, ground_extent);
+            eprintln!("Ground motiflet is {:?}", ground_indices);
             ground_indices.sort();
             // check that the indices of the motiflet found are not too far away from
             // the true ones.

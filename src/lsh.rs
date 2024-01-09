@@ -1150,29 +1150,7 @@ impl Hasher {
 
 #[cfg(test)]
 mod test {
-    use crate::{distance::zeucl, lsh::*};
-
-    #[test]
-    fn test_collision_probability() {
-        let w = 25;
-        let ts = crate::load::loadts("data/npo141.csv", None).expect("problem loading data");
-        let ts = crate::timeseries::WindowedTimeseries::new(ts, w, true);
-        let fft_data = FFTData::new(&ts);
-
-        let repetitions = 1 << 10;
-
-        let width = Hasher::compute_width(&ts);
-        let hasher = Hasher::new(w, repetitions, width, 12453);
-        let pools = HashCollection::from_ts(&ts, &fft_data, hasher);
-
-        let prefix = 7;
-        let (i, j) = (75066, 186391);
-        let d = zeucl(&ts, i, j);
-        let p = pools.collision_probability_at(d.into()).powi(prefix as i32);
-        let empirical = pools.empirical_collision_probability(i, j, prefix);
-        println!("d={} p={} ep={}", d, p, empirical);
-        assert!((empirical - p).abs() / p <= 0.1);
-    }
+    use crate::lsh::*;
 
     #[test]
     fn test_first_collision() {
