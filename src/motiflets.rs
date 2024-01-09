@@ -275,11 +275,11 @@ impl MotifletsIterator {
                     .map(|(a, b, dist)| {
                         let a = *a as usize;
                         let b = *b as usize;
-                        if previous_prefix
-                            .map(|prefix| pools.first_collision(a, b, prefix).is_none())
-                            .unwrap_or(true)
+                        // TODO: Re-introduce the check to verify if a pair has been verified iwth a
+                        // longer prefix. The caveat now is that we might do different number of
+                        // repetitions at different prefixes
                         // TODO: maybe skip pairs with only one collision
-                        {
+                        if true {
                             let d = Distance(zeucl(ts, a, b));
                             if d <= threshold {
                                 // we only schedule the pair to update the respective
@@ -352,6 +352,9 @@ impl MotifletsIterator {
             if !*emitted && extent.0.is_finite() {
                 assert!(min_to_replace[k] > 0);
                 assert!(min_to_replace[k] <= self.max_k);
+                // FIXME: fix the computation of failure probability with the
+                // caveat that different prefixes might use a different number
+                // of repetitions
                 let fp = self.pools.failure_probability_independent(
                     *extent,
                     rep,
