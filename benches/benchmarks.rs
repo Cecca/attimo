@@ -102,14 +102,6 @@ pub fn bench_sort_u8(c: &mut Criterion) {
         )
     });
 
-    group.bench_function("radix sort", |b| {
-        b.iter_batched(
-            || vals.clone(),
-            |mut vals| vals.radix_sort(),
-            criterion::BatchSize::LargeInput,
-        )
-    });
-
     group.finish()
 }
 
@@ -128,14 +120,6 @@ pub fn bench_sort_usize(c: &mut Criterion) {
         b.iter_batched(
             || vals.clone(),
             |mut vals| vals.sort_unstable(),
-            criterion::BatchSize::LargeInput,
-        )
-    });
-
-    group.bench_function("radix sort", |b| {
-        b.iter_batched(
-            || vals.clone(),
-            |mut vals| vals.radix_sort(),
             criterion::BatchSize::LargeInput,
         )
     });
