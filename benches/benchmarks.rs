@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use attimo::distance::{zdot, zeucl};
 use attimo::load::loadts;
 use attimo::sort::*;
@@ -69,20 +67,6 @@ pub fn bench_sliding_dot_product(c: &mut Criterion) {
     group.finish();
 }
 
-pub fn bench_hash_ts(c: &mut Criterion) {
-    let mut group = c.benchmark_group("hash-time-series");
-    group.sampling_mode(criterion::SamplingMode::Flat);
-    group.sample_size(10);
-    let w = 500;
-    let ts = WindowedTimeseries::gen_randomwalk(1000000, w, 12345);
-    let fft_data = FFTData::new(&ts);
-    let hasher = Arc::new(Hasher::new(w, 200, 10.0, 12345));
-    group.bench_function("hash time series", |b| {
-        b.iter(|| HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher)))
-    });
-    group.finish()
-}
-
 pub fn bench_sort_u8(c: &mut Criterion) {
     use rand::prelude::*;
     use rand_xoshiro::Xoshiro256PlusPlus;
@@ -137,8 +121,8 @@ pub fn bench_sort_hashes(c: &mut Criterion) {
     let ts = WindowedTimeseries::new(ts, w, false);
     let fft_data = FFTData::new(&ts);
 
-    let h = Arc::new(Hasher::new(w, repetitions, 16.0, 12345));
-    let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&h));
+    let h = Hasher::new(w, repetitions, 16.0, 12345);
+    let pools = HashCollection::from_ts(&ts, &fft_data, h);
     let vals: Vec<(HashValue, u32)> = (0..ts.num_subsequences())
         .map(|i| (pools.hash_value(i, K, 0.into()), i as u32))
         .collect();
@@ -233,8 +217,8 @@ pub fn bench_first_collision(c: &mut Criterion) {
         let ts = WindowedTimeseries::new(ts, w, false);
         let fft_data = FFTData::new(&ts);
 
-        let h = Arc::new(Hasher::new(w, repetitions, 16.0, 12345));
-        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&h));
+        let h = Hasher::new(w, repetitions, 16.0, 12345);
+        let pools = HashCollection::from_ts(&ts, &fft_data, h);
 
         c.bench_function(
             &format!("ops/first_collision/{}/ECG/far", depth),
@@ -259,8 +243,8 @@ pub fn bench_first_collision(c: &mut Criterion) {
         let ts = WindowedTimeseries::new(ts, w, false);
         let fft_data = FFTData::new(&ts);
 
-        let h = Arc::new(Hasher::new(w, repetitions, 16.0, 12345));
-        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&h));
+        let h = Hasher::new(w, repetitions, 16.0, 12345);
+        let pools = HashCollection::from_ts(&ts, &fft_data, h);
 
         c.bench_function(
             &format!("ops/first_collision/{}/HumanY/far", depth),
@@ -285,8 +269,8 @@ pub fn bench_first_collision(c: &mut Criterion) {
         let ts = WindowedTimeseries::new(ts, w, false);
         let fft_data = FFTData::new(&ts);
 
-        let h = Arc::new(Hasher::new(w, repetitions, 8.0, 12345));
-        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&h));
+        let h = Hasher::new(w, repetitions, 8.0, 12345);
+        let pools = HashCollection::from_ts(&ts, &fft_data, h);
 
         c.bench_function(
             &format!("ops/first_collision/{}/ASTRO/far", depth),

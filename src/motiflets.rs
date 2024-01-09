@@ -201,8 +201,8 @@ impl MotifletsIterator {
 
         let hasher_width = Hasher::compute_width(&ts);
 
-        let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
-        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
+        let hasher = Hasher::new(ts.w, repetitions, hasher_width, seed);
+        let pools = HashCollection::from_ts(&ts, &fft_data, hasher);
         info!("Computed hash values in {:?}", start.elapsed());
 
         let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);

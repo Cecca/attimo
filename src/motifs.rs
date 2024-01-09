@@ -481,7 +481,6 @@ pub struct MotifsEnumerator<S: State> {
     repetitions: usize,
     delta: f64,
     exclusion_zone: usize,
-    hasher: Arc<Hasher>,
     pools: Arc<HashCollection>,
     buffers: ColumnBuffers,
     /// the current repetition
@@ -513,8 +512,8 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
         let hasher_width = Hasher::compute_width(&ts);
         debug!("hasher_width" = hasher_width; "computed hasher width");
 
-        let hasher = Arc::new(Hasher::new(ts.w, repetitions, hasher_width, seed));
-        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
+        let hasher = Hasher::new(ts.w, repetitions, hasher_width, seed);
+        let pools = HashCollection::from_ts(&ts, &fft_data, hasher);
         let pools = Arc::new(pools);
         info!("Computed hash values in {:?}", start.elapsed());
         drop(fft_data);
@@ -534,7 +533,6 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
             repetitions,
             delta,
             exclusion_zone,
-            hasher,
             pools,
             buffers: ColumnBuffers::default(),
             rep: 0,
@@ -566,7 +564,11 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
         let orig_prefix = prefix;
         while prefix > 0 {
             for rep in 0..self.repetitions {
-                if self.hasher.failure_probability(d, rep, prefix, None) < self.delta {
+                if self
+                    .pools
+                    .failure_probability_independent(d.into(), rep, prefix, None)
+                    < self.delta
+                {
                     return prefix;
                 }
             }
@@ -673,9 +675,9 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
             let depth = self.depth;
             let rep = self.rep;
             let delta = self.delta;
-            let hasher = Arc::clone(&self.hasher);
+            let pools = &self.pools;
             let mut buf = self.state.emit(&self.ts, |d| {
-                hasher.failure_probability(d, rep, depth, None) <= delta
+                pools.failure_probability_independent(d.into(), rep, depth, None) <= delta
             });
             self.to_return.extend(buf.drain(..).map(|m| Reverse(m)));
 

@@ -345,12 +345,7 @@ impl HashCollection {
     /// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
     /// and a `Hasher`.
 
-    pub fn from_ts(
-        ts: &WindowedTimeseries,
-        fft_data: &FFTData,
-        // FIXME: remove this Arc
-        hasher: Arc<Hasher>,
-    ) -> Self {
+    pub fn from_ts(ts: &WindowedTimeseries, fft_data: &FFTData, hasher: Hasher) -> Self {
         assert!(ts.num_subsequences() < u32::MAX as usize, "We use 32 bit integers as pointers into subsequences, this timeseries has too many subsequences.");
         let ns = ts.num_subsequences();
 
@@ -386,7 +381,7 @@ impl HashCollection {
             .collect();
 
         Self {
-            hasher: (*hasher).clone(),
+            hasher,
             n_subsequences: ns,
             pools,
             minimal_repetition_table,
@@ -1065,7 +1060,7 @@ impl Hasher {
 
         loop {
             println!("Build probe buckets with r={}", r);
-            let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
+            let probe_hasher = Hasher::new(ts.w, 1, r, seed);
             let probe_collection = HashCollection::from_ts(&ts, fft_data, probe_hasher);
             let probe_collection = Arc::new(probe_collection);
             probe_collection.group_subsequences(K, 0.into(), ts.w, &mut probe_buffers, true);
@@ -1167,13 +1162,13 @@ mod test {
         let repetitions = 1 << 10;
 
         let width = Hasher::compute_width(&ts);
-        let hasher = Arc::new(Hasher::new(w, repetitions, width, 12453));
-        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
+        let hasher = Hasher::new(w, repetitions, width, 12453);
+        let pools = HashCollection::from_ts(&ts, &fft_data, hasher);
 
         let prefix = 7;
         let (i, j) = (75066, 186391);
         let d = zeucl(&ts, i, j);
-        let p = hasher.collision_probability_at(d).powi(prefix as i32);
+        let p = pools.collision_probability_at(d.into()).powi(prefix as i32);
         let empirical = pools.empirical_collision_probability(i, j, prefix);
         println!("d={} p={} ep={}", d, p, empirical);
         assert!((empirical - p).abs() / p <= 0.1);
@@ -1188,8 +1183,8 @@ mod test {
 
         let repetitions = 200;
 
-        let hasher = Arc::new(Hasher::new(w, repetitions, 5.0, 1245));
-        let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&hasher));
+        let hasher = Hasher::new(w, repetitions, 5.0, 1245);
+        let pools = HashCollection::from_ts(&ts, &fft_data, hasher);
 
         for &depth in &[K, K / 2, K / 4] {
             for i in 0..ts.num_subsequences() {
