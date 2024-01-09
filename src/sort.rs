@@ -11,42 +11,26 @@ macro_rules! getbyte {
 
 pub fn sort_hash_pairs(data: &mut [(HashValue, u32)], scratch: &mut [(HashValue, u32)]) {
     assert!(data.len() == scratch.len());
+    const BYTES: usize = 8;
 
     // build histograms in a first pass over the data
-    let mut b0 = [0usize; 256];
-    let mut b1 = [0usize; 256];
-    let mut b2 = [0usize; 256];
-    let mut b3 = [0usize; 256];
+    let mut b = [[0usize; 256]; BYTES];
 
     for (h, _) in data.iter() {
         let h = h.0;
-        b0[getbyte!(h, 0)] += 1;
-        b1[getbyte!(h, 1)] += 1;
-        b2[getbyte!(h, 2)] += 1;
-        b3[getbyte!(h, 3)] += 1;
+        for i in 0..BYTES {
+            b[i][getbyte!(h, i)] += 1;
+        }
     }
 
     // set write heads
-    let mut sum0 = 0;
-    let mut sum1 = 0;
-    let mut sum2 = 0;
-    let mut sum3 = 0;
+    let mut sum = [0usize; BYTES];
     for i in 0..256 {
-        let mut tmp = sum0 + b0[i];
-        b0[i] = sum0;
-        sum0 = tmp;
-
-        tmp = sum1 + b1[i];
-        b1[i] = sum1;
-        sum1 = tmp;
-
-        tmp = sum2 + b2[i];
-        b2[i] = sum2;
-        sum2 = tmp;
-
-        tmp = sum3 + b3[i];
-        b3[i] = sum3;
-        sum3 = tmp;
+        for j in 0..BYTES {
+            let tmp = sum[j] + b[j][i];
+            b[j][i] = sum[j];
+            sum[j] = tmp;
+        }
     }
 
     #[inline]
@@ -64,11 +48,15 @@ pub fn sort_hash_pairs(data: &mut [(HashValue, u32)], scratch: &mut [(HashValue,
         }
     }
 
-    // Sort the data in four more passes
-    pass(data, scratch, 0, &mut b0);
-    pass(scratch, data, 1, &mut b1);
-    pass(data, scratch, 2, &mut b2);
-    pass(scratch, data, 3, &mut b3);
+    // Sort the data in eight more passes
+    pass(data, scratch, 0, &mut b[0]);
+    pass(scratch, data, 1, &mut b[1]);
+    pass(data, scratch, 2, &mut b[2]);
+    pass(scratch, data, 3, &mut b[3]);
+    pass(data, scratch, 4, &mut b[4]);
+    pass(scratch, data, 5, &mut b[5]);
+    pass(data, scratch, 6, &mut b[6]);
+    pass(scratch, data, 7, &mut b[7]);
 }
 
 #[test]

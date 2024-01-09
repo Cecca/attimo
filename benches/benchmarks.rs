@@ -145,7 +145,7 @@ pub fn bench_sort_hashes(c: &mut Criterion) {
     //     )
     // });
 
-    group.bench_function("radix sort 5pass", |b| {
+    group.bench_function("radix sort 9pass", |b| {
         b.iter_batched(
             || vals.clone(),
             |mut vals| sort_hash_pairs(&mut vals, &mut scratch),
