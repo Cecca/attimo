@@ -247,6 +247,25 @@ fn test_collision_enumerator() {
     assert_eq!(enumerated, tot_pairs);
 }
 
+/// Encapsulate a repetition index along with its left and
+/// right tensor decomposition so that we don't have to recompute them all the time.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq)]
+pub struct RepetitionIndex {
+    repetition: usize,
+    left_tensor_repetition: usize,
+    right_tensor_repetition: usize,
+}
+impl From<usize> for RepetitionIndex {
+    fn from(repetition: usize) -> Self {
+        let (l, r) = get_minimal_index_pair(repetition);
+        Self {
+            repetition,
+            left_tensor_repetition: l,
+            right_tensor_repetition: r,
+        }
+    }
+}
+
 fn get_minimal_index_pair(idx: usize) -> (usize, usize) {
     let sqrt = (idx as f64).sqrt() as usize;
     if idx == sqrt * sqrt + 2 * sqrt {
@@ -289,12 +308,6 @@ pub struct HashCollection {
     /// This table caches, in row-major order, the results of calls to
     /// [get_minimal_repetition] for different pairs i and j
     minimal_repetition_table: Vec<Option<usize>>,
-    /// The repetition the collection is currently pointed at
-    repetition: usize,
-    /// The left tensored repetition
-    l_trep: usize,
-    /// The right tensored repetition
-    r_trep: usize,
 }
 
 impl HashCollection {
@@ -303,12 +316,6 @@ impl HashCollection {
         let tensor_repetitions = (repetitions as f64).sqrt().ceil() as usize;
         let bytes = tensor_repetitions * K * ts.num_subsequences() * 8;
         PrettyBytes(bytes)
-    }
-
-    pub fn set_repetition(&mut self, repetition: usize) {
-        assert!(repetition < self.hasher.repetitions);
-        self.repetition = repetition;
-        (self.l_trep, self.r_trep) = get_minimal_index_pair(repetition);
     }
 
     /// Get how many repetitions are being run
@@ -383,9 +390,6 @@ impl HashCollection {
             n_subsequences: ns,
             pools,
             minimal_repetition_table,
-            repetition: 0,
-            l_trep: 0,
-            r_trep: 0,
         }
     }
 
@@ -436,16 +440,14 @@ impl HashCollection {
             .collect();
     }
 
-    // FIXME: remove the repetition parameter
-    pub fn half_hashes(&self, i: usize, repetition: usize) -> (&[u8], &[u8]) {
-        // let (l_trep, r_trep) = get_minimal_index_pair(repetition);
-        let l = &self.pools[self.l_trep][i].0;
-        let r = &self.pools[self.r_trep][i].1;
+    pub fn half_hashes(&self, i: usize, repetition: RepetitionIndex) -> (&[u8], &[u8]) {
+        let l = &self.pools[repetition.left_tensor_repetition][i].0;
+        let r = &self.pools[repetition.right_tensor_repetition][i].1;
         (l, r)
     }
 
     #[cfg(test)]
-    pub fn extended_hash_value(&self, i: usize, repetition: usize) -> [u8; K] {
+    pub fn extended_hash_value(&self, i: usize, repetition: RepetitionIndex) -> [u8; K] {
         let mut output = [0; K];
         let (l, r) = self.half_hashes(i, repetition);
         let mut h = 0;
@@ -464,8 +466,7 @@ impl HashCollection {
         (k_left, k_right)
     }
 
-    // FIXME: remove the repetition parameter
-    pub fn hash_value(&self, i: usize, prefix: usize, repetition: usize) -> HashValue {
+    pub fn hash_value(&self, i: usize, prefix: usize, repetition: RepetitionIndex) -> HashValue {
         let mut hv: [u8; K] = [0; K];
         let (l, r) = self.half_hashes(i, repetition);
         for h in 0..(prefix / 2) {
@@ -483,6 +484,7 @@ impl HashCollection {
     pub fn empirical_collision_probability(&self, i: usize, j: usize, prefix: usize) -> f64 {
         let collisions = (0..self.hasher.repetitions)
             .filter(|&rep| {
+                let rep = rep.into();
                 let hi = self.hash_value(i, prefix, rep);
                 let hj = self.hash_value(j, prefix, rep);
                 hi == hj
@@ -495,6 +497,7 @@ impl HashCollection {
     pub fn first_collision_baseline(&self, i: usize, j: usize, prefix: usize) -> Option<usize> {
         (0..self.hasher.repetitions)
             .filter(|&rep| {
+                let rep = rep.into();
                 let ihash = &self.extended_hash_value(i, rep)[0..prefix];
                 let jhash = &self.extended_hash_value(j, rep)[0..prefix];
                 ihash == jhash
@@ -510,7 +513,7 @@ impl HashCollection {
     /// Counts the number of collision at a given repetition and prefix length
     fn num_collisions(
         &self,
-        repetition: usize,
+        repetition: RepetitionIndex,
         prefix: usize,
         exclusion_zone: usize,
         buffers: &mut ColumnBuffers,
@@ -541,6 +544,7 @@ impl HashCollection {
         let mut output = vec![0.0; K + 1];
         for prefix in (1..=K).rev() {
             for rep in 0..nreps {
+                let rep = rep.into();
                 output[prefix] += self.num_collisions(rep, prefix, exclusion_zone, buffers) as f64;
             }
         }
@@ -611,7 +615,7 @@ impl HashCollection {
     pub fn group_subsequences(
         &self,
         depth: usize,
-        repetition: usize,
+        repetition: RepetitionIndex,
         exclusion_zone: usize,
         buffers: &mut ColumnBuffers,
         parallel: bool,
@@ -671,7 +675,7 @@ impl HashCollection {
         let elapsed_boundaries = timer.elapsed();
         log::trace!(
             "tag" = "profiling",
-            "repetition" = repetition,
+            "repetition" = repetition.repetition,
             "depth" = depth,
             "largest_bucket" = largest_bucket,
             "n_buckets" = output.len(),
@@ -724,7 +728,7 @@ impl HashCollectionStats {
             .flat_map(|prefix| (0..nreps).into_par_iter().map(move |rep| (prefix, rep)))
             .map_with(ColumnBuffers::default(), |mut buffers, (prefix, rep)| {
                 let (collisions, setup_cost) =
-                    Self::num_collisions(pool, rep, prefix, exclusion_zone, &mut buffers);
+                    Self::num_collisions(pool, rep.into(), prefix, exclusion_zone, &mut buffers);
                 (prefix, rep, collisions, setup_cost)
             })
             .collect();
@@ -738,7 +742,6 @@ impl HashCollectionStats {
         }
         expected_collisions[0] = f64::INFINITY; // just to signal that we don't want to go to prefix 0
         repetition_setup_cost /= repetition_setup_cost_experiments as f64;
-        dbg!(repetition_setup_cost);
 
         // now we estimate the cost of running a handful of distance computations,
         // as a proxy for the cost of handling the collisions.
@@ -748,7 +751,7 @@ impl HashCollectionStats {
             if *estimated_collisions > 100.0 {
                 dbg!(estimated_collisions);
                 let mut cnt_dists = 0;
-                pool.group_subsequences(prefix, 0, exclusion_zone, &mut buffers, false);
+                pool.group_subsequences(prefix, 0.into(), exclusion_zone, &mut buffers, false);
                 let t_start = Instant::now();
                 let mut dists_buf = [(0, 0, Distance::infinity()); 1024];
                 let mut enumerator = buffers.enumerator().unwrap();
@@ -776,7 +779,7 @@ impl HashCollectionStats {
     /// and the cost of setting up the repetition
     fn num_collisions(
         pool: &HashCollection,
-        repetition: usize,
+        repetition: RepetitionIndex,
         prefix: usize,
         exclusion_zone: usize,
         buffers: &mut ColumnBuffers,
@@ -1065,7 +1068,7 @@ impl Hasher {
             let probe_hasher = Arc::new(Hasher::new(ts.w, 1, r, seed));
             let probe_collection = HashCollection::from_ts(&ts, fft_data, probe_hasher);
             let probe_collection = Arc::new(probe_collection);
-            probe_collection.group_subsequences(K, 0, ts.w, &mut probe_buffers, true);
+            probe_collection.group_subsequences(K, 0.into(), ts.w, &mut probe_buffers, true);
             info!("grouped subsequences");
 
             let mut has_collision = || {

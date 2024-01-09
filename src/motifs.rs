@@ -599,7 +599,7 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
             // Set up buckets for the current repetition
             self.pools.group_subsequences(
                 self.depth,
-                self.rep,
+                self.rep.into(),
                 self.exclusion_zone,
                 &mut self.buffers,
                 true,

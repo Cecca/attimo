@@ -140,7 +140,7 @@ pub fn bench_sort_hashes(c: &mut Criterion) {
     let h = Arc::new(Hasher::new(w, repetitions, 16.0, 12345));
     let pools = HashCollection::from_ts(&ts, &fft_data, Arc::clone(&h));
     let vals: Vec<(HashValue, u32)> = (0..ts.num_subsequences())
-        .map(|i| (pools.hash_value(i, K, 0), i as u32))
+        .map(|i| (pools.hash_value(i, K, 0.into()), i as u32))
         .collect();
     let mut scratch: Vec<(HashValue, u32)> = Vec::new();
     scratch.resize(vals.len(), Default::default());

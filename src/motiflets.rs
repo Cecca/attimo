@@ -1,7 +1,7 @@
 use crate::{
     distance::zeucl,
     knn::*,
-    lsh::{ColumnBuffers, HashCollection, HashCollectionStats, Hasher},
+    lsh::{ColumnBuffers, HashCollection, HashCollectionStats, Hasher, RepetitionIndex},
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 use log::*;
@@ -214,7 +214,7 @@ impl MotifletsIterator {
 
         let best_motiflet = vec![(Distance(std::f64::INFINITY), 0, false); max_k];
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
-        let mut buffers = ColumnBuffers::default();
+        let buffers = ColumnBuffers::default();
 
         let pools_stats = pools.stats(&ts, exclusion_zone);
         info!("Pools stats: {:?}", pools_stats);
@@ -250,7 +250,7 @@ impl MotifletsIterator {
     fn update_neighborhoods(&mut self) {
         let prefix = self.prefix;
         let previous_prefix = self.previous_prefix;
-        let rep = self.rep;
+        let rep: RepetitionIndex = self.rep.into();
         let exclusion_zone = self.exclusion_zone;
         let pools = &mut self.pools;
         let ts = &self.ts;
@@ -258,7 +258,6 @@ impl MotifletsIterator {
 
         let threshold = self.best_motiflet[self.max_k - 1].0;
 
-        pools.set_repetition(rep);
         pools.group_subsequences(prefix, rep, exclusion_zone, &mut self.buffers, true);
 
         let mut cnt_candidates = 0;
