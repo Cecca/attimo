@@ -257,11 +257,17 @@ impl MotifletsIterator {
             "max_k * exclusion_zone should be less than the number of subsequences. We have instead {} * {} > {}",
             max_k, exclusion_zone, ts.num_subsequences()
         );
-        let max_memory = max_memory.unwrap_or("1G".to_owned());
+        let max_memory = if let Some(max_mem_str) = max_memory {
+            Bytes::from_str(&max_mem_str).expect("cannot parse memory string")
+        } else {
+            let sysmem = Bytes::system_memory();
+            let mem = sysmem.divide(2);
+            mem
+        };
         let inner = attimo::motiflets::MotifletsIterator::new(
             ts,
             max_k,
-            Bytes::from_str(&max_memory).unwrap(),
+            max_memory,
             delta,
             exclusion_zone,
             seed,

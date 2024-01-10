@@ -35,10 +35,9 @@ struct Config {
     /// the number of repetitions to perform
     pub repetitions: usize,
 
-    // FIXME: make it half the available memory by default
-    #[argh(option, default = "\"1G\".to_owned()")]
+    #[argh(option)]
     /// the number of repetitions to perform
-    pub max_memory: String,
+    pub max_memory: Option<String>,
 
     #[argh(switch)]
     /// use the exact algorithm
@@ -130,11 +129,19 @@ fn main() -> Result<()> {
             let (extent, indices) = brute_force_motiflets(&ts, support, ts.w);
             vec![Motiflet::new(indices, extent)]
         } else {
+            let max_memory = if let Some(max_mem_str) = config.max_memory {
+                Bytes::from_str(&max_mem_str)?
+            } else {
+                let sysmem = Bytes::system_memory();
+                let mem = sysmem.divide(2);
+                log::info!("System has {} memory, using {} at most", sysmem, mem);
+                mem
+            };
             let exclusion_zone = ts.w;
             MotifletsIterator::new(
                 Arc::new(ts),
                 support,
-                Bytes::from_str(&config.max_memory)?,
+                max_memory,
                 config.failure_probability,
                 exclusion_zone,
                 config.seed,

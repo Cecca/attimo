@@ -392,6 +392,15 @@ impl Bytes {
     pub fn gbytes(gb: usize) -> Self {
         Self(gb * 1024 * 1024 * 1024)
     }
+    pub fn system_memory() -> Self {
+        let mut system = sysinfo::System::new_all();
+        system.refresh_memory();
+        let mem = system.total_memory();
+        Self(mem.try_into().expect("Cannot convert u64 to usize"))
+    }
+    pub fn divide(&self, divisor: usize) -> Self {
+        Self(self.0 / divisor)
+    }
 }
 impl FromStr for Bytes {
     type Err = ParseBytesError;
