@@ -417,7 +417,6 @@ impl FromStr for Bytes {
                 Some("K") => 1024,
                 Some("M") => 1024 * 1024,
                 Some("G") => 1024 * 1024 * 1024,
-                Some("T") => 1024 * 1024 * 1024 * 1024,
                 _ => unreachable!(),
             };
             Ok(Self(num * mult))
