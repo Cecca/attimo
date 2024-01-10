@@ -1,6 +1,7 @@
 use crate::distance::{zdot, zeucl};
 use rand_distr::num_traits::Zero;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
+use std::str::FromStr;
 use std::{cell::RefCell, convert::TryFrom, fmt::Display, sync::Arc};
 use thread_local::ThreadLocal;
 
@@ -370,10 +371,66 @@ impl WindowedTimeseries {
     }
 }
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy)]
-pub struct PrettyBytes(pub usize);
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct ParseBytesError;
+impl std::error::Error for ParseBytesError {}
+impl std::fmt::Display for ParseBytesError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "error in parsing memory specification")
+    }
+}
 
-impl Display for PrettyBytes {
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Copy)]
+pub struct Bytes(pub usize);
+impl Bytes {
+    pub fn kbytes(kb: usize) -> Self {
+        Self(kb * 1024)
+    }
+    pub fn mbytes(mb: usize) -> Self {
+        Self(mb * 1024 * 1024)
+    }
+    pub fn gbytes(gb: usize) -> Self {
+        Self(gb * 1024 * 1024 * 1024)
+    }
+}
+impl FromStr for Bytes {
+    type Err = ParseBytesError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use regex::Regex;
+
+        dbg!(s);
+        let rex = Regex::new(r"([0-9]+) *(([KMGT])(B|b|bytes))?").unwrap();
+        if let Some(captures) = rex.captures(s) {
+            dbg!(&captures);
+            let num: usize = captures[1].parse().unwrap();
+            let mult = match &captures.get(3).map(|m| m.as_str()) {
+                None => 1,
+                Some("K") => 1024,
+                Some("M") => 1024 * 1024,
+                Some("G") => 1024 * 1024 * 1024,
+                Some("T") => 1024 * 1024 * 1024 * 1024,
+                _ => unreachable!(),
+            };
+            Ok(Self(num * mult))
+        } else {
+            Err(ParseBytesError)
+        }
+    }
+}
+
+#[test]
+fn test_parse_bytes_string() {
+    assert_eq!(Bytes::from_str("10"), Ok(Bytes(10)));
+    assert_eq!(Bytes::from_str("10Kb"), Ok(Bytes(10 * 1024)));
+    assert_eq!(Bytes::from_str("10Mbytes"), Ok(Bytes(10 * 1024 * 1024)));
+    assert_eq!(Bytes::from_str("10 GB"), Ok(Bytes(10 * 1024 * 1024 * 1024)));
+    assert_eq!(
+        Bytes::from_str("10 TB"),
+        Ok(Bytes(10 * 1024 * 1024 * 1024 * 1024))
+    );
+}
+
+impl Display for Bytes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.0 >= 1024 * 1024 * 1024 {
             write!(f, "{:.2} Gbytes", self.0 as f64 / (1024. * 1024. * 1024.0))
@@ -387,7 +444,7 @@ impl Display for PrettyBytes {
     }
 }
 
-impl TryFrom<String> for PrettyBytes {
+impl TryFrom<String> for Bytes {
     type Error = anyhow::Error;
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
@@ -396,21 +453,21 @@ impl TryFrom<String> for PrettyBytes {
             s.remove_matches("Gb");
             let num = s.parse::<f64>().map_err(|e| anyhow::anyhow!(e))?;
             let bytes = num * 1024.0 * 1024.0 * 1024.0;
-            Ok(PrettyBytes(bytes as usize))
+            Ok(Bytes(bytes as usize))
         } else if s.ends_with("Mb") {
             s.remove_matches("Mb");
             let num = s.parse::<f64>().map_err(|e| anyhow::anyhow!(e))?;
             let bytes = num * 1024.0 * 1024.0;
-            Ok(PrettyBytes(bytes as usize))
+            Ok(Bytes(bytes as usize))
         } else if s.ends_with("Kb") {
             s.remove_matches("Kb");
             let num = s.parse::<f64>().map_err(|e| anyhow::anyhow!(e))?;
             let bytes = num * 1024.0;
-            Ok(PrettyBytes(bytes as usize))
+            Ok(Bytes(bytes as usize))
         } else {
             let num = s.parse::<f64>().map_err(|e| anyhow::anyhow!(e))?;
             let bytes = num;
-            Ok(PrettyBytes(bytes as usize))
+            Ok(Bytes(bytes as usize))
         }
     }
 }

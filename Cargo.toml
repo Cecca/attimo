@@ -30,6 +30,7 @@ env_logger = "0.10.1"
 # slog-async = "2.7"
 flate2 = "1"
 pprof = {version = "0.13", features = ["cpp", "prost", "prost-codec"]}
+regex = "1.10.2"
 
 [profile.release]
 debug = true

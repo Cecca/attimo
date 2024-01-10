@@ -29,7 +29,7 @@
 use crate::distance::zeucl;
 use crate::knn::Distance;
 use crate::motifs::Motif;
-use crate::timeseries::{FFTData, Overlaps, PrettyBytes, WindowedTimeseries};
+use crate::timeseries::{Bytes, FFTData, Overlaps, WindowedTimeseries};
 use log::info;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
@@ -312,10 +312,10 @@ pub struct HashCollection {
 
 impl HashCollection {
     /// How much memory would it be required to store information for these many repetitions?
-    pub fn required_memory(ts: &WindowedTimeseries, repetitions: usize) -> PrettyBytes {
+    pub fn required_memory(ts: &WindowedTimeseries, repetitions: usize) -> Bytes {
         let tensor_repetitions = (repetitions as f64).sqrt().ceil() as usize;
         let bytes = tensor_repetitions * K * ts.num_subsequences() * 8;
-        PrettyBytes(bytes)
+        Bytes(bytes)
     }
 
     /// Get how many repetitions are being run
@@ -682,8 +682,13 @@ impl HashCollection {
         );
     }
 
-    pub fn stats(&self, ts: &WindowedTimeseries, exclusion_zone: usize) -> HashCollectionStats {
-        HashCollectionStats::new(self, ts, exclusion_zone)
+    pub fn stats(
+        &self,
+        ts: &WindowedTimeseries,
+        max_memory: Bytes,
+        exclusion_zone: usize,
+    ) -> HashCollectionStats {
+        HashCollectionStats::new(self, ts, max_memory, exclusion_zone)
     }
 }
 
@@ -701,8 +706,12 @@ pub struct HashCollectionStats {
     max_repetitions: usize,
 }
 impl HashCollectionStats {
-    fn new(pool: &HashCollection, ts: &WindowedTimeseries, exclusion_zone: usize) -> Self {
-        let max_memory = PrettyBytes(1024 * 1024 * 1024 * 8);
+    fn new(
+        pool: &HashCollection,
+        ts: &WindowedTimeseries,
+        max_memory: Bytes,
+        exclusion_zone: usize,
+    ) -> Self {
         let mut max_repetitions = 16;
         while HashCollection::required_memory(ts, 2 * max_repetitions) <= max_memory {
             max_repetitions *= 2;

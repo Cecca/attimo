@@ -6,6 +6,7 @@ use attimo::motiflets::{brute_force_motiflets, Motiflet, MotifletsIterator};
 use attimo::motifs::{motifs, Motif};
 use attimo::timeseries::*;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -30,9 +31,14 @@ struct Config {
     /// failure probability of the LSH scheme
     pub failure_probability: f64,
 
-    #[argh(option)]
+    #[argh(option, default = "1024")]
     /// the number of repetitions to perform
     pub repetitions: usize,
+
+    // FIXME: make it half the available memory by default
+    #[argh(option, default = "\"1G\".to_owned()")]
+    /// the number of repetitions to perform
+    pub max_memory: String,
 
     #[argh(switch)]
     /// use the exact algorithm
@@ -100,7 +106,7 @@ fn main() -> Result<()> {
         "Create windowed time series with {} subsequences in {:?}, taking {}",
         ts.num_subsequences(),
         input_elapsed,
-        PrettyBytes(ts_bytes)
+        Bytes(ts_bytes)
     );
     log::debug!(
         "time_s" = input_elapsed.as_secs_f64();
@@ -128,7 +134,7 @@ fn main() -> Result<()> {
             MotifletsIterator::new(
                 Arc::new(ts),
                 support,
-                config.repetitions,
+                Bytes::from_str(&config.max_memory)?,
                 config.failure_probability,
                 exclusion_zone,
                 config.seed,

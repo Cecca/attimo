@@ -1,7 +1,8 @@
 use attimo::motifs::{MotifsEnumerator, PairMotifState};
-use attimo::timeseries::WindowedTimeseries;
+use attimo::timeseries::{Bytes, WindowedTimeseries};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use std::str::FromStr;
 use std::sync::Arc;
 
 #[pyclass]
@@ -239,11 +240,12 @@ struct MotifletsIterator {
 #[pymethods]
 impl MotifletsIterator {
     #[new]
-    #[pyo3(signature=(ts, w, max_k = 10, exclusion_zone=None, delta = 0.05, seed = 1234))]
+    #[pyo3(signature=(ts, w, max_k = 10, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234))]
     fn new(
         ts: Vec<f64>,
         w: usize,
         max_k: usize,
+        max_memory: Option<String>,
         exclusion_zone: Option<usize>,
         delta: f64,
         seed: u64,
@@ -255,11 +257,11 @@ impl MotifletsIterator {
             "max_k * exclusion_zone should be less than the number of subsequences. We have instead {} * {} > {}",
             max_k, exclusion_zone, ts.num_subsequences()
         );
-        let initial_repetitions = 16;
+        let max_memory = max_memory.unwrap_or("1G".to_owned());
         let inner = attimo::motiflets::MotifletsIterator::new(
             ts,
             max_k,
-            initial_repetitions,
+            Bytes::from_str(&max_memory).unwrap(),
             delta,
             exclusion_zone,
             seed,

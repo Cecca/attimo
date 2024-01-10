@@ -2,7 +2,7 @@ use crate::{
     distance::zeucl,
     knn::*,
     lsh::{ColumnBuffers, HashCollection, HashCollectionStats, Hasher, RepetitionIndex},
-    timeseries::{FFTData, Overlaps, WindowedTimeseries},
+    timeseries::{Bytes, FFTData, Overlaps, WindowedTimeseries},
 };
 use log::*;
 use rayon::prelude::*;
@@ -189,7 +189,7 @@ impl MotifletsIterator {
     pub fn new(
         ts: Arc<WindowedTimeseries>,
         max_k: usize,
-        repetitions: usize,
+        max_memory: Bytes,
         delta: f64,
         exclusion_zone: usize,
         seed: u64,
@@ -199,6 +199,7 @@ impl MotifletsIterator {
         let n = ts.num_subsequences();
         let fft_data = FFTData::new(&ts);
 
+        let repetitions = 16;
         let hasher_width = Hasher::compute_width(&ts);
 
         let hasher = Hasher::new(ts.w, repetitions, hasher_width, seed);
@@ -216,7 +217,7 @@ impl MotifletsIterator {
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
         let buffers = ColumnBuffers::default();
 
-        let pools_stats = pools.stats(&ts, exclusion_zone);
+        let pools_stats = pools.stats(&ts, max_memory, exclusion_zone);
         info!("Pools stats: {:?}", pools_stats);
         let first_meaningful_prefix = pools_stats.first_meaningful_prefix();
 
@@ -389,7 +390,7 @@ impl MotifletsIterator {
             // by returning an `Err` in this call
             f()?;
             // check the stopping condition: everything is confirmed
-            if self.best_motiflet[1..].iter().all(|tup| tup.2) {
+            if self.best_motiflet.iter().all(|tup| tup.2) {
                 info!("Execution stats: {:#?}", self.stats);
                 return Ok(None);
             }
@@ -480,7 +481,7 @@ mod test {
         let iter = MotifletsIterator::new(
             Arc::clone(&ts),
             k,
-            repetitions,
+            Bytes::gbytes(4),
             failure_probability,
             exclusion_zone,
             seed,
