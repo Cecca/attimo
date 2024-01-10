@@ -153,6 +153,14 @@ pub fn bench_sort_hashes(c: &mut Criterion) {
         )
     });
 
+    group.bench_function("parallel radix sort 9pass", |b| {
+        b.iter_batched(
+            || vals.clone(),
+            |mut vals| par_sort_hash_pairs(&mut vals, &mut scratch),
+            criterion::BatchSize::LargeInput,
+        )
+    });
+
     group.bench_function("rayon sort", |b| {
         b.iter_batched(
             || vals.clone(),
