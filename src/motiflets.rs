@@ -167,7 +167,6 @@ pub struct MotifletsIterator {
     best_motiflet: Vec<(Distance, usize, bool)>,
     graph: KnnGraph,
     to_return: Vec<Motiflet>,
-    repetitions: usize,
     delta: f64,
     exclusion_zone: usize,
     // hasher: Arc<Hasher>,
@@ -228,7 +227,6 @@ impl MotifletsIterator {
             graph: KnnGraph::new(max_k, n, exclusion_zone),
             max_k,
             to_return: Vec::new(),
-            repetitions,
             delta,
             exclusion_zone,
             pools,
@@ -408,7 +406,7 @@ impl MotifletsIterator {
                 .iter()
                 .filter(|tup| tup.0.is_finite())
                 .find_map(|tup| if !tup.2 { Some(tup.0) } else { None });
-            info!("First non confirmed distance {:?}", first_unconfirmed);
+            debug!("First non confirmed distance {:?}", first_unconfirmed);
 
             let best_prefix = if let Some(first_unconfirmed) = first_unconfirmed {
                 let costs = self.pools_stats.costs_to_confirm(
@@ -422,10 +420,12 @@ impl MotifletsIterator {
                     .enumerate()
                     .min_by(|(_, tup1), (_, tup2)| tup1.0.total_cmp(&tup2.0))
                     .unwrap();
-                info!(
-                    "Best prefix to confirm {} is {} with {} repetitions with cost {}",
-                    first_unconfirmed, best_prefix, required_repetitions, best_cost
-                );
+                if best_prefix < self.prefix {
+                    info!(
+                        "Best prefix to confirm {} is {} with {} repetitions with cost {}",
+                        first_unconfirmed, best_prefix, required_repetitions, best_cost
+                    );
+                }
                 if *required_repetitions > self.pools.get_repetitions() {
                     self.pools.add_repetitions(
                         &self.ts,
@@ -441,10 +441,13 @@ impl MotifletsIterator {
             if best_prefix >= self.prefix {
                 // Advance on the current prefix
                 self.rep += 1;
-                if self.rep >= self.repetitions {
+                debug!("Advancing to repetition {}", self.rep);
+                if self.rep >= self.pools.get_repetitions() {
                     self.rep = 0;
                     self.previous_prefix.replace(self.prefix);
                     self.prefix -= 1;
+                    debug!("Not enough repetitions, going to prefix {}", self.prefix);
+                    assert!(self.prefix > 0);
                 }
             } else {
                 // Go to the suggested prefix, and start from the first repetition there

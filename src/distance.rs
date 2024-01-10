@@ -36,6 +36,7 @@ pub fn zeucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     (2.0 * ts.w as f64 - 2.0 * dotp).sqrt()
 }
 
+// TODO: add thresholding and exit early if the threshold is exceeded
 pub fn zeucl_slow(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     let mut s = 0.0;
     let mi = ts.mean(i);
