@@ -248,12 +248,13 @@ impl MotifletsIterator {
     /// Update the neighborhoods with collisions
     fn update_neighborhoods(&mut self) {
         let prefix = self.prefix;
-        let previous_prefix = self.previous_prefix;
         let rep: RepetitionIndex = self.rep.into();
         let exclusion_zone = self.exclusion_zone;
         let pools = &mut self.pools;
         let ts = &self.ts;
         let graph = &mut self.graph;
+
+        let num_collisions_threshold = ts.num_subsequence_pairs() / 2;
 
         let threshold = self.best_motiflet[self.max_k - 1].0;
 
@@ -266,6 +267,13 @@ impl MotifletsIterator {
             while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone)
             {
                 cnt_candidates += cnt;
+                if cnt_candidates > num_collisions_threshold {
+                    panic!(
+                        "Too many collisions: {} out of {} possible pairs",
+                        cnt_candidates,
+                        ts.num_subsequence_pairs()
+                    );
+                }
                 self.stats.cnt_candidates += cnt;
                 // Fixup the distances
                 let (d, c): (f64, usize) = self.pairs_buffer[0..cnt]
