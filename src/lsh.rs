@@ -374,11 +374,9 @@ impl HashCollection {
         let elapsed = timer.elapsed();
         info!("tensor pool building in {:?}", elapsed.as_secs_f64());
 
-        let trep = hasher.tensor_repetitions;
         let reps = hasher.repetitions;
-        let minimal_repetition_table = (0..trep)
-            .flat_map(|i| (0..trep).map(move |j| get_minimal_repetition(reps, i, j)))
-            .collect();
+        let minimal_repetition_table =
+            Self::build_minimal_repetition_table(reps, hasher.tensor_repetitions);
 
         Self {
             hasher,
@@ -386,6 +384,31 @@ impl HashCollection {
             pools,
             minimal_repetition_table,
         }
+    }
+
+    fn build_minimal_repetition_table(reps: usize, trep: usize) -> Vec<Option<usize>> {
+        use std::collections::HashMap;
+        let mut htable = HashMap::<(usize, usize), Option<usize>>::new();
+        for i in 0..trep {
+            for j in 0..trep {
+                htable.insert((i, j), None);
+            }
+        }
+        for rep in 0..reps {
+            htable
+                .entry(get_minimal_index_pair(rep))
+                .and_modify(|entry| *entry = Some(rep));
+        }
+        let mut minimal_repetition_table: Vec<((usize, usize), Option<usize>)> =
+            htable.into_iter().collect();
+
+        minimal_repetition_table.sort();
+        let table: Vec<Option<usize>> = minimal_repetition_table
+            .into_iter()
+            .map(|tup| tup.1)
+            .collect();
+
+        table
     }
 
     pub fn add_repetitions(
@@ -414,11 +437,11 @@ impl HashCollection {
                 let mut repdata = vec![([0u8; K_HALF], [0u8; K_HALF]); ns];
                 let mut max_dotp = 0.0f64;
                 for k in 0..K_HALF {
-                    let mdp1 = hasher.hash_all(&ts, fft_data, k, trep, |i, h| {
+                    let mdp1 = hasher.hash_all(ts, fft_data, k, trep, |i, h| {
                         let h = ((h as i64 & 0xFFi64) as i8) as u8;
                         repdata[i].0[k] = h;
                     });
-                    let mdp2 = hasher.hash_all(&ts, fft_data, k + K_HALF, trep, |i, h| {
+                    let mdp2 = hasher.hash_all(ts, fft_data, k + K_HALF, trep, |i, h| {
                         let h = ((h as i64 & 0xFFi64) as i8) as u8;
                         repdata[i].1[k] = h;
                     });
@@ -428,11 +451,9 @@ impl HashCollection {
             });
         self.pools.par_extend(it);
 
-        let trep = hasher.tensor_repetitions;
         let reps = hasher.repetitions;
-        self.minimal_repetition_table = (0..trep)
-            .flat_map(|i| (0..trep).map(move |j| get_minimal_repetition(reps, i, j)))
-            .collect();
+        self.minimal_repetition_table =
+            Self::build_minimal_repetition_table(reps, hasher.tensor_repetitions);
     }
 
     pub fn half_hashes(&self, i: usize, repetition: RepetitionIndex) -> (&[u8], &[u8]) {
@@ -614,7 +635,7 @@ impl HashCollection {
         exclusion_zone: usize,
         buffers: &mut ColumnBuffers,
         parallel: bool,
-    ) -> () {
+    ) {
         let ns = self.n_subsequences;
         let buffer = &mut buffers.hashes;
         let output = &mut buffers.buckets;
