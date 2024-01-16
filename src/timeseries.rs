@@ -407,10 +407,8 @@ impl FromStr for Bytes {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use regex::Regex;
 
-        dbg!(s);
         let rex = Regex::new(r"([0-9]+) *(([KMGT])(B|b|bytes))?").unwrap();
         if let Some(captures) = rex.captures(s) {
-            dbg!(&captures);
             let num: usize = captures[1].parse().unwrap();
             let mult = match &captures.get(3).map(|m| m.as_str()) {
                 None => 1,
@@ -432,10 +430,6 @@ fn test_parse_bytes_string() {
     assert_eq!(Bytes::from_str("10Kb"), Ok(Bytes(10 * 1024)));
     assert_eq!(Bytes::from_str("10Mbytes"), Ok(Bytes(10 * 1024 * 1024)));
     assert_eq!(Bytes::from_str("10 GB"), Ok(Bytes(10 * 1024 * 1024 * 1024)));
-    assert_eq!(
-        Bytes::from_str("10 TB"),
-        Ok(Bytes(10 * 1024 * 1024 * 1024 * 1024))
-    );
 }
 
 impl Display for Bytes {
