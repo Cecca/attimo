@@ -277,25 +277,6 @@ fn get_minimal_index_pair(idx: usize) -> (usize, usize) {
     }
 }
 
-fn get_minimal_repetition(repetitions: usize, i: usize, j: usize) -> Option<usize> {
-    for rep in 0..repetitions {
-        let pair = get_minimal_index_pair(rep);
-        if pair == (i, j) {
-            return Some(rep);
-        }
-    }
-    None
-}
-
-#[test]
-fn test_index_pair_round_trip() {
-    let repetitions = 4096;
-    for rep in 0..repetitions {
-        let (i, j) = get_minimal_index_pair(rep);
-        assert_eq!(rep, get_minimal_repetition(repetitions, i, j).unwrap());
-    }
-}
-
 //// This data structure contains all the information needed to generate the hash values for all the repeititions
 //// for all the subsequences.
 #[derive(Clone)]
