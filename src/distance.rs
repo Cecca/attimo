@@ -50,6 +50,47 @@ pub fn zeucl_slow(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     s.sqrt()
 }
 
+/// computes the z-normalized Euclidean distance between the subsequences
+/// of `ts` at index `i` and `j`, with early exit if the distance exceeds
+/// the given `threshold`, in which case the function returns `None`.
+pub fn zeucl_threshold(ts: &WindowedTimeseries, i: usize, j: usize, threshold: f64) -> Option<f64> {
+    use std::simd::f64x4;
+    let threshold = threshold * threshold;
+    let mut s = 0.0;
+    let mi = ts.mean(i);
+    let mj = ts.mean(j);
+    let si = ts.sd(i);
+    let sj = ts.sd(j);
+    let simd_mi = f64x4::splat(mi);
+    let simd_mj = f64x4::splat(mj);
+    let simd_si = f64x4::splat(si);
+    let simd_sj = f64x4::splat(sj);
+
+    let i_chunks = ts.subsequence(i).chunks_exact(f64x4::LANES);
+    let j_chunks = ts.subsequence(j).chunks_exact(f64x4::LANES);
+
+    for (&x, &y) in i_chunks.remainder().iter().zip(j_chunks.remainder()) {
+        let d = ((x - mi) / si) - ((y - mj) / sj);
+        s += d * d;
+        if s > threshold {
+            return None;
+        }
+    }
+
+    for (x, y) in i_chunks.zip(j_chunks) {
+        let x = f64x4::from_slice(x);
+        let y = f64x4::from_slice(y);
+        let d = ((x - simd_mi) / simd_si) - ((y - simd_mj) / simd_sj);
+        let d = d * d;
+        s += d.as_array().iter().sum::<f64>();
+        if s > threshold {
+            return None;
+        }
+    }
+
+    Some(s.sqrt())
+}
+
 #[cfg(test)]
 pub fn dot_slow(a: &[f64], b: &[f64]) -> f64 {
     assert_eq!(a.len(), b.len());
@@ -144,10 +185,17 @@ fn test_zeucl() {
             ts.znormalized(j, &mut zb);
             let expected = euclidean(&za, &zb);
             let slow = zeucl_slow(&ts, i, j);
+            let thresholded = zeucl_threshold(&ts, i, j, f64::INFINITY).unwrap();
             let actual = zeucl(&ts, i, j);
             assert_eq!(expected, slow);
             assert!(
                 (expected - actual).abs() < 0.0001,
+                "distances are too different: \n\texpected={} \n\tactual={}",
+                expected,
+                actual
+            );
+            assert!(
+                (expected - thresholded).abs() < 0.0001,
                 "distances are too different: \n\texpected={} \n\tactual={}",
                 expected,
                 actual

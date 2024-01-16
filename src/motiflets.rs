@@ -1,5 +1,5 @@
 use crate::{
-    distance::zeucl,
+    distance::{zeucl, zeucl_threshold},
     knn::*,
     lsh::{ColumnBuffers, HashCollection, HashCollectionStats, Hasher, RepetitionIndex},
     timeseries::{Bytes, FFTData, Overlaps, WindowedTimeseries},
@@ -286,8 +286,8 @@ impl MotifletsIterator {
                         // longer prefix. The caveat now is that we might do different number of
                         // repetitions at different prefixes
                         // TODO: maybe skip pairs with only one collision
-                        if true {
-                            let d = Distance(zeucl(ts, a, b));
+                        if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
+                            let d = Distance(d);
                             if d <= threshold {
                                 // we only schedule the pair to update the respective
                                 // neighborhoods if it can result in a better motiflet.
