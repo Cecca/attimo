@@ -127,8 +127,8 @@ pub fn compute_extent(ts: &WindowedTimeseries, indices: &[usize]) -> Distance {
 /// this structure reports some statistics, mainly for debugging purposes
 #[derive(Debug, Clone, Copy, Default)]
 pub struct KnnGraphStats {
-    total_neighbors: usize,
-    max_neighbors: usize,
+    pub total_neighbors: usize,
+    pub max_neighbors: usize,
 }
 
 pub struct KnnGraph {

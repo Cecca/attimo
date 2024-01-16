@@ -1,5 +1,5 @@
 use crate::{
-    distance::{zeucl, zeucl_threshold},
+    distance::zeucl_threshold,
     knn::*,
     lsh::{ColumnBuffers, HashCollection, HashCollectionStats, Hasher, RepetitionIndex},
     timeseries::{Bytes, FFTData, Overlaps, WindowedTimeseries},
@@ -155,6 +155,8 @@ impl Motiflet {
     }
 }
 
+const INITIAL_REPETITIONS: usize = 32;
+
 #[derive(Debug, Clone, Default)]
 pub struct MotifletsIteratorStats {
     cnt_candidates: usize,
@@ -198,7 +200,7 @@ impl MotifletsIterator {
         let n = ts.num_subsequences();
         let fft_data = FFTData::new(&ts);
 
-        let repetitions = 16;
+        let repetitions = INITIAL_REPETITIONS;
         let hasher_width = Hasher::compute_width(&ts);
 
         let hasher = Hasher::new(ts.w, repetitions, hasher_width, seed);
@@ -416,12 +418,20 @@ impl MotifletsIterator {
                 .find_map(|tup| if !tup.2 { Some(tup.0) } else { None });
             debug!("First non confirmed distance {:?}", first_unconfirmed);
 
-            let best_prefix = if let Some(first_unconfirmed) = first_unconfirmed {
+            let best_prefix = if self.rep < INITIAL_REPETITIONS && self.previous_prefix.is_none() {
+                // stay at the current prefix for the first few repetitions, to allow discovery
+                // of at least a few pairs
+                debug!("Still in the initial repetitions, continuing with the current prefix");
+                self.prefix
+            } else if let Some(first_unconfirmed) = first_unconfirmed {
+                // let graph_stats = self.graph.stats();
+                // graph_stats.total_neighbors;
+
                 let costs = self.pools_stats.costs_to_confirm(
                     self.prefix,
                     first_unconfirmed,
                     self.delta,
-                    &self.pools.get_hasher(),
+                    self.pools.get_hasher(),
                 );
                 let (best_prefix, (best_cost, required_repetitions)) = costs
                     .iter()
@@ -455,7 +465,6 @@ impl MotifletsIterator {
                     self.previous_prefix.replace(self.prefix);
                     self.prefix -= 1;
                     debug!("Not enough repetitions, going to prefix {}", self.prefix);
-                    assert!(self.prefix > 0);
                 }
             } else {
                 // Go to the suggested prefix, and start from the first repetition there
@@ -463,6 +472,7 @@ impl MotifletsIterator {
                 self.previous_prefix.replace(self.prefix);
                 self.prefix = best_prefix;
             }
+            assert!(self.prefix > 0);
         }
 
         Ok(self.to_return.pop())

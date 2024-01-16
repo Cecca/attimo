@@ -148,7 +148,11 @@ fn main() -> Result<()> {
                 false,
             )
             .map(|m| {
-                eprintln!("discovered {:?}", m);
+                eprintln!(
+                    "discovered motiflet with support {} and extent {}",
+                    m.support(),
+                    m.extent()
+                );
                 m
             })
             .collect()
