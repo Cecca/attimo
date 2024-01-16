@@ -184,29 +184,31 @@ impl KnnGraph {
 
     /// Mark the neighbors that are not overlapped by others
     fn fix_flags(&mut self) {
-        for idx in 0..self.dirty.len() {
-            if !self.dirty[idx] {
-                self.changed[idx] = false;
-                continue;
-            }
-            let neighborhood = &mut self.neighborhoods[idx];
-            // for tup in neighborhood.iter_mut() {
-            //     tup.2 = false;
-            // }
-            let mut i = 0;
-            let mut changed = false;
-            while i < neighborhood.len() {
-                // is the subsequence shadowed because it overlaps with an earlier one?
-                let shadowed = neighborhood[i].overlaps(&neighborhood[..i], self.exclusion_zone);
-                // store if we are flipping the flag
-                changed |= neighborhood[i].2 != !shadowed;
-                // possibly flip the flag
-                neighborhood[i].2 = !shadowed;
-                i += 1;
-            }
-            self.changed[idx] = changed;
-            self.dirty[idx] = false;
-        }
+        use rayon::prelude::*;
+        self.dirty
+            .par_iter_mut()
+            .zip(self.changed.par_iter_mut())
+            .zip(self.neighborhoods.par_iter_mut())
+            .for_each(|((dirty, changed), neighborhood)| {
+                if !*dirty {
+                    *changed = false;
+                    return;
+                }
+                let mut i = 0;
+                let mut change = false;
+                while i < neighborhood.len() {
+                    // is the subsequence shadowed because it overlaps with an earlier one?
+                    let shadowed =
+                        neighborhood[i].overlaps(&neighborhood[..i], self.exclusion_zone);
+                    // store if we are flipping the flag
+                    change |= neighborhood[i].2 != !shadowed;
+                    // possibly flip the flag
+                    neighborhood[i].2 = !shadowed;
+                    i += 1;
+                }
+                *changed = change;
+                *dirty = false;
+            });
     }
 
     pub fn num_non_empty(&self) -> usize {
@@ -371,7 +373,7 @@ impl KnnGraph {
                     continue;
                 }
                 neighborhood.insert(i, (d, dst, false));
-                assert!(neighborhood.is_sorted_by_key(|tup| tup.0));
+                debug_assert!(neighborhood.is_sorted_by_key(|tup| tup.0));
 
                 dirty[src] = true;
             }
