@@ -12,14 +12,14 @@ pub trait Overlaps<T> {
 impl Overlaps<usize> for usize {
     #[inline]
     fn overlaps(&self, other: usize, exclusion_zone: usize) -> bool {
-        self.max(&other) - self.min(&other) < exclusion_zone
+        ((*self as isize - other as isize).abs() - exclusion_zone as isize) < 0isize
     }
 }
 
 impl Overlaps<u32> for u32 {
     #[inline]
     fn overlaps(&self, other: u32, exclusion_zone: usize) -> bool {
-        self.max(&other) - self.min(&other) < exclusion_zone as u32
+        ((*self as isize - other as isize).abs() - exclusion_zone as isize) < 0isize
     }
 }
 
@@ -27,6 +27,7 @@ impl<T> Overlaps<&T> for T
 where
     T: Overlaps<T> + Copy,
 {
+    #[inline]
     fn overlaps(&self, other: &T, exclusion_zone: usize) -> bool {
         self.overlaps(*other, exclusion_zone)
     }
@@ -48,7 +49,10 @@ pub fn overlap_count<T: for<'a> Overlaps<&'a T>>(
     others: &[T],
     exclusion_zone: usize,
 ) -> usize {
-    others.iter().map(|o| x.overlaps(o, exclusion_zone)).count()
+    others
+        .iter()
+        .filter(|o| x.overlaps(o, exclusion_zone))
+        .count()
 }
 
 pub struct WindowedTimeseries {

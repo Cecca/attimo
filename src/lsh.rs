@@ -106,11 +106,11 @@ impl<'hashes> CollisionEnumerator<'hashes> {
             let range = self.buffers.buckets[self.current_bucket].clone();
             while self.i < range.end {
                 while self.j < range.end {
-                    assert!(range.contains(&self.i));
-                    assert!(range.contains(&self.j));
+                    debug_assert!(range.contains(&self.i));
+                    debug_assert!(range.contains(&self.j));
                     let (ha, a) = self.buffers.hashes[self.i];
                     let (hb, b) = self.buffers.hashes[self.j];
-                    assert_eq!(ha, hb);
+                    debug_assert_eq!(ha, hb);
                     if !a.overlaps(b, exclusion_zone) {
                         output[idx] = (a.min(b), a.max(b), Distance(f64::INFINITY));
                         idx += 1;
@@ -129,18 +129,16 @@ impl<'hashes> CollisionEnumerator<'hashes> {
                 let range = self.buffers.buckets[self.current_bucket].clone();
                 self.i = range.start;
                 self.j = range.start + 1;
+            } else if idx == 0 {
+                return None;
             } else {
-                if idx == 0 {
-                    return None;
-                } else {
-                    return Some(idx);
-                }
+                return Some(idx);
             }
         }
         if idx == 0 {
-            return None;
+            None
         } else {
-            return Some(idx);
+            Some(idx)
         }
     }
 
