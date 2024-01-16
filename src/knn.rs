@@ -1,3 +1,5 @@
+use thread_local::ThreadLocal;
+
 use crate::{
     distance::zeucl,
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
@@ -228,52 +230,45 @@ impl KnnGraph {
     }
 
     pub fn min_count_above_many(&self, thresholds: &[Distance]) -> Vec<usize> {
+        use rayon::prelude::*;
         assert!(!self.neighborhoods.is_empty());
-        let mut output = vec![0; thresholds.len()];
-        let mut local_counts = vec![0; thresholds.len()];
+        let output = ThreadLocal::new(); // vec![0; thresholds.len()];
+        let local_counts = vec![0; thresholds.len()];
 
-        self.neighborhoods.iter().for_each(|neighborhood| {
-            local_counts.fill(0);
-            for (i, tup) in ActiveNeighborhood::new(neighborhood)
-                .take(self.max_k - 1)
-                .enumerate()
-            {
-                if tup.0 <= thresholds[i] {
-                    local_counts[i] += 1;
+        self.neighborhoods
+            .par_iter()
+            .for_each_with(local_counts, |local_counts, neighborhood| {
+                let mut output = output
+                    .get_or(|| std::cell::RefCell::new(vec![0usize; thresholds.len()]))
+                    .borrow_mut();
+                local_counts.fill(0);
+                for (i, tup) in ActiveNeighborhood::new(neighborhood)
+                    .take(self.max_k - 1)
+                    .enumerate()
+                {
+                    if tup.0 <= thresholds[i] {
+                        local_counts[i] += 1;
+                    }
                 }
-            }
 
-            for (below, cnt) in output.iter_mut().zip(local_counts.iter()) {
-                if cnt > below {
-                    *below = *cnt;
+                for (below, cnt) in output.iter_mut().zip(local_counts.iter()) {
+                    if cnt > below {
+                        *below = *cnt;
+                    }
                 }
-            }
-        });
+            });
+
+        let mut output = output
+            .into_iter()
+            .map(|cell| cell.take())
+            .reduce(|a, b| a.into_iter().zip(b).map(|(a, b)| a.max(b)).collect())
+            .unwrap();
 
         for below in output.iter_mut() {
             assert!(*below <= self.max_k);
             *below = self.max_k - *below;
         }
         output
-    }
-
-    pub fn min_count_above(&self, threshold: Distance) -> usize {
-        assert!(!self.neighborhoods.is_empty());
-        let below = self
-            .neighborhoods
-            .iter()
-            .map(|neighborhood| {
-                let active = ActiveNeighborhood::new(neighborhood);
-                let cnt = active
-                    .filter(|tup| tup.0 <= threshold)
-                    .take(self.max_k - 1)
-                    .count();
-                cnt
-            })
-            .max()
-            .unwrap();
-        assert!(below <= self.max_k);
-        self.max_k - below
     }
 
     pub fn update_extents(&mut self, ts: &WindowedTimeseries) {
@@ -304,7 +299,7 @@ impl KnnGraph {
                             extents[k] = dist.max(extents[k - 1]);
                         }
                         for (_, j) in ActiveNeighborhood::new(neighborhood).take(k) {
-                            let d = Self::get_distance(&neighborhoods, i, j)
+                            let d = Self::get_distance(neighborhoods, i, j)
                                 .unwrap_or_else(|| Distance(zeucl(ts, i, j)));
                             extents[k] = extents[k].max(d);
                         }
