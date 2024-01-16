@@ -66,8 +66,8 @@ pub fn zeucl_threshold(ts: &WindowedTimeseries, i: usize, j: usize, threshold: f
     let simd_si = f64x4::splat(si);
     let simd_sj = f64x4::splat(sj);
 
-    let i_chunks = ts.subsequence(i).chunks_exact(f64x4::LANES);
-    let j_chunks = ts.subsequence(j).chunks_exact(f64x4::LANES);
+    let i_chunks = ts.subsequence(i).chunks_exact(4);
+    let j_chunks = ts.subsequence(j).chunks_exact(4);
 
     for (&x, &y) in i_chunks.remainder().iter().zip(j_chunks.remainder()) {
         let d = ((x - mi) / si) - ((y - mj) / sj);
