@@ -1,14 +1,9 @@
 [package]
 name = "attimo"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Matteo Ceccarello <matteo.ceccarello@unipd.it>"]
 edition = "2021"
-include = [
-    "/benches",
-    "/examples",
-    "/src",
-    "/*.toml",
-]
+include = ["/benches", "/examples", "/src", "/*.toml"]
 
 [dependencies]
 anyhow = "1.0"
@@ -22,14 +17,10 @@ rustfft = "6.1"
 indicatif = "0.16"
 statrs = "0.16"
 argh = "0.1"
-log = {version = "0.4", features = ["kv_unstable"] }
+log = { version = "0.4", features = ["kv_unstable"] }
 env_logger = "0.10.1"
-# slog = "2.7"
-# slog-json = "2.4"
-# slog-scope = "4.4"
-# slog-async = "2.7"
 flate2 = "1"
-pprof = {version = "0.13", features = ["cpp", "prost", "prost-codec"]}
+pprof = { version = "0.13", features = ["cpp", "prost", "prost-codec"] }
 regex = "1.10.2"
 sysinfo = "0.30.5"
 
@@ -49,4 +40,3 @@ harness = false
 # This is different than running tests in relase mode,
 # which also disables debug assertions.
 opt-level = 2
-
