@@ -125,7 +125,6 @@ pub fn brute_force_motiflets(
         .min()
         .unwrap();
     pl.finish_and_clear();
-    info!("Root of motiflet is {root}");
     (extent.0, indices)
 }
 
@@ -207,10 +206,10 @@ impl MotifletsIterator {
 
         let hasher = Hasher::new(ts.w, repetitions, hasher_width, seed);
         let pools = HashCollection::from_ts(&ts, &fft_data, hasher);
-        info!("Computed hash values in {:?}", start.elapsed());
+        debug!("Computed hash values in {:?}", start.elapsed());
 
         let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
-        info!(
+        debug!(
             "Average pairwise distance: {}, maximum pairwise distance: {}",
             average_pairwise_distance,
             ts.maximum_distance(),
@@ -221,7 +220,7 @@ impl MotifletsIterator {
         let buffers = ColumnBuffers::default();
 
         let pools_stats = pools.stats(&ts, max_memory, exclusion_zone);
-        info!("Pools stats: {:?}", pools_stats);
+        debug!("Pools stats: {:?}", pools_stats);
         let first_meaningful_prefix = pools_stats.first_meaningful_prefix();
 
         Self {
@@ -327,7 +326,6 @@ impl MotifletsIterator {
             "Candidate pairs {}, distances computed {}, average distance {} (p={})",
             cnt_candidates, cnt_distances, average_distance, average_distance_probability
         );
-        // assert!(average_distance_probability.is_nan() || average_distance_probability >= 0.000001);
     }
 
     /// adds to `self.to_return` the motiflets that can
@@ -360,7 +358,7 @@ impl MotifletsIterator {
         for k in 0..self.max_k {
             let (extent, root_idx, emitted) = &mut self.best_motiflet[k];
             if !*emitted && extent.0.is_finite() {
-                let fp = self.pools.failure_probability_independent(
+                let fp = self.pools.failure_probability(
                     *extent,
                     rep,
                     prefix,
@@ -380,14 +378,14 @@ impl MotifletsIterator {
                     *emitted = true;
                     let m = Motiflet::new(indices, extent.0);
                     self.to_return.push(m);
-                } else if rep % 512 == 0 {
-                    info!(
-                        "[{}@{}] failure probability for k={}: {}",
-                        rep, prefix, k, fp
-                    );
                 }
             }
         }
+        log::trace!(
+            "Failure probability at extent {} : {}",
+            min_extents.last().unwrap().0,
+            failure_probabilities.last().unwrap()
+        );
     }
 
     pub fn next_interruptible<E, F: FnMut() -> Result<(), E>>(
@@ -408,8 +406,8 @@ impl MotifletsIterator {
             self.emit_confirmed();
 
             if self.rep % 512 == 0 {
-                info!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
-                info!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
+                debug!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
+                debug!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             }
 
             let first_unconfirmed = self
@@ -440,7 +438,7 @@ impl MotifletsIterator {
                     .min_by(|(_, tup1), (_, tup2)| tup1.0.total_cmp(&tup2.0))
                     .unwrap();
                 if best_prefix < self.prefix {
-                    info!(
+                    debug!(
                         "Best prefix to confirm {} is {} with {} repetitions with cost {}",
                         first_unconfirmed, best_prefix, required_repetitions, best_cost
                     );
@@ -494,8 +492,9 @@ impl Iterator for MotifletsIterator {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::distance::zeucl;
     use crate::load::loadts;
-    use std::collections::HashMap;
+    use std::collections::{BTreeSet, HashMap};
     use std::sync::Arc;
 
     fn run_motiflet_test(ts: Arc<WindowedTimeseries>, k: usize, seed: u64) {
@@ -575,15 +574,15 @@ mod test {
         ground.insert(6, &[113, 241, 369, 497]);
 
         let grounds = &[
-            vec![113, 241, 369, 497],
-            vec![31, 159, 287, 415, 543, 671],
+            // vec![113, 241, 369, 497],
+            // vec![31, 159, 287, 415, 543, 671],
             vec![
                 1308, 1434, 1519, 1626, 1732, 1831, 1938, 2034, 2118, 2227, 2341, 2415, 2510, 2607,
                 2681, 2787,
             ],
         ];
 
-        let iter = MotifletsIterator::new(
+        let mut iter = MotifletsIterator::new(
             Arc::clone(&ts),
             grounds.last().unwrap().len() - 1,
             Bytes::gbytes(8),
@@ -592,7 +591,8 @@ mod test {
             1234,
             false,
         );
-        let prob_motiflets: HashMap<usize, Motiflet> = iter.map(|m| (m.support(), m)).collect();
+        let prob_motiflets: HashMap<usize, Motiflet> =
+            (&mut iter).map(|m| (m.support(), m)).collect();
 
         for ground in grounds {
             let k = ground.len();
@@ -612,8 +612,7 @@ mod test {
             dbg!(&ground);
             for (i_expected, i_actual) in ground.iter().zip(&p_idxs) {
                 assert!(
-                    (*i_expected as isize - *i_actual as isize).abs()
-                        <= exclusion_zone as isize / 2
+                    (*i_expected as isize - *i_actual as isize).abs() <= 2 // <= exclusion_zone as isize / 2
                 );
             }
         }

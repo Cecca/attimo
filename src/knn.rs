@@ -297,9 +297,9 @@ impl KnnGraph {
         let mut minima = vec![(Distance::infinity(), 0); self.max_k];
 
         for (idx, extents) in self.extents.iter().enumerate() {
-            for k in 0..extents.len() {
-                if extents[k] < minima[k].0 {
-                    minima[k] = (extents[k], idx);
+            for (k, &ext) in extents.iter().enumerate() {
+                if ext < minima[k].0 {
+                    minima[k] = (ext, idx);
                 }
             }
         }

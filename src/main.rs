@@ -115,7 +115,7 @@ fn main() -> Result<()> {
     let profiler = if config.profile {
         Some(
             pprof::ProfilerGuardBuilder::default()
-                .frequency(1000)
+                .frequency(999)
                 .blocklist(&["libc", "libgcc", "pthread", "vdso"])
                 .build()
                 .unwrap(),

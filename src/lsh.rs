@@ -306,6 +306,18 @@ impl HashCollection {
         self.hasher.collision_probability_at(d.0)
     }
 
+    pub fn failure_probability(
+        &self,
+        d: Distance,
+        reps: usize,
+        prefix: usize,
+        prev_prefix: Option<usize>,
+        prev_prefix_repetitions: Option<usize>,
+    ) -> f64 {
+        self.hasher
+            .failure_probability(d.0, reps, prefix, prev_prefix, prev_prefix_repetitions)
+    }
+
     pub fn failure_probability_independent(
         &self,
         d: Distance,
@@ -482,16 +494,27 @@ impl HashCollection {
         HashValue(hash)
     }
 
-    pub fn empirical_collision_probability(&self, i: usize, j: usize, prefix: usize) -> f64 {
-        let collisions = (0..self.hasher.repetitions)
-            .filter(|&rep| {
-                let rep = rep.into();
-                let hi = self.hash_value(i, prefix, rep);
-                let hj = self.hash_value(j, prefix, rep);
-                hi == hj
+    pub fn empirical_collision_probability(&self, i: usize, j: usize) -> f64 {
+        fn count_equal(x: [u8; 4], y: [u8; 4]) -> usize {
+            let mut cnt = 0;
+            for (a, b) in x.iter().zip(&y) {
+                if a == b {
+                    cnt += 1;
+                }
+            }
+            cnt
+        }
+
+        let collisions = self
+            .pools
+            .iter()
+            .map(|rep| {
+                let (hl_i, hr_i) = rep[i];
+                let (hl_j, hr_j) = rep[j];
+                count_equal(hl_i, hl_j) + count_equal(hr_i, hr_j)
             })
-            .count();
-        collisions as f64 / self.hasher.repetitions as f64
+            .sum::<usize>();
+        collisions as f64 / (self.pools.len() * 8) as f64
     }
 
     #[cfg(test)]
@@ -761,7 +784,6 @@ impl HashCollectionStats {
         let mut collision_cost = 0.0;
         for (prefix, estimated_collisions) in expected_collisions.iter().enumerate().rev() {
             if *estimated_collisions > 100.0 {
-                dbg!(estimated_collisions);
                 let mut cnt_dists = 0;
                 pool.group_subsequences(prefix, 0.into(), exclusion_zone, &mut buffers, false);
                 let t_start = Instant::now();
@@ -825,7 +847,7 @@ impl HashCollectionStats {
         delta: f64,
         hasher: &Hasher,
     ) -> Vec<(f64, usize)> {
-        let p = hasher.collision_probability_at(d.0);
+        // let p = hasher.collision_probability_at(d.0);
         self.expected_collisions[..=max_prefix]
             .iter()
             .enumerate()
@@ -838,7 +860,8 @@ impl HashCollectionStats {
                         // FIXME: use the actual failure probability, which
                         // however depends on the number of repetitions which
                         // cannot be exceeded.
-                        fp = (1.0 - p.powi(prefix as i32)).powi(nreps as i32);
+                        // fp = (1.0 - p.powi(prefix as i32)).powi(nreps as i32);
+                        fp = hasher.failure_probability(d.0, nreps, prefix, None, None);
                         nreps += 1;
                     }
                     nreps
@@ -971,6 +994,7 @@ impl Hasher {
         reps: usize,
         prefix: usize,
         prev_prefix: Option<usize>,
+        prev_prefix_repetitions: Option<usize>,
     ) -> f64 {
         let p = self.collision_probability_at(zeucl_dist);
 
@@ -981,13 +1005,22 @@ impl Hasher {
 
         let prev_prefixes = prev_prefix.map(|prefix| {
             (
-                (prefix as f64 / 2.0).floor() as i32,
                 (prefix as f64 / 2.0).ceil() as i32,
+                (prefix as f64 / 2.0).floor() as i32,
             )
         });
 
         let up_treps = (reps as f64 + 1.0).sqrt().floor() as i32;
-        let low_treps = self.tensor_repetitions as i32 - up_treps;
+        let low_treps = prev_prefix_repetitions
+            .map(|repetitions| {
+                let tensor_repetitions = (repetitions as f64).sqrt().ceil() as i32;
+                if tensor_repetitions > up_treps {
+                    tensor_repetitions - up_treps
+                } else {
+                    0
+                }
+            })
+            .unwrap_or(0);
 
         // Probabilities of *not* colliding on a *single* repetition with a given number of bits
         let cur_left_fail = 1.0 - p.powi(cur_left_bits);
@@ -1032,10 +1065,17 @@ impl Hasher {
         let mut res = Vec::new();
         let mut dist = 0.0;
         let mut previous_prefix = None;
+        let previous_prefix_repetitions = Some(self.repetitions);
         for prefix in (1..K).rev() {
             eprintln!("prefix {prefix}");
             for rep in 0..self.repetitions {
-                while self.failure_probability(dist, rep, prefix, previous_prefix) < delta
+                while self.failure_probability(
+                    dist,
+                    rep,
+                    prefix,
+                    previous_prefix,
+                    previous_prefix_repetitions,
+                ) < delta
                     && dist < max_dist
                 {
                     dist += step;
@@ -1237,6 +1277,53 @@ mod test {
             writeln!(f, "prefix, rep, dist").unwrap();
             for (prefix, rep, dist) in dists {
                 writeln!(f, "{prefix}, {rep}, {dist}").unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn test_collision_probability() {
+        let ts: Vec<f64> = crate::load::loadts("data/ecg-heartbeat-av.csv", None).unwrap();
+        let w = 100;
+        let ts = WindowedTimeseries::new(ts, w, false);
+
+        let ids = vec![
+            1308, 1434, 1519, 1626, 1732, 1831, 1938, 2034, 2118, 2227, 2341, 2415, 2510, 2607,
+            2681, 2787,
+        ];
+
+        let fft_data = FFTData::new(&ts);
+        let hasher = Hasher::new(w, 8192, Hasher::compute_width(&ts), 1234);
+        let mut pool = HashCollection::from_ts(&ts, &fft_data, hasher);
+        dbg!(pool.hasher.tensor_repetitions);
+
+        for &i in &ids {
+            for &j in &ids {
+                if i < j {
+                    dbg!(i, j);
+                    let d = Distance(zeucl(&ts, i, j));
+                    let p = pool.collision_probability_at(d);
+
+                    dbg!(d);
+                    dbg!(p);
+                    dbg!(pool.empirical_collision_probability(i, j));
+                    dbg!(pool.failure_probability_independent(
+                        d,
+                        pool.hasher.repetitions,
+                        1,
+                        None,
+                        None
+                    ));
+                    dbg!(pool.hasher.failure_probability(
+                        d.0,
+                        pool.hasher.repetitions,
+                        1,
+                        None,
+                        None
+                    ));
+
+                    assert!(pool.first_collision(i, j, 1).is_some());
+                }
             }
         }
     }
