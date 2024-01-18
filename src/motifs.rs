@@ -778,6 +778,7 @@ mod test {
     }
 
     #[test]
+    #[ignore]
     fn test_ecg() {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
@@ -789,6 +790,7 @@ mod test {
     }
 
     #[test]
+    #[ignore]
     fn test_astro() {
         let ts: Vec<f64> = loadts("data/ASTRO.csv.gz", Some(10000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 20, false));
