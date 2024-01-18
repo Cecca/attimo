@@ -249,9 +249,9 @@ fn test_collision_enumerator() {
 /// right tensor decomposition so that we don't have to recompute them all the time.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub struct RepetitionIndex {
-    repetition: usize,
-    left_tensor_repetition: usize,
-    right_tensor_repetition: usize,
+    pub repetition: usize,
+    pub left_tensor_repetition: usize,
+    pub right_tensor_repetition: usize,
 }
 impl From<usize> for RepetitionIndex {
     fn from(repetition: usize) -> Self {
@@ -312,9 +312,15 @@ impl HashCollection {
         reps: usize,
         prefix: usize,
         prev_prefix: Option<usize>,
+        prev_prefix_repetitions: Option<usize>,
     ) -> f64 {
-        self.hasher
-            .failure_probability_independent(d.0, reps, prefix, prev_prefix)
+        self.hasher.failure_probability_independent(
+            d.0,
+            reps,
+            prefix,
+            prev_prefix,
+            prev_prefix_repetitions,
+        )
     }
 
     pub fn get_hasher(&self) -> &Hasher {
@@ -500,7 +506,7 @@ impl HashCollection {
             .next()
     }
 
-    fn get_minimal_repetition(&self, lindex: usize, rindex: usize) -> Option<usize> {
+    pub fn get_minimal_repetition(&self, lindex: usize, rindex: usize) -> Option<usize> {
         let idx = lindex * self.hasher.tensor_repetitions + rindex;
         self.minimal_repetition_table[idx]
     }
@@ -615,6 +621,8 @@ impl HashCollection {
         buffers: &mut ColumnBuffers,
         parallel: bool,
     ) {
+        assert!(repetition.left_tensor_repetition < self.hasher.tensor_repetitions);
+        assert!(repetition.right_tensor_repetition < self.hasher.tensor_repetitions);
         let ns = self.n_subsequences;
         let buffer = &mut buffers.hashes;
         let output = &mut buffers.buckets;
@@ -902,7 +910,7 @@ impl Hasher {
         for _ in 0..(new_tensor_repetitions * K) {
             self.shifts.push(uniform.sample(&mut self.rng));
         }
-        self.tensor_repetitions = new_tensor_repetitions;
+        self.tensor_repetitions = total_tensor_repetitions;
         self.repetitions = total_repetitions;
     }
 
@@ -944,11 +952,15 @@ impl Hasher {
         reps: usize,
         prefix: usize,
         prev_prefix: Option<usize>,
+        prev_prefix_repetitions: Option<usize>,
     ) -> f64 {
         let p = self.collision_probability_at(zeucl_dist);
         let cur_fail = (1.0 - p.powi(prefix as i32)).powi(reps as i32);
         let prev_fail = prev_prefix
-            .map(|prefix| (1.0 - p.powi(prefix as i32)).powi((self.repetitions - reps) as i32))
+            .zip(prev_prefix_repetitions)
+            .map(|(prefix, repetitions)| {
+                (1.0 - p.powi(prefix as i32)).powi(0i32.max(repetitions as i32 - reps as i32))
+            })
             .unwrap_or(1.0);
         cur_fail * prev_fail
     }

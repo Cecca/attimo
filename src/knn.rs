@@ -160,6 +160,14 @@ impl KnnGraph {
         self.extents[idx][k]
     }
 
+    pub fn subgraph(&self, idxs: &[usize]) -> Vec<(usize, Vec<usize>)> {
+        let mut out = Vec::new();
+        for i in idxs {
+            out.push((*i, self.neighborhoods[*i].iter().map(|tup| tup.1).collect()));
+        }
+        out
+    }
+
     /// Mark the neighbors that are not overlapped by others
     fn fix_flags(&mut self) {
         use rayon::prelude::*;

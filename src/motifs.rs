@@ -566,7 +566,7 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
             for rep in 0..self.repetitions {
                 if self
                     .pools
-                    .failure_probability_independent(d.into(), rep, prefix, None)
+                    .failure_probability_independent(d.into(), rep, prefix, None, None)
                     < self.delta
                 {
                     return prefix;
@@ -677,7 +677,7 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
             let delta = self.delta;
             let pools = &self.pools;
             let mut buf = self.state.emit(&self.ts, |d| {
-                pools.failure_probability_independent(d.into(), rep, depth, None) <= delta
+                pools.failure_probability_independent(d.into(), rep, depth, None, None) <= delta
             });
             self.to_return.extend(buf.drain(..).map(|m| Reverse(m)));
 

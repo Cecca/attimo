@@ -27,7 +27,7 @@ struct Config {
     /// the number of motifs to look for
     pub motifs: usize,
 
-    #[argh(option, default = "0.001")]
+    #[argh(option, default = "0.01")]
     /// failure probability of the LSH scheme
     pub failure_probability: f64,
 

@@ -182,6 +182,8 @@ pub struct MotifletsIterator {
     prefix: usize,
     /// the previous prefix
     previous_prefix: Option<usize>,
+    /// the repetitions done at the previous prefix
+    previous_prefix_repetitions: Option<usize>,
     /// some statistics on the execution
     stats: MotifletsIteratorStats,
 }
@@ -239,6 +241,7 @@ impl MotifletsIterator {
             // this way we avoid meaningless repetitions that have no collisions
             prefix: first_meaningful_prefix,
             previous_prefix: None,
+            previous_prefix_repetitions: None,
             stats: MotifletsIteratorStats::default(),
         }
     }
@@ -332,6 +335,7 @@ impl MotifletsIterator {
     fn emit_confirmed(&mut self) {
         let prefix = self.prefix;
         let previous_prefix = self.previous_prefix;
+        let previous_prefix_repetitions = self.previous_prefix_repetitions;
         let rep = self.rep;
         let mut failure_probabilities = vec![1.0; self.max_k];
 
@@ -352,25 +356,22 @@ impl MotifletsIterator {
             }
         }
 
-        // then, we populate the min_to replace vector
-        let min_to_replace = self.graph.min_count_above_many(&thresholds);
-
         // finally, we possibly output the points
         for k in 0..self.max_k {
             let (extent, root_idx, emitted) = &mut self.best_motiflet[k];
             if !*emitted && extent.0.is_finite() {
-                assert!(min_to_replace[k] > 0);
-                assert!(min_to_replace[k] <= self.max_k);
-                // FIXME: fix the computation of failure probability with the
-                // caveat that different prefixes might use a different number
-                // of repetitions
                 let fp = self.pools.failure_probability_independent(
                     *extent,
                     rep,
                     prefix,
                     previous_prefix,
+                    previous_prefix_repetitions,
                 );
-                let fp = fp.powi(min_to_replace[k] as i32);
+                // NOTE: here we used to raise the failure probability by the number of
+                // neighbors that need to be replaced in order for this candidate to be overcome.
+                // It turns out that this is too aggressive (i.e. it makes the algorithm fail
+                // more often than we'd like), therefore we keep as a failure probability
+                // the probability of having missed a _single_ neighbor.
                 assert!(fp <= 1.0);
                 failure_probabilities[k] = fp;
 
@@ -461,6 +462,7 @@ impl MotifletsIterator {
                 self.rep += 1;
                 debug!("Advancing to repetition {}", self.rep);
                 if self.rep >= self.pools.get_repetitions() {
+                    self.previous_prefix_repetitions.replace(self.rep);
                     self.rep = 0;
                     self.previous_prefix.replace(self.prefix);
                     self.prefix -= 1;
@@ -468,6 +470,7 @@ impl MotifletsIterator {
                 }
             } else {
                 // Go to the suggested prefix, and start from the first repetition there
+                self.previous_prefix_repetitions.replace(self.rep);
                 self.rep = 0;
                 self.previous_prefix.replace(self.prefix);
                 self.prefix = best_prefix;
@@ -495,7 +498,7 @@ mod test {
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    fn run_motiflet_test(ts: Arc<WindowedTimeseries>, k: usize, repetitions: usize, seed: u64) {
+    fn run_motiflet_test(ts: Arc<WindowedTimeseries>, k: usize, seed: u64) {
         let failure_probability = 0.01;
         let exclusion_zone = ts.w;
 
@@ -535,21 +538,21 @@ mod test {
     fn test_ecg_motiflet_k2() {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
-        run_motiflet_test(ts, 2, 8192, 123456);
+        run_motiflet_test(ts, 2, 123456);
     }
 
     #[test]
     fn test_ecg_motiflet_k5() {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
-        run_motiflet_test(ts, 5, 8192, 123456);
+        run_motiflet_test(ts, 5, 123456);
     }
 
     #[test]
     fn test_ecg_motiflet_k8() {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
-        run_motiflet_test(ts, 8, 8192, 123456);
+        run_motiflet_test(ts, 8, 123456);
     }
 
     #[test]
@@ -557,6 +560,62 @@ mod test {
     fn test_ecg_motiflet_k10() {
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(20000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 50, false));
-        run_motiflet_test(ts, 10, 8192, 1234567);
+        run_motiflet_test(ts, 10, 1234567);
+    }
+
+    #[test]
+    fn test_ecg_motiflet_ground_truth() {
+        env_logger::init();
+        let ts: Vec<f64> = loadts("data/ecg-heartbeat-av.csv", None).unwrap();
+        let w = 100;
+        let exclusion_zone = w / 2;
+        let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
+
+        let mut ground = HashMap::new();
+        ground.insert(6, &[113, 241, 369, 497]);
+
+        let grounds = &[
+            vec![113, 241, 369, 497],
+            vec![31, 159, 287, 415, 543, 671],
+            vec![
+                1308, 1434, 1519, 1626, 1732, 1831, 1938, 2034, 2118, 2227, 2341, 2415, 2510, 2607,
+                2681, 2787,
+            ],
+        ];
+
+        let iter = MotifletsIterator::new(
+            Arc::clone(&ts),
+            grounds.last().unwrap().len() - 1,
+            Bytes::gbytes(8),
+            0.01,
+            exclusion_zone,
+            1234,
+            false,
+        );
+        let prob_motiflets: HashMap<usize, Motiflet> = iter.map(|m| (m.support(), m)).collect();
+
+        for ground in grounds {
+            let k = ground.len();
+            let (_bf_extent, mut bf_idxs): (f64, Vec<usize>) =
+                brute_force_motiflets(&ts, k, exclusion_zone);
+            dbg!(_bf_extent);
+            bf_idxs.sort();
+            for (i_expected, i_actual) in ground.iter().zip(&bf_idxs) {
+                assert!((*i_expected as isize - *i_actual as isize).abs() <= 1);
+            }
+
+            let m = &prob_motiflets[&k];
+            dbg!(m.extent());
+            let mut p_idxs = m.indices();
+            p_idxs.sort();
+            dbg!(&p_idxs);
+            dbg!(&ground);
+            for (i_expected, i_actual) in ground.iter().zip(&p_idxs) {
+                assert!(
+                    (*i_expected as isize - *i_actual as isize).abs()
+                        <= exclusion_zone as isize / 2
+                );
+            }
+        }
     }
 }
