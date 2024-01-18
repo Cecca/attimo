@@ -6,10 +6,12 @@
 
 pub mod allocator;
 pub mod distance;
+pub mod index;
 pub mod knn;
 pub mod load;
 pub mod lsh;
 pub mod motiflets;
 pub mod motifs;
 pub mod sort;
+/// Implements an LSH-based index for a time series.
 pub mod timeseries;
