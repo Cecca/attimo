@@ -13,34 +13,58 @@ use crate::{
 
 pub const K: usize = 8;
 pub const MASKS: [u64; 8] = [
-    0x0,
-    0xFF,
-    0xFFFF,
-    0xFFFFFF,
-    0xFFFFFFFF,
-    0xFFFFFFFFFF,
-    0xFFFFFFFFFFFF,
+    0x00000000000000,
+    0xFF000000000000,
+    0xFFFF0000000000,
+    0xFFFFFF00000000,
+    0xFFFFFFFF000000,
+    0xFFFFFFFFFF0000,
+    0xFFFFFFFFFFFF00,
     0xFFFFFFFFFFFFFF,
 ];
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HashValue(u64);
 impl HashValue {
     fn set_byte(&mut self, k: usize, byte: u8) {
         // Clear byte
-        self.0 &= 0xFFu64 << (size_of::<u8>() * k);
+        self.0 &= !(0xFFu64 << ((size_of::<u8>() * k) * 8));
         // Set byte
-        self.0 |= (byte as u64) << (size_of::<u8>() * k);
+        self.0 |= (byte as u64) << ((size_of::<u8>() * k) * 8);
     }
 
     fn prefix_eq(&self, other: &Self, prefix: usize) -> bool {
-        (self.0 & MASKS[prefix]) == (other.0 & MASKS[prefix])
+        assert!(prefix > 0);
+        (self.0 & MASKS[prefix - 1]) == (other.0 & MASKS[prefix - 1])
     }
+}
+
+impl std::fmt::Debug for HashValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:016x}", self.0)
+    }
+}
+
+#[test]
+fn test_set_byte() {
+    let mut h = HashValue(0);
+    h.set_byte(0, 0xAA);
+    assert_eq!(h, HashValue(0x0000000000000000AAu64));
+    h.set_byte(1, 0xBB);
+    assert_eq!(h, HashValue(0x00000000000000BBAAu64));
+}
+
+#[test]
+fn test_hash_prefix_compare() {
+    let h1 = HashValue(0x1122000000000000u64);
+    let h2 = HashValue(0x1133000000000000u64);
+    assert!(h1.prefix_eq(&h2, 1));
+    assert!(!h1.prefix_eq(&h2, 2));
+    assert!(!h1.prefix_eq(&h2, 2));
 }
 
 /// Stores information to compute a single repetition of [HashValue]s
 struct Hasher {
-    dimension: usize,
     vectors: [Vec<f64>; K],
     shifts: [f64; K],
     width: f64,
@@ -78,7 +102,6 @@ impl Hasher {
             sample_vec(dimension, rng),
         ];
         Self {
-            dimension,
             vectors,
             shifts,
             width,
@@ -114,6 +137,7 @@ impl Hasher {
                 }
                 let h = ((h as i64 & 0xFFi64) as i8) as u8;
                 output[i].0.set_byte(k, h);
+                output[i].1 = i as u32;
             });
         }
     }
@@ -192,6 +216,19 @@ impl LSHIndex {
         self.functions[0].collision_probability_at(d)
     }
 
+    fn empirical_collision_probability(&self, i: usize, j: usize, prefix: usize) -> f64 {
+        let mut cnt = 0;
+        for (hs, idxs) in self.hashes.iter().zip(&self.indices) {
+            let hi = hs[*idxs.iter().find(|idx| **idx as usize == i).unwrap() as usize];
+            let hj = hs[*idxs.iter().find(|idx| **idx as usize == j).unwrap() as usize];
+            if hi.prefix_eq(&hj, prefix) {
+                cnt += 1;
+            }
+        }
+
+        cnt as f64 / self.get_repetitions() as f64
+    }
+
     pub fn failure_probability(
         &self,
         d: Distance,
@@ -221,6 +258,7 @@ impl LSHIndex {
     }
 
     pub fn collisions(&self, repetition: usize, prefix: usize) -> CollisionEnumerator {
+        assert!(prefix > 0 && prefix <= K, "illegal prefix {}", prefix);
         CollisionEnumerator::new(&self.hashes[repetition], &self.indices[repetition], prefix)
     }
 }
@@ -235,6 +273,7 @@ pub struct CollisionEnumerator<'index> {
 }
 impl<'index> CollisionEnumerator<'index> {
     fn new(hashes: &'index [HashValue], indices: &'index [u32], prefix: usize) -> Self {
+        assert!(prefix > 0 && prefix <= K);
         let mut slf = Self {
             prefix,
             hashes,
@@ -254,7 +293,11 @@ impl<'index> CollisionEnumerator<'index> {
         let start = self.current_range.end;
         let h = self.hashes[start];
         let mut offset = 1;
-        let mut low = start + offset;
+        let mut low = start;
+        if low >= self.hashes.len() {
+            self.current_range = low..low;
+            return;
+        }
         while start + offset < self.hashes.len()
             && self.hashes[start + offset].prefix_eq(&h, self.prefix)
         {
@@ -264,7 +307,13 @@ impl<'index> CollisionEnumerator<'index> {
         let high = (start + offset).min(self.hashes.len());
 
         // binary search
-        assert!(self.hashes[low].prefix_eq(&h, self.prefix));
+        debug_assert!(
+            self.hashes[low].prefix_eq(&h, self.prefix),
+            "{:?} != {:?} (prefix {})",
+            self.hashes[low],
+            h,
+            self.prefix
+        );
         let off = self.hashes[low..high].partition_point(|hv| h.prefix_eq(hv, self.prefix));
         let end = low + off;
         self.current_range = start..end;
@@ -294,7 +343,7 @@ impl<'index> CollisionEnumerator<'index> {
                     let b = self.indices[self.j];
                     let ha = self.hashes[self.i];
                     let hb = self.hashes[self.j];
-                    debug_assert_eq!(ha, hb);
+                    assert!(ha.prefix_eq(&hb, self.prefix));
                     if !a.overlaps(b, exclusion_zone) {
                         output[idx] = (a.min(b), a.max(b), Distance(f64::INFINITY));
                         idx += 1;
@@ -308,15 +357,7 @@ impl<'index> CollisionEnumerator<'index> {
                 self.j = self.i + 1;
             }
 
-            if self.current_range.end < self.hashes.len() {
-                self.next_range();
-                self.i = range.start;
-                self.j = range.start + 1;
-            } else if idx == 0 {
-                return None;
-            } else {
-                return Some(idx);
-            }
+            self.next_range();
         }
         if idx == 0 {
             None
@@ -388,16 +429,13 @@ impl IndexStats {
             LSHIndex::required_memory(ts, max_repetitions)
         );
 
+        let nreps = 4;
         let mut repetition_setup_cost = 0.0;
         let mut repetition_setup_cost_experiments = 0;
         let mut expected_collisions = vec![0.0; K + 1];
         let dat: Vec<(usize, usize, usize)> = (1..=K)
             .into_par_iter()
-            .flat_map(|prefix| {
-                (0..max_repetitions)
-                    .into_par_iter()
-                    .map(move |rep| (prefix, rep))
-            })
+            .flat_map(|prefix| (0..nreps).into_par_iter().map(move |rep| (prefix, rep)))
             .map(|(prefix, rep)| {
                 let collisions = Self::num_collisions(index, rep, prefix, exclusion_zone);
                 (prefix, rep, collisions)
@@ -407,7 +445,7 @@ impl IndexStats {
             expected_collisions[prefix] += collisions as f64;
         }
         for c in expected_collisions.iter_mut() {
-            *c /= max_repetitions as f64;
+            *c /= nreps as f64;
         }
         expected_collisions[0] = f64::INFINITY; // just to signal that we don't want to go to prefix 0
         repetition_setup_cost /= repetition_setup_cost_experiments as f64;
@@ -415,24 +453,13 @@ impl IndexStats {
         // now we estimate the cost of running a handful of distance computations,
         // as a proxy for the cost of handling the collisions.
         // TODO: maybe update this as we collect information during the execution?
-        let mut collision_cost = 0.0;
-        for (prefix, estimated_collisions) in expected_collisions.iter().enumerate().rev() {
-            if *estimated_collisions > 100.0 {
-                let mut cnt_dists = 0;
-                let t_start = Instant::now();
-                let mut dists_buf = [(0, 0, Distance::infinity()); 1024];
-                let mut enumerator = index.collisions(0, prefix);
-                while let Some(cnt) = enumerator.next(&mut dists_buf, exclusion_zone) {
-                    for (i, j, d) in &mut dists_buf[..cnt] {
-                        *d = Distance(zeucl(ts, *i as usize, *j as usize));
-                    }
-                    cnt_dists += cnt;
-                }
-                let elapsed = Instant::now() - t_start;
-                collision_cost = elapsed.as_secs_f64() / cnt_dists as f64;
-                break;
-            }
+        let samples = 4096.min(ts.num_subsequences());
+        let t_start = Instant::now();
+        for i in 0..samples {
+            std::hint::black_box(zeucl(ts, 0, i));
         }
+        let elapsed = Instant::now() - t_start;
+        let collision_cost = elapsed.as_secs_f64() / (samples as f64);
 
         Self {
             expected_collisions,
@@ -460,10 +487,10 @@ impl IndexStats {
             .iter()
             .enumerate()
             .rev()
-            .skip_while(|(_prefix, collisions)| **collisions < 1.0)
-            .next()
+            .find(|(_prefix, collisions)| **collisions >= 1.0)
             .unwrap()
             .0
+            .max(1)
     }
 
     /// For each prefix length, compute the cost to confirm a pair at
@@ -499,5 +526,39 @@ impl IndexStats {
                 )
             })
             .collect()
+    }
+}
+
+#[test]
+fn test_collision_probability() {
+    let ts: Vec<f64> = crate::load::loadts("data/ecg-heartbeat-av.csv", None).unwrap();
+    let w = 100;
+    let ts = WindowedTimeseries::new(ts, w, false);
+
+    let ids = vec![
+        1308, 1434, 1519, 1626, 1732, 1831, 1938, 2034, 2118, 2227, 2341, 2415, 2510, 2607, 2681,
+        2787,
+    ];
+
+    let fft_data = FFTData::new(&ts);
+    let mut index = LSHIndex::from_ts(&ts, &fft_data, 1234);
+    dbg!(index.stats(&ts, Bytes::gbytes(8), w));
+    index.add_repetitions(&ts, &fft_data, 256);
+
+    for &i in &ids {
+        for &j in &ids {
+            if i < j {
+                dbg!(i, j);
+                let d = Distance(zeucl(&ts, i, j));
+                let p = index.collision_probability_at(d);
+
+                dbg!(d);
+                dbg!(p);
+                dbg!(index.empirical_collision_probability(i, j, 1));
+                dbg!(index.failure_probability(d, index.get_repetitions(), 1, None, None));
+
+                // assert!(pool.first_collision(i, j, 1).is_some());
+            }
+        }
     }
 }

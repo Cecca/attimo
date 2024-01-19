@@ -1,7 +1,8 @@
 use crate::{
     distance::zeucl_threshold,
+    index::{IndexStats, LSHIndex},
     knn::*,
-    lsh::{ColumnBuffers, HashCollection, HashCollectionStats, Hasher, RepetitionIndex},
+    // lsh::{ColumnBuffers, HashCollection, HashCollectionStats, Hasher, RepetitionIndex},
     timeseries::{Bytes, FFTData, Overlaps, WindowedTimeseries},
 };
 use log::*;
@@ -170,10 +171,8 @@ pub struct MotifletsIterator {
     to_return: Vec<Motiflet>,
     delta: f64,
     exclusion_zone: usize,
-    // hasher: Arc<Hasher>,
-    pools: HashCollection,
-    pools_stats: HashCollectionStats,
-    buffers: ColumnBuffers,
+    index: LSHIndex,
+    index_stats: IndexStats,
     pairs_buffer: Vec<(u32, u32, Distance)>,
     /// the current repetition
     rep: usize,
@@ -201,11 +200,7 @@ impl MotifletsIterator {
         let n = ts.num_subsequences();
         let fft_data = FFTData::new(&ts);
 
-        let repetitions = INITIAL_REPETITIONS;
-        let hasher_width = Hasher::compute_width(&ts);
-
-        let hasher = Hasher::new(ts.w, repetitions, hasher_width, seed);
-        let pools = HashCollection::from_ts(&ts, &fft_data, hasher);
+        let index = LSHIndex::from_ts(&ts, &fft_data, seed);
         debug!("Computed hash values in {:?}", start.elapsed());
 
         let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
@@ -217,11 +212,11 @@ impl MotifletsIterator {
 
         let best_motiflet = vec![(Distance(std::f64::INFINITY), 0, false); max_k];
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
-        let buffers = ColumnBuffers::default();
 
-        let pools_stats = pools.stats(&ts, max_memory, exclusion_zone);
-        debug!("Pools stats: {:?}", pools_stats);
-        let first_meaningful_prefix = pools_stats.first_meaningful_prefix();
+        let index_stats = index.stats(&ts, max_memory, exclusion_zone);
+        debug!("Pools stats: {:?}", index_stats);
+        let first_meaningful_prefix = index_stats.first_meaningful_prefix();
+        assert!(first_meaningful_prefix > 0);
 
         Self {
             ts,
@@ -232,9 +227,8 @@ impl MotifletsIterator {
             to_return: Vec::new(),
             delta,
             exclusion_zone,
-            pools,
-            pools_stats,
-            buffers,
+            index,
+            index_stats,
             pairs_buffer,
             rep: 0,
             // this way we avoid meaningless repetitions that have no collisions
@@ -252,9 +246,10 @@ impl MotifletsIterator {
     /// Update the neighborhoods with collisions
     fn update_neighborhoods(&mut self) {
         let prefix = self.prefix;
-        let rep: RepetitionIndex = self.rep.into();
+        let rep = self.rep;
+        assert!(rep < self.index.get_repetitions());
         let exclusion_zone = self.exclusion_zone;
-        let pools = &mut self.pools;
+        let index = &self.index;
         let ts = &self.ts;
         let graph = &mut self.graph;
 
@@ -262,70 +257,56 @@ impl MotifletsIterator {
 
         let threshold = self.best_motiflet[self.max_k - 1].0;
 
-        pools.group_subsequences(prefix, rep, exclusion_zone, &mut self.buffers, true);
-
         let mut cnt_candidates = 0;
         let mut sum_dist = 0.0;
         let mut cnt_distances = 0;
-        if let Some(mut enumerator) = self.buffers.enumerator() {
-            while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone)
-            {
-                cnt_candidates += cnt;
-                if cnt_candidates > num_collisions_threshold {
-                    panic!(
-                        "Too many collisions: {} out of {} possible pairs",
-                        cnt_candidates,
-                        ts.num_subsequence_pairs()
-                    );
-                }
-                self.stats.cnt_candidates += cnt;
-                // Fixup the distances
-                let (d, c): (f64, usize) = self.pairs_buffer[0..cnt]
-                    .par_iter_mut()
-                    .with_min_len(1024)
-                    .map(|(a, b, dist)| {
-                        let a = *a as usize;
-                        let b = *b as usize;
-                        // TODO: Re-introduce the check to verify if a pair has been verified iwth a
-                        // longer prefix. The caveat now is that we might do different number of
-                        // repetitions at different prefixes
-                        // TODO: maybe skip pairs with only one collision
-                        if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
-                            let d = Distance(d);
-                            if d <= threshold {
-                                // we only schedule the pair to update the respective
-                                // neighborhoods if it can result in a better motiflet.
-                                *dist = d;
-                            } else {
-                                *dist = Distance(std::f64::INFINITY);
-                            }
-                            (d.0, 1)
-                        } else {
-                            (0.0, 0)
-                        }
-                    })
-                    .reduce(
-                        || (0.0f64, 0usize),
-                        |accum, pair| (accum.0 + pair.0, accum.1 + pair.1),
-                    );
-
-                sum_dist += d;
-                cnt_distances += c;
-
-                // Update the neighborhoods
-                graph.update_batch(self.pairs_buffer.as_mut_slice());
+        let mut enumerator = index.collisions(rep, prefix);
+        while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone) {
+            cnt_candidates += cnt;
+            if cnt_candidates > num_collisions_threshold {
+                panic!(
+                    "Too many collisions: {} out of {} possible pairs",
+                    cnt_candidates,
+                    ts.num_subsequence_pairs()
+                );
             }
-            // while there are collisions
-        }
-        let average_distance = sum_dist / cnt_distances as f64;
-        let average_distance_probability = self
-            .pools
-            .collision_probability_at(Distance(average_distance))
-            .powi(prefix as i32);
-        debug!(
-            "Candidate pairs {}, distances computed {}, average distance {} (p={})",
-            cnt_candidates, cnt_distances, average_distance, average_distance_probability
-        );
+            self.stats.cnt_candidates += cnt;
+            // Fixup the distances
+            let (d, c): (f64, usize) = self.pairs_buffer[0..cnt]
+                .par_iter_mut()
+                .with_min_len(1024)
+                .map(|(a, b, dist)| {
+                    let a = *a as usize;
+                    let b = *b as usize;
+                    // TODO: Re-introduce the check to verify if a pair has been verified iwth a
+                    // longer prefix. The caveat now is that we might do different number of
+                    // repetitions at different prefixes
+                    // TODO: maybe skip pairs with only one collision
+                    if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
+                        let d = Distance(d);
+                        if d <= threshold {
+                            // we only schedule the pair to update the respective
+                            // neighborhoods if it can result in a better motiflet.
+                            *dist = d;
+                        } else {
+                            *dist = Distance(std::f64::INFINITY);
+                        }
+                        (d.0, 1)
+                    } else {
+                        (0.0, 0)
+                    }
+                })
+                .reduce(
+                    || (0.0f64, 0usize),
+                    |accum, pair| (accum.0 + pair.0, accum.1 + pair.1),
+                );
+
+            sum_dist += d;
+            cnt_distances += c;
+
+            // Update the neighborhoods
+            graph.update_batch(self.pairs_buffer.as_mut_slice());
+        } // while there are collisions
     }
 
     /// adds to `self.to_return` the motiflets that can
@@ -358,7 +339,7 @@ impl MotifletsIterator {
         for k in 0..self.max_k {
             let (extent, root_idx, emitted) = &mut self.best_motiflet[k];
             if !*emitted && extent.0.is_finite() {
-                let fp = self.pools.failure_probability(
+                let fp = self.index.failure_probability(
                     *extent,
                     rep,
                     prefix,
@@ -426,11 +407,11 @@ impl MotifletsIterator {
                 // let graph_stats = self.graph.stats();
                 // graph_stats.total_neighbors;
 
-                let costs = self.pools_stats.costs_to_confirm(
+                let costs = self.index_stats.costs_to_confirm(
                     self.prefix,
                     first_unconfirmed,
                     self.delta,
-                    self.pools.get_hasher(),
+                    &self.index,
                 );
                 let (best_prefix, (best_cost, required_repetitions)) = costs
                     .iter()
@@ -443,8 +424,8 @@ impl MotifletsIterator {
                         first_unconfirmed, best_prefix, required_repetitions, best_cost
                     );
                 }
-                if *required_repetitions > self.pools.get_repetitions() {
-                    self.pools.add_repetitions(
+                if *required_repetitions > self.index.get_repetitions() {
+                    self.index.add_repetitions(
                         &self.ts,
                         &self.fft_data,
                         required_repetitions.next_power_of_two(),
@@ -459,7 +440,7 @@ impl MotifletsIterator {
                 // Advance on the current prefix
                 self.rep += 1;
                 debug!("Advancing to repetition {}", self.rep);
-                if self.rep >= self.pools.get_repetitions() {
+                if self.rep >= self.index.get_repetitions() {
                     self.previous_prefix_repetitions.replace(self.rep);
                     self.rep = 0;
                     self.previous_prefix.replace(self.prefix);
