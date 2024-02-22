@@ -16,15 +16,16 @@ use crate::{
 };
 
 pub const K: usize = 8;
-pub const MASKS: [u64; 8] = [
-    0x00000000000000,
-    0xFF000000000000,
-    0xFFFF0000000000,
-    0xFFFFFF00000000,
-    0xFFFFFFFF000000,
-    0xFFFFFFFFFF0000,
-    0xFFFFFFFFFFFF00,
-    0xFFFFFFFFFFFFFF,
+pub const MASKS: [u64; K + 1] = [
+    0x0000000000000000, // unused
+    0xFF00000000000000, // 1
+    0xFFFF000000000000, // 2
+    0xFFFFFF0000000000, // 3
+    0xFFFFFFFF00000000, // 4
+    0xFFFFFFFFFF000000, // 5
+    0xFFFFFFFFFFFF0000, // 6
+    0xFFFFFFFFFFFFFF00, // 7
+    0xFFFFFFFFFFFFFFFF, // 8
 ];
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -39,7 +40,8 @@ impl HashValue {
 
     fn prefix_eq(&self, other: &Self, prefix: usize) -> bool {
         assert!(prefix > 0);
-        (self.0 & MASKS[prefix - 1]) == (other.0 & MASKS[prefix - 1])
+        let mask = MASKS[prefix];
+        self.0 & mask == other.0 & mask
     }
 }
 
@@ -220,6 +222,7 @@ impl LSHIndex {
         self.functions[0].collision_probability_at(d)
     }
 
+    #[cfg(test)]
     fn empirical_collision_probability(&self, i: usize, j: usize, prefix: usize) -> f64 {
         let mut cnt = 0;
         for (hs, idxs) in self.hashes.iter().zip(&self.indices) {
@@ -554,7 +557,7 @@ fn test_collision_probability() {
     let fft_data = FFTData::new(&ts);
     let mut index = LSHIndex::from_ts(&ts, &fft_data, 1234);
     dbg!(index.stats(&ts, Bytes::gbytes(8), w));
-    index.add_repetitions(&ts, &fft_data, 256);
+    index.add_repetitions(&ts, &fft_data, 4096);
 
     for &i in &ids {
         for &j in &ids {

@@ -307,6 +307,7 @@ impl MotifletsIterator {
             // Update the neighborhoods
             graph.update_batch(self.pairs_buffer.as_mut_slice());
         } // while there are collisions
+        debug!("collisions at prefix {}: {}", prefix, cnt_candidates);
     }
 
     /// adds to `self.to_return` the motiflets that can
@@ -516,7 +517,6 @@ mod test {
 
     #[test]
     fn test_ecg_motiflet_k2() {
-        env_logger::init();
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
         run_motiflet_test(ts, 2, 123456);
