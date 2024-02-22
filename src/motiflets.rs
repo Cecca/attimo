@@ -414,22 +414,23 @@ impl MotifletsIterator {
                     self.delta,
                     &self.index,
                 );
+                debug!("Costs: {:?}", costs);
                 let (best_prefix, (best_cost, required_repetitions)) = costs
                     .iter()
                     .enumerate()
                     .min_by(|(_, tup1), (_, tup2)| tup1.0.total_cmp(&tup2.0))
                     .unwrap();
-                if best_prefix < self.prefix {
+                if best_prefix <= self.prefix {
                     debug!(
                         "Best prefix to confirm {} is {} with {} repetitions with cost {}",
                         first_unconfirmed, best_prefix, required_repetitions, best_cost
                     );
                 }
-                if *required_repetitions > self.index.get_repetitions() {
+                if *required_repetitions >= self.index.get_repetitions() {
                     self.index.add_repetitions(
                         &self.ts,
                         &self.fft_data,
-                        required_repetitions.next_power_of_two(),
+                        (1 + required_repetitions).next_power_of_two(),
                     );
                 }
                 best_prefix

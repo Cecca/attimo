@@ -154,6 +154,7 @@ pub struct LSHIndex {
     functions: Vec<Hasher>,
     hashes: Vec<Vec<HashValue>>,
     indices: Vec<Vec<u32>>,
+    repetitions_setup_time: Duration,
 }
 
 impl LSHIndex {
@@ -175,9 +176,12 @@ impl LSHIndex {
             functions: Vec::new(),
             hashes: Vec::new(),
             indices: Vec::new(),
+            repetitions_setup_time: Duration::from_secs(0),
         };
 
-        slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS);
+        let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS);
+        slf.repetitions_setup_time = avg_dur;
+
         slf
     }
 
@@ -186,7 +190,7 @@ impl LSHIndex {
         ts: &WindowedTimeseries,
         fft_data: &FFTData,
         total_repetitions: usize,
-    ) {
+    ) -> Duration {
         assert!(total_repetitions > self.get_repetitions());
         let dimension = ts.w;
         let n = ts.num_subsequences();
@@ -197,20 +201,32 @@ impl LSHIndex {
             .map(|_| Hasher::new(dimension, width, &mut self.rng))
             .collect();
 
+        let (dur_send, dur_recv) = std::sync::mpsc::channel();
+
         let (new_hashes, new_indices): (Vec<Vec<HashValue>>, Vec<Vec<u32>>) = new_hashers
             .par_iter()
-            .map_with(Vec::new(), |tmp, hasher| {
+            .map_with((dur_send.clone(), Vec::new()), |(dur_send, tmp), hasher| {
+                let timer = Instant::now();
                 tmp.resize(n, (HashValue::default(), 0u32));
                 hasher.hash(ts, fft_data, tmp);
                 tmp.sort();
                 let res: (Vec<HashValue>, Vec<u32>) = tmp.iter().copied().unzip();
+                let elapsed = timer.elapsed();
+                dur_send
+                    .send(elapsed)
+                    .expect("error sending the elapsed time");
                 res
             })
             .unzip();
 
+        drop(dur_send);
+
         self.functions.extend(new_hashers);
         self.hashes.extend(new_hashes);
         self.indices.extend(new_indices);
+
+        // FIXME:: compute the average duration by taking into account the number of threads as well
+        dur_recv.into_iter().sum::<Duration>() / new_repetitions as u32
     }
 
     /// Get how many repetitions are available in this index
@@ -437,28 +453,23 @@ impl IndexStats {
         );
 
         let nreps = 4;
-        let mut repetition_setup_cost = 0.0;
-        let repetition_setup_cost_experiments = nreps * K;
+        let repetition_setup_cost = index.repetitions_setup_time.as_secs_f64();
         let mut expected_collisions = vec![0.0; K + 1];
-        let dat: Vec<(usize, usize, usize, Duration)> = (1..=K)
+        let dat: Vec<(usize, usize, usize)> = (1..=K)
             .into_par_iter()
             .flat_map(|prefix| (0..nreps).into_par_iter().map(move |rep| (prefix, rep)))
             .map(|(prefix, rep)| {
-                let start = Instant::now();
                 let collisions = Self::num_collisions(index, rep, prefix, exclusion_zone);
-                let elapsed = Instant::now() - start;
-                (prefix, rep, collisions, elapsed)
+                (prefix, rep, collisions)
             })
             .collect();
-        for (prefix, _rep, collisions, duration) in dat {
-            repetition_setup_cost += duration.as_secs_f64();
+        for (prefix, _rep, collisions) in dat {
             expected_collisions[prefix] += collisions as f64;
         }
         for c in expected_collisions.iter_mut() {
             *c /= nreps as f64;
         }
         expected_collisions[0] = f64::INFINITY; // just to signal that we don't want to go to prefix 0
-        repetition_setup_cost /= repetition_setup_cost_experiments as f64;
 
         // now we estimate the cost of running a handful of distance computations,
         // as a proxy for the cost of handling the collisions.
@@ -514,6 +525,7 @@ impl IndexStats {
         delta: f64,
         index: &LSHIndex,
     ) -> Vec<(f64, usize)> {
+        let index_repetitions = index.get_repetitions();
         // let p = hasher.collision_probability_at(d.0);
         self.expected_collisions[..=max_prefix]
             .iter()
@@ -532,12 +544,17 @@ impl IndexStats {
                 if nreps >= maxreps {
                     return (f64::INFINITY, maxreps);
                 }
-                let res = (
-                    nreps as f64 * (self.collision_cost * collisions + self.repetition_setup_cost),
+                let new_repetitions = if nreps <= index_repetitions {
+                    0
+                } else {
+                    nreps - index_repetitions
+                } as f64;
+                (
+                    nreps as f64
+                        * (self.collision_cost * collisions
+                            + self.repetition_setup_cost * new_repetitions),
                     nreps,
-                );
-                assert!(!res.0.is_nan());
-                res
+                )
             })
             .collect()
     }
