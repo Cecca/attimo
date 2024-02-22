@@ -3,7 +3,11 @@ use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
-use std::{mem::size_of, ops::Range, time::Instant};
+use std::{
+    mem::size_of,
+    ops::Range,
+    time::{Duration, Instant},
+};
 
 use crate::{
     distance::zeucl,
@@ -431,17 +435,20 @@ impl IndexStats {
 
         let nreps = 4;
         let mut repetition_setup_cost = 0.0;
-        let mut repetition_setup_cost_experiments = 0;
+        let repetition_setup_cost_experiments = nreps * K;
         let mut expected_collisions = vec![0.0; K + 1];
-        let dat: Vec<(usize, usize, usize)> = (1..=K)
+        let dat: Vec<(usize, usize, usize, Duration)> = (1..=K)
             .into_par_iter()
             .flat_map(|prefix| (0..nreps).into_par_iter().map(move |rep| (prefix, rep)))
             .map(|(prefix, rep)| {
+                let start = Instant::now();
                 let collisions = Self::num_collisions(index, rep, prefix, exclusion_zone);
-                (prefix, rep, collisions)
+                let elapsed = Instant::now() - start;
+                (prefix, rep, collisions, elapsed)
             })
             .collect();
-        for (prefix, _rep, collisions) in dat {
+        for (prefix, _rep, collisions, duration) in dat {
+            repetition_setup_cost += duration.as_secs_f64();
             expected_collisions[prefix] += collisions as f64;
         }
         for c in expected_collisions.iter_mut() {
@@ -460,6 +467,8 @@ impl IndexStats {
         }
         let elapsed = Instant::now() - t_start;
         let collision_cost = elapsed.as_secs_f64() / (samples as f64);
+        assert!(!collision_cost.is_nan());
+        assert!(!repetition_setup_cost.is_nan());
 
         Self {
             expected_collisions,
@@ -520,10 +529,12 @@ impl IndexStats {
                 if nreps >= maxreps {
                     return (f64::INFINITY, maxreps);
                 }
-                (
+                let res = (
                     nreps as f64 * (self.collision_cost * collisions + self.repetition_setup_cost),
                     nreps,
-                )
+                );
+                assert!(!res.0.is_nan());
+                res
             })
             .collect()
     }

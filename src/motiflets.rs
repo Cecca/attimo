@@ -516,6 +516,7 @@ mod test {
 
     #[test]
     fn test_ecg_motiflet_k2() {
+        env_logger::init();
         let ts: Vec<f64> = loadts("data/ECG.csv.gz", Some(10000)).unwrap();
         let ts = Arc::new(WindowedTimeseries::new(ts, 100, false));
         run_motiflet_test(ts, 2, 123456);
