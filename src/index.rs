@@ -115,10 +115,10 @@ impl Hasher {
     }
 
     pub fn collision_probability_at(&self, d: Distance) -> f64 {
-        use statrs::distribution::{ContinuousCDF, Normal as NormalDistr};
+        use crate::stats::Normal;
         let d = d.0;
         let r = self.width;
-        let normal = NormalDistr::new(0.0, 1.0).unwrap();
+        let normal = Normal::default();
         1.0 - 2.0 * normal.cdf(-r / d)
             - (2.0 / ((std::f64::consts::PI * 2.0).sqrt() * (r / d)))
                 * (1.0 - (-r * r / (2.0 * d * d)).exp())
