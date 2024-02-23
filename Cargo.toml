@@ -18,7 +18,7 @@ indicatif = "0.17"
 statrs = "0.16"
 argh = "0.1"
 log = { version = "0.4", features = ["kv_unstable"] }
-env_logger = "0.11"
+env_logger = { version = "0.11", features = [], default-features = false }
 flate2 = "1"
 pprof = { version = "0.13", features = ["cpp", "prost", "prost-codec"] }
 sysinfo = "0.30.5"
