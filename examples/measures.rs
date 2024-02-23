@@ -42,7 +42,8 @@ fn main() -> Result<()> {
 
     let pbar = ProgressBar::new(idxs.len() as u64).with_style(
         ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
+            .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}")
+            .unwrap(),
     );
 
     let lids: Vec<(usize, Measures)> = idxs

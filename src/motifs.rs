@@ -545,10 +545,10 @@ impl<S: State + Send + Sync> MotifsEnumerator<S> {
 
     fn build_progress_bar(depth: usize, repetitions: usize) -> ProgressBar {
         let pbar = ProgressBar::new(repetitions as u64);
-        pbar.set_draw_rate(1);
         pbar.set_style(
             ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}"),
+                .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos:>7}/{len:7}")
+                .unwrap(),
         );
         pbar.set_message(format!("depth {}", depth));
         pbar

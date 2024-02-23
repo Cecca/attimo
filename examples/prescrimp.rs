@@ -83,7 +83,8 @@ fn pre_scrimp(
     let pbar = ProgressBar::new((ns / s) as u64);
     pbar.set_style(
         ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} ETA: {eta} {pos:>7}/{len:7} {msg}"),
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} ETA: {eta} {pos:>7}/{len:7} {msg}")
+            .unwrap(),
     );
 
     // We don't shuffle the indices, since we are not going to stop pre_scrimp
