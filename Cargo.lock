@@ -108,7 +108,6 @@ dependencies = [
  "rand_distr",
  "rand_xoshiro",
  "rayon",
- "regex",
  "rustfft",
  "statrs",
  "sysinfo",

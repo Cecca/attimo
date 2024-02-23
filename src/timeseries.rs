@@ -409,22 +409,31 @@ impl Bytes {
 impl FromStr for Bytes {
     type Err = ParseBytesError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use regex::Regex;
-
-        let rex = Regex::new(r"([0-9]+) *(([KMGT])(B|b|bytes))?").unwrap();
-        if let Some(captures) = rex.captures(s) {
-            let num: usize = captures[1].parse().unwrap();
-            let mult = match &captures.get(3).map(|m| m.as_str()) {
-                None => 1,
-                Some("K") => 1024,
-                Some("M") => 1024 * 1024,
-                Some("G") => 1024 * 1024 * 1024,
-                _ => unreachable!(),
-            };
-            Ok(Self(num * mult))
-        } else {
-            Err(ParseBytesError)
+        if s.is_empty() {
+            return Err(ParseBytesError);
         }
+        let s = s.to_lowercase();
+        let s = s.trim_end_matches("bytes").trim_end_matches('b');
+        let suffix = s.chars().last().unwrap();
+        let suffix = if suffix.is_alphabetic() {
+            Some(suffix)
+        } else {
+            None
+        };
+        let num = if suffix.is_some() {
+            &s[..s.len() - 1]
+        } else {
+            s
+        };
+        let num = num.trim().parse::<usize>().map_err(|_| ParseBytesError)?;
+        let mult = match suffix {
+            None => 1,
+            Some('k') => 1024,
+            Some('m') => 1024 * 1024,
+            Some('g') => 1024 * 1024 * 1024,
+            _ => unreachable!(),
+        };
+        Ok(Self(num * mult))
     }
 }
 
