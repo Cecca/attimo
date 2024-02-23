@@ -201,32 +201,24 @@ impl LSHIndex {
             .map(|_| Hasher::new(dimension, width, &mut self.rng))
             .collect();
 
-        let (dur_send, dur_recv) = std::sync::mpsc::channel();
-
+        let timer = Instant::now();
         let (new_hashes, new_indices): (Vec<Vec<HashValue>>, Vec<Vec<u32>>) = new_hashers
             .par_iter()
-            .map_with((dur_send.clone(), Vec::new()), |(dur_send, tmp), hasher| {
-                let timer = Instant::now();
+            .map_with(Vec::new(), |tmp, hasher| {
                 tmp.resize(n, (HashValue::default(), 0u32));
                 hasher.hash(ts, fft_data, tmp);
                 tmp.sort();
                 let res: (Vec<HashValue>, Vec<u32>) = tmp.iter().copied().unzip();
-                let elapsed = timer.elapsed();
-                dur_send
-                    .send(elapsed)
-                    .expect("error sending the elapsed time");
                 res
             })
             .unzip();
-
-        drop(dur_send);
+        let elapsed = timer.elapsed();
+        let average_time = elapsed / new_repetitions as u32;
 
         self.functions.extend(new_hashers);
         self.hashes.extend(new_hashes);
         self.indices.extend(new_indices);
-
-        // FIXME:: compute the average duration by taking into account the number of threads as well
-        dur_recv.into_iter().sum::<Duration>() / new_repetitions as u32
+        average_time
     }
 
     /// Get how many repetitions are available in this index
