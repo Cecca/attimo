@@ -1,4 +1,4 @@
-use crate::lsh::HashValue;
+use crate::index::HashValue;
 
 macro_rules! getbyte {
     ($x: expr, $b: ident) => {
@@ -17,7 +17,7 @@ pub fn sort_hash_pairs(data: &mut [(HashValue, u32)], scratch: &mut [(HashValue,
     let mut b = [[0usize; 256]; BYTES];
 
     for (h, _) in data.iter() {
-        let h = h.0;
+        let h: u64 = h.into();
         for i in 0..BYTES {
             b[i][getbyte!(h, i)] += 1;
         }
@@ -41,7 +41,8 @@ pub fn sort_hash_pairs(data: &mut [(HashValue, u32)], scratch: &mut [(HashValue,
         hist: &mut [usize; 256],
     ) {
         for pair in data.iter() {
-            let b = getbyte!((pair.0).0, pass_idx);
+            let h: u64 = (pair.0).into();
+            let b = getbyte!(h, pass_idx);
             let t = hist[b];
             hist[b] += 1;
             scratch[t] = *pair;
@@ -154,7 +155,8 @@ fn test_radix_sort_hash_pairs() {
         .sample_iter(&mut rng)
         .take(100000)
         .enumerate()
-        .map(|(i, h)| (HashValue(h), i as u32))
+        // .map(|(i, h)| (HashValue(h), i as u32))
+        .map(|(i, h)| (h.into(), i as u32))
         .collect();
     let mut expected = v.clone();
     let mut actual = v.clone();
@@ -183,7 +185,7 @@ fn test_par_radix_sort_hash_pairs() {
             .sample_iter(&mut rng)
             .take(n)
             .enumerate()
-            .map(|(i, h)| (HashValue(h), i as u32))
+            .map(|(i, h)| (h.into(), i as u32))
             .collect();
         let mut expected = v.clone();
         let mut actual = v.clone();

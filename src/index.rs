@@ -45,6 +45,26 @@ impl HashValue {
     }
 }
 
+impl From<u64> for HashValue {
+    #[inline]
+    fn from(v: u64) -> Self {
+        Self(v)
+    }
+}
+
+impl Into<u64> for HashValue {
+    #[inline]
+    fn into(self) -> u64 {
+        self.0
+    }
+}
+impl Into<u64> for &HashValue {
+    #[inline]
+    fn into(self) -> u64 {
+        self.0
+    }
+}
+
 impl std::fmt::Debug for HashValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:016x}", self.0)
@@ -204,10 +224,12 @@ impl LSHIndex {
         let timer = Instant::now();
         let (new_hashes, new_indices): (Vec<Vec<HashValue>>, Vec<Vec<u32>>) = new_hashers
             .par_iter()
-            .map_with(Vec::new(), |tmp, hasher| {
+            .map_with((Vec::new(), Vec::new()), |(tmp, scratch), hasher| {
                 tmp.resize(n, (HashValue::default(), 0u32));
+                scratch.resize(n, (HashValue::default(), 0u32));
                 hasher.hash(ts, fft_data, tmp);
-                tmp.sort();
+                // tmp.sort();
+                crate::sort::sort_hash_pairs(tmp.as_mut_slice(), scratch);
                 let res: (Vec<HashValue>, Vec<u32>) = tmp.iter().copied().unzip();
                 res
             })
