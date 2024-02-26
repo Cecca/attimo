@@ -435,8 +435,10 @@ impl IndexStats {
         exclusion_zone: usize,
     ) -> Self {
         let mut max_repetitions = 4.min(index.get_repetitions());
-        while LSHIndex::required_memory(ts, 2 * max_repetitions) <= max_memory {
-            max_repetitions *= 2;
+        while LSHIndex::required_memory(ts, 1 + max_repetitions) <= max_memory {
+            // while LSHIndex::required_memory(ts, 2 * max_repetitions) <= max_memory {
+            // max_repetitions *= 2;
+            max_repetitions += 1;
         }
         info!(
             "Maximum repetitions {} which would require {}",

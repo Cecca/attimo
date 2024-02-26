@@ -214,7 +214,7 @@ impl MotifletsIterator {
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
 
         let index_stats = index.stats(&ts, max_memory, exclusion_zone);
-        debug!("Pools stats: {:?}", index_stats);
+        info!("Pools stats: {:?}", index_stats);
         let first_meaningful_prefix = index_stats.first_meaningful_prefix();
         assert!(first_meaningful_prefix > 0);
 
