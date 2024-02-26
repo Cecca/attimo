@@ -169,11 +169,34 @@ impl Hasher {
     }
 }
 
+enum Repetition {
+    InMemory(Vec<HashValue>, Vec<u32>),
+}
+
+impl Repetition {
+    fn from_pairs<I: IntoIterator<Item = (HashValue, u32)>>(pairs: I) -> Self {
+        let (hashes, indices): (Vec<HashValue>, Vec<u32>) = pairs.into_iter().unzip();
+        Self::InMemory(hashes, indices)
+    }
+
+    fn get_hashes(&self) -> &[HashValue] {
+        match self {
+            Self::InMemory(hashes, _) => hashes,
+        }
+    }
+    fn get_indices(&self) -> &[u32] {
+        match self {
+            Self::InMemory(_, indices) => indices,
+        }
+    }
+}
+
 pub struct LSHIndex {
     rng: Xoshiro256PlusPlus,
     functions: Vec<Hasher>,
-    hashes: Vec<Vec<HashValue>>,
-    indices: Vec<Vec<u32>>,
+    repetitions: Vec<Repetition>,
+    // hashes: Vec<Vec<HashValue>>,
+    // indices: Vec<Vec<u32>>,
     repetitions_setup_time: Duration,
 }
 
@@ -194,8 +217,9 @@ impl LSHIndex {
         let mut slf = Self {
             rng,
             functions: Vec::new(),
-            hashes: Vec::new(),
-            indices: Vec::new(),
+            repetitions: Vec::new(),
+            // hashes: Vec::new(),
+            // indices: Vec::new(),
             repetitions_setup_time: Duration::from_secs(0),
         };
 
@@ -222,30 +246,28 @@ impl LSHIndex {
             .collect();
 
         let timer = Instant::now();
-        let (new_hashes, new_indices): (Vec<Vec<HashValue>>, Vec<Vec<u32>>) = new_hashers
-            .par_iter()
-            .map_with((Vec::new(), Vec::new()), |(tmp, scratch), hasher| {
-                tmp.resize(n, (HashValue::default(), 0u32));
-                scratch.resize(n, (HashValue::default(), 0u32));
-                hasher.hash(ts, fft_data, tmp);
-                // tmp.sort();
-                crate::sort::sort_hash_pairs(tmp.as_mut_slice(), scratch);
-                let res: (Vec<HashValue>, Vec<u32>) = tmp.iter().copied().unzip();
-                res
-            })
-            .unzip();
+        let new_reps =
+            new_hashers
+                .par_iter()
+                .map_with((Vec::new(), Vec::new()), |(tmp, scratch), hasher| {
+                    tmp.resize(n, (HashValue::default(), 0u32));
+                    scratch.resize(n, (HashValue::default(), 0u32));
+                    hasher.hash(ts, fft_data, tmp);
+                    // tmp.sort();
+                    crate::sort::sort_hash_pairs(tmp.as_mut_slice(), scratch);
+                    Repetition::from_pairs(tmp.iter().copied())
+                });
         let elapsed = timer.elapsed();
         let average_time = elapsed / new_repetitions as u32;
 
+        self.repetitions.par_extend(new_reps);
         self.functions.extend(new_hashers);
-        self.hashes.extend(new_hashes);
-        self.indices.extend(new_indices);
         average_time
     }
 
     /// Get how many repetitions are available in this index
     pub fn get_repetitions(&self) -> usize {
-        self.hashes.len()
+        self.repetitions.len()
     }
 
     fn collision_probability_at(&self, d: Distance) -> f64 {
@@ -255,7 +277,10 @@ impl LSHIndex {
     #[cfg(test)]
     fn empirical_collision_probability(&self, i: usize, j: usize, prefix: usize) -> f64 {
         let mut cnt = 0;
-        for (hs, idxs) in self.hashes.iter().zip(&self.indices) {
+        // for (hs, idxs) in self.hashes.iter().zip(&self.indices) {
+        for repetition in self.repetitions.iter() {
+            let hs = repetition.get_hashes();
+            let idxs = repetition.get_indices();
             let hi = hs[*idxs.iter().find(|idx| **idx as usize == i).unwrap() as usize];
             let hj = hs[*idxs.iter().find(|idx| **idx as usize == j).unwrap() as usize];
             if hi.prefix_eq(&hj, prefix) {
@@ -296,7 +321,8 @@ impl LSHIndex {
 
     pub fn collisions(&self, repetition: usize, prefix: usize) -> CollisionEnumerator {
         assert!(prefix > 0 && prefix <= K, "illegal prefix {}", prefix);
-        CollisionEnumerator::new(&self.hashes[repetition], &self.indices[repetition], prefix)
+        let rep = &self.repetitions[repetition];
+        CollisionEnumerator::new(rep.get_hashes(), rep.get_indices(), prefix)
     }
 }
 
