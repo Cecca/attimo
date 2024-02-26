@@ -1,11 +1,14 @@
-use log::info;
+use log::{debug, info, warn};
 use rand::prelude::*;
-use rand_distr::{Normal, Uniform};
+use rand_distr::{num_traits::ToBytes, Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use std::{
+    fs::File,
+    io::{prelude::*, BufReader, BufWriter},
     mem::size_of,
     ops::Range,
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -171,6 +174,19 @@ impl Hasher {
 
 enum Repetition {
     InMemory(Vec<HashValue>, Vec<u32>),
+    OnDisk(usize, PathBuf, PathBuf),
+}
+
+impl Drop for Repetition {
+    fn drop(&mut self) {
+        match self {
+            Self::InMemory(_, _) => (),
+            Self::OnDisk(_, p1, p2) => {
+                std::fs::remove_file(p1).unwrap();
+                std::fs::remove_file(p2).unwrap();
+            }
+        }
+    }
 }
 
 impl Repetition {
@@ -179,14 +195,75 @@ impl Repetition {
         Self::InMemory(hashes, indices)
     }
 
+    fn from_pairs_to_disk<I: IntoIterator<Item = (HashValue, u32)>>(pairs: I) -> Self {
+        let dir = std::env::temp_dir().join(format!("attimo-{}", thread_rng().next_u64()));
+        assert!(!dir.is_dir());
+        std::fs::create_dir(&dir).unwrap();
+        let hashes_path = dir.join("hashes.bin");
+        let indices_path = dir.join("indices.bin");
+
+        let mut file_hashes = BufWriter::new(File::create(&hashes_path).unwrap());
+        let mut file_indices = BufWriter::new(File::create(&indices_path).unwrap());
+
+        let mut n = 0;
+        for (h, i) in pairs.into_iter() {
+            file_hashes.write_all(&h.0.to_be_bytes()).unwrap();
+            file_indices.write_all(&i.to_be_bytes()).unwrap();
+            n += 1;
+        }
+
+        Self::OnDisk(n, hashes_path, indices_path)
+    }
+
+    fn get(&self) -> RepetitionHandle<'_> {
+        match self {
+            Self::InMemory(hashes, indices) => RepetitionHandle::Ref(hashes, indices),
+            Self::OnDisk(n, hashes_path, indices_path) => {
+                let mut hashes = Vec::with_capacity(*n);
+                let mut file_hashes = BufReader::new(File::open(hashes_path).unwrap());
+                let mut buf = [0u8; 8];
+                while let Ok(r) = file_hashes.read(&mut buf) {
+                    if r == 0 {
+                        break;
+                    }
+                    assert!(r == 8);
+                    let h = u64::from_be_bytes(buf);
+                    hashes.push(HashValue(h));
+                }
+
+                let mut indices = Vec::with_capacity(*n);
+                let mut file_indices = BufReader::new(File::open(indices_path).unwrap());
+                let mut buf = [0u8; 4];
+                while let Ok(r) = file_indices.read(&mut buf) {
+                    if r == 0 {
+                        break;
+                    }
+                    assert!(r == 4);
+                    let i = u32::from_be_bytes(buf);
+                    indices.push(i);
+                }
+
+                RepetitionHandle::Owned(hashes, indices)
+            }
+        }
+    }
+}
+
+enum RepetitionHandle<'data> {
+    Ref(&'data [HashValue], &'data [u32]),
+    Owned(Vec<HashValue>, Vec<u32>),
+}
+impl<'data> RepetitionHandle<'data> {
     fn get_hashes(&self) -> &[HashValue] {
         match self {
-            Self::InMemory(hashes, _) => hashes,
+            Self::Ref(hashes, _) => hashes,
+            Self::Owned(hashes, _) => &hashes,
         }
     }
     fn get_indices(&self) -> &[u32] {
         match self {
-            Self::InMemory(_, indices) => indices,
+            Self::Ref(_, indices) => indices,
+            Self::Owned(_, indices) => &indices,
         }
     }
 }
@@ -195,16 +272,17 @@ pub struct LSHIndex {
     rng: Xoshiro256PlusPlus,
     functions: Vec<Hasher>,
     repetitions: Vec<Repetition>,
-    // hashes: Vec<Vec<HashValue>>,
-    // indices: Vec<Vec<u32>>,
     repetitions_setup_time: Duration,
+    /// How much main memory the index will use before swapping out repetitions to disk
+    main_memory_cap: Bytes,
+    max_repetitions_in_memory: usize,
 }
 
 impl LSHIndex {
     /// How much memory would it be required to store information for these many repetitions?
     pub fn required_memory(ts: &WindowedTimeseries, repetitions: usize) -> Bytes {
-        let hashes = repetitions * K * ts.num_subsequences() * size_of::<HashValue>();
-        let indices = repetitions * K * ts.num_subsequences() * size_of::<u32>();
+        let hashes = repetitions * ts.num_subsequences() * size_of::<HashValue>();
+        let indices = repetitions * ts.num_subsequences() * size_of::<u32>();
         Bytes(hashes + indices)
     }
 
@@ -214,13 +292,19 @@ impl LSHIndex {
         let rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         const INITIAL_REPETITIONS: usize = 8;
 
+        let main_memory_cap = Bytes::system_memory().divide(2);
+        let mut max_repetitions_in_memory = 0;
+        while Self::required_memory(ts, max_repetitions_in_memory) < main_memory_cap {
+            max_repetitions_in_memory += 1;
+        }
+
         let mut slf = Self {
             rng,
             functions: Vec::new(),
             repetitions: Vec::new(),
-            // hashes: Vec::new(),
-            // indices: Vec::new(),
             repetitions_setup_time: Duration::from_secs(0),
+            main_memory_cap,
+            max_repetitions_in_memory,
         };
 
         let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS);
@@ -239,29 +323,39 @@ impl LSHIndex {
         let dimension = ts.w;
         let n = ts.num_subsequences();
         let width = Hasher::compute_width(ts);
-        let new_repetitions = total_repetitions - self.get_repetitions();
+        let starting_repetitions = self.get_repetitions();
+        let new_repetitions = total_repetitions - starting_repetitions;
+        let max_repetitions_in_memory = self.max_repetitions_in_memory;
+        info!("Adding {} new repetitions", new_repetitions);
 
         let new_hashers: Vec<Hasher> = (0..new_repetitions)
             .map(|_| Hasher::new(dimension, width, &mut self.rng))
             .collect();
 
         let timer = Instant::now();
-        let new_reps =
-            new_hashers
-                .par_iter()
-                .map_with((Vec::new(), Vec::new()), |(tmp, scratch), hasher| {
-                    tmp.resize(n, (HashValue::default(), 0u32));
-                    scratch.resize(n, (HashValue::default(), 0u32));
-                    hasher.hash(ts, fft_data, tmp);
-                    // tmp.sort();
-                    crate::sort::sort_hash_pairs(tmp.as_mut_slice(), scratch);
+        let new_reps = new_hashers.par_iter().enumerate().map_with(
+            (Vec::new(), Vec::new()),
+            |(tmp, scratch), (i, hasher)| {
+                let rep_idx = starting_repetitions + i;
+                tmp.resize(n, (HashValue::default(), 0u32));
+                scratch.resize(n, (HashValue::default(), 0u32));
+                hasher.hash(ts, fft_data, tmp);
+                crate::sort::sort_hash_pairs(tmp.as_mut_slice(), scratch);
+                if rep_idx > max_repetitions_in_memory {
+                    warn!("Creating repetition on disk!");
+                    Repetition::from_pairs_to_disk(tmp.iter().copied())
+                } else {
                     Repetition::from_pairs(tmp.iter().copied())
-                });
+                }
+            },
+        );
+        self.repetitions.par_extend(new_reps);
         let elapsed = timer.elapsed();
         let average_time = elapsed / new_repetitions as u32;
 
-        self.repetitions.par_extend(new_reps);
         self.functions.extend(new_hashers);
+
+        info!("Allocation after new repetitions {}", Bytes::allocated());
         average_time
     }
 
@@ -279,6 +373,7 @@ impl LSHIndex {
         let mut cnt = 0;
         // for (hs, idxs) in self.hashes.iter().zip(&self.indices) {
         for repetition in self.repetitions.iter() {
+            let repetition = repetition.get();
             let hs = repetition.get_hashes();
             let idxs = repetition.get_indices();
             let hi = hs[*idxs.iter().find(|idx| **idx as usize == i).unwrap() as usize];
@@ -321,26 +416,29 @@ impl LSHIndex {
 
     pub fn collisions(&self, repetition: usize, prefix: usize) -> CollisionEnumerator {
         assert!(prefix > 0 && prefix <= K, "illegal prefix {}", prefix);
-        let rep = &self.repetitions[repetition];
-        CollisionEnumerator::new(rep.get_hashes(), rep.get_indices(), prefix)
+        let rep = self.repetitions[repetition].get();
+        // CollisionEnumerator::new(rep.get_hashes(), rep.get_indices(), prefix)
+        CollisionEnumerator::new(rep, prefix)
     }
 }
 
 pub struct CollisionEnumerator<'index> {
     prefix: usize,
-    hashes: &'index [HashValue],
-    indices: &'index [u32],
+    handle: RepetitionHandle<'index>,
+    // hashes: &'index [HashValue],
+    // indices: &'index [u32],
     current_range: Range<usize>,
     i: usize,
     j: usize,
 }
 impl<'index> CollisionEnumerator<'index> {
-    fn new(hashes: &'index [HashValue], indices: &'index [u32], prefix: usize) -> Self {
+    fn new(handle: RepetitionHandle<'index>, prefix: usize) -> Self {
         assert!(prefix > 0 && prefix <= K);
         let mut slf = Self {
             prefix,
-            hashes,
-            indices,
+            handle,
+            // hashes: handle.get_hashes(),
+            // indices: handle.get_indices(),
             current_range: 0..0,
             i: 0,
             j: 1,
@@ -348,36 +446,49 @@ impl<'index> CollisionEnumerator<'index> {
         slf.next_range();
         slf
     }
+    // fn new(hashes: &'index [HashValue], indices: &'index [u32], prefix: usize) -> Self {
+    //     assert!(prefix > 0 && prefix <= K);
+    //     let mut slf = Self {
+    //         prefix,
+    //         hashes,
+    //         indices,
+    //         current_range: 0..0,
+    //         i: 0,
+    //         j: 1,
+    //     };
+    //     slf.next_range();
+    //     slf
+    // }
 
     /// efficiently the enumerator to the next range of equal (by prefix)
     /// hash values
     fn next_range(&mut self) {
+        let hashes = self.handle.get_hashes();
+
         // exponential search
         let start = self.current_range.end;
-        let h = self.hashes[start];
+        let h = hashes[start];
         let mut offset = 1;
         let mut low = start;
-        if low >= self.hashes.len() {
+        if low >= hashes.len() {
             self.current_range = low..low;
             return;
         }
-        while start + offset < self.hashes.len()
-            && self.hashes[start + offset].prefix_eq(&h, self.prefix)
-        {
+        while start + offset < hashes.len() && hashes[start + offset].prefix_eq(&h, self.prefix) {
             low = start + offset;
             offset *= 2;
         }
-        let high = (start + offset).min(self.hashes.len());
+        let high = (start + offset).min(hashes.len());
 
         // binary search
         debug_assert!(
-            self.hashes[low].prefix_eq(&h, self.prefix),
+            hashes[low].prefix_eq(&h, self.prefix),
             "{:?} != {:?} (prefix {})",
-            self.hashes[low],
+            hashes[low],
             h,
             self.prefix
         );
-        let off = self.hashes[low..high].partition_point(|hv| h.prefix_eq(hv, self.prefix));
+        let off = hashes[low..high].partition_point(|hv| h.prefix_eq(hv, self.prefix));
         let end = low + off;
         self.current_range = start..end;
         self.i = self.current_range.start;
@@ -396,16 +507,18 @@ impl<'index> CollisionEnumerator<'index> {
     ) -> Option<usize> {
         let mut idx = 0;
         output.fill((0, 0, Distance(0.0)));
-        while self.current_range.end < self.hashes.len() {
+        while self.current_range.end < self.handle.get_hashes().len() {
+            let hashes = self.handle.get_hashes();
+            let indices = self.handle.get_indices();
             let range = self.current_range.clone();
             while self.i < range.end {
                 while self.j < range.end {
                     assert!(range.contains(&self.i));
                     assert!(range.contains(&self.j));
-                    let a = self.indices[self.i];
-                    let b = self.indices[self.j];
-                    let ha = self.hashes[self.i];
-                    let hb = self.hashes[self.j];
+                    let a = indices[self.i];
+                    let b = indices[self.j];
+                    let ha = hashes[self.i];
+                    let hb = hashes[self.j];
                     assert!(ha.prefix_eq(&hb, self.prefix));
                     if !a.overlaps(b, exclusion_zone) {
                         output[idx] = (a.min(b), a.max(b), Distance(f64::INFINITY));
@@ -431,9 +544,12 @@ impl<'index> CollisionEnumerator<'index> {
 
     pub fn estimate_num_collisions(mut self, exclusion_zone: usize) -> usize {
         let mut cnt = 0;
-        while self.current_range.end < self.hashes.len() {
+        while self.current_range.end < self.handle.get_hashes().len() {
+            let hashes = self.handle.get_hashes();
+            let indices = self.handle.get_indices();
+
             let range = self.current_range.clone();
-            if range.len() as f64 > (self.hashes.len() as f64).sqrt() {
+            if range.len() as f64 > (hashes.len() as f64).sqrt() {
                 // the bucket if _very_ large (relative to the number of subsequences),
                 // so we just pick the square of its size in order to avoid spending
                 // forever in iterating over pairs checking for overlaps
@@ -444,8 +560,8 @@ impl<'index> CollisionEnumerator<'index> {
                 while i < range.end {
                     let mut j = i + 1;
                     while j < range.end {
-                        let a = self.indices[i];
-                        let b = self.indices[j];
+                        let a = indices[i];
+                        let b = indices[j];
                         if !a.overlaps(b, exclusion_zone) {
                             cnt += 1;
                         }

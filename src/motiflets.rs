@@ -249,7 +249,7 @@ impl MotifletsIterator {
         let rep = self.rep;
         assert!(rep < self.index.get_repetitions());
         let exclusion_zone = self.exclusion_zone;
-        let index = &self.index;
+        let index = &mut self.index;
         let ts = &self.ts;
         let graph = &mut self.graph;
 

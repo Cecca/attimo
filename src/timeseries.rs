@@ -1,6 +1,8 @@
+use crate::allocator::allocated;
 use crate::distance::{zdot, zeucl};
 use rand_distr::num_traits::Zero;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
+use std::ops::{Add, Sub};
 use std::str::FromStr;
 use std::{cell::RefCell, convert::TryFrom, fmt::Display, sync::Arc};
 use thread_local::ThreadLocal;
@@ -402,10 +404,28 @@ impl Bytes {
         let mem = system.total_memory();
         Self(mem.try_into().expect("Cannot convert u64 to usize"))
     }
+    pub fn allocated() -> Self {
+        Self(allocated())
+    }
     pub fn divide(&self, divisor: usize) -> Self {
         Self(self.0 / divisor)
     }
 }
+
+impl Add<Bytes> for Bytes {
+    type Output = Bytes;
+    fn add(self, rhs: Bytes) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl Sub<Bytes> for Bytes {
+    type Output = Bytes;
+    fn sub(self, rhs: Bytes) -> Self::Output {
+        Self(self.0 - rhs.0)
+    }
+}
+
 impl FromStr for Bytes {
     type Err = ParseBytesError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
