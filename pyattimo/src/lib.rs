@@ -298,7 +298,7 @@ pub fn motiflet_brute_force(
     w: usize,
     support: usize,
     exclusion_zone: Option<usize>,
-) -> KMotiflet {
+) -> Vec<KMotiflet> {
     use attimo::motiflets::*;
     let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
     let exclusion_zone = exclusion_zone.unwrap_or(w / 2);
@@ -307,13 +307,16 @@ pub fn motiflet_brute_force(
         "support * exclusion_zone should be less than the number of subsequences. We have instead {} * {} > {}",
         support, exclusion_zone, ts.num_subsequences()
     );
-    let (extent, indices) = brute_force_motiflets(&ts, support, exclusion_zone);
-    KMotiflet {
-        support,
-        indices,
-        extent,
-        ts,
-    }
+    let motiflets = brute_force_motiflets(&ts, support, exclusion_zone);
+    motiflets
+        .into_iter()
+        .map(|(extent, indices)| KMotiflet {
+            support: indices.len(),
+            indices,
+            extent: extent.into(),
+            ts: Arc::clone(&ts),
+        })
+        .collect()
 }
 
 #[pymodule]

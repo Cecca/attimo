@@ -104,6 +104,20 @@ pub fn compute_extent(ts: &WindowedTimeseries, indices: &[usize]) -> Distance {
     Distance(extent)
 }
 
+pub fn compute_extents(ts: &WindowedTimeseries, indices: &[usize]) -> Vec<Distance> {
+    let k = indices.len();
+    let mut extents = vec![Distance(0.0f64); indices.len()];
+    for i in 1..k {
+        extents[i] = extents[i - 1];
+        for j in 0..i {
+            let d = Distance(zeucl(ts, indices[i], indices[j]));
+            extents[i] = extents[i].max(d);
+        }
+    }
+
+    extents
+}
+
 /// this structure reports some statistics, mainly for debugging purposes
 #[derive(Debug, Clone, Copy, Default)]
 pub struct KnnGraphStats {

@@ -76,6 +76,67 @@ fn k_nearest_neighbors_bf(
     (compute_extent(ts, &ret), ret)
 }
 
+fn k_extents_bf(
+    ts: &WindowedTimeseries,
+    from: usize,
+    fft_data: &FFTData,
+    k: usize,
+    exclusion_zone: usize,
+    indices: &mut [usize],
+    distances: &mut [f64],
+    buf: &mut [f64],
+) -> (Vec<Distance>, Vec<usize>) {
+    // Check that the auxiliary memory buffers are correctly sized
+    assert_eq!(indices.len(), ts.num_subsequences());
+    assert_eq!(distances.len(), ts.num_subsequences());
+    assert_eq!(buf.len(), ts.w);
+
+    // Compute the distance profile using the MASS algorithm
+    ts.distance_profile(&fft_data, from, distances, buf);
+
+    // Reset the indices of the subsequences
+    for i in 0..ts.num_subsequences() {
+        indices[i] = i;
+    }
+    // Find the likely candidates by a (partial) indirect sort of
+    // the indices by increasing distance.
+    let n_candidates = (k * exclusion_zone).min(indices.len() - 1);
+    assert!(n_candidates <= indices.len());
+    indices.select_nth_unstable_by_key(n_candidates, |j| Distance(distances[*j]));
+
+    // Sort the candidate indices by increasing distance (the previous step)
+    // only partitioned the indices in two groups with the guarantee that the first
+    // `n_candidates` indices are the ones at shortest distance from the `from` point,
+    // but they are not guaranteed to be sorted
+    let indices = &mut indices[..n_candidates];
+    indices.sort_unstable_by_key(|j| Distance(distances[*j]));
+
+    // Pick the k-neighborhood skipping overlapping subsequences
+    let mut ret = Vec::new();
+    ret.push(from);
+    let mut j = 1;
+    while ret.len() < k && j < indices.len() {
+        // find the non-overlapping subsequences
+        let jj = indices[j];
+        let mut overlaps = false;
+        for h in 0..ret.len() {
+            let hh = ret[h];
+            if jj.overlaps(hh, exclusion_zone) {
+                // if jj.max(hh) - jj.min(hh) < exclusion_zone {
+                overlaps = true;
+                break;
+            }
+        }
+        if !overlaps {
+            ret.push(jj);
+        }
+        j += 1;
+    }
+    assert_eq!(ret.len(), k);
+
+    (compute_extents(ts, &ret), ret)
+}
+
 // Find the (approximate) motiflets by brute force: for each subsequence find its
 // k-nearest neighbors, compute their extents, and pick the neighborhood with the
 // smallest extent.
@@ -83,7 +144,7 @@ pub fn brute_force_motiflets(
     ts: &WindowedTimeseries,
     k: usize,
     exclusion_zone: usize,
-) -> (f64, Vec<usize>) {
+) -> Vec<(Distance, Vec<usize>)> {
     debug_assert!(false, "Should run only in `release mode`");
     // pre-compute the FFT for the time series
     let fft_data = FFTData::new(&ts);
@@ -100,34 +161,43 @@ pub fn brute_force_motiflets(
 
     // initialize some auxiliary buffers, which will be cloned on a
     // per-thread basis.
-    let mut indices = Vec::new();
-    indices.resize(n, 0usize);
-    let mut distances = Vec::new();
-    distances.resize(n, 0.0f64);
-    let mut buf = Vec::new();
-    buf.resize(ts.w, 0.0f64);
+    let indices = vec![0usize; n];
+    let distances = vec![0.0f64; n];
+    let buf = vec![0.0f64; ts.w];
 
     // compute all k-nearest neighborhoods
-    let (extent, indices, _root) = (0..n)
+    let motiflets = (0..n)
         .into_par_iter()
         .map_with((indices, distances, buf), |(indices, distances, buf), i| {
             pl.inc(1);
-            let (extent, indices) = k_nearest_neighbors_bf(
-                ts,
-                i,
-                &fft_data,
-                k,
-                exclusion_zone,
-                indices,
-                distances,
-                buf,
-            );
-            (extent, indices, i)
+            let (extents, indices) =
+                k_extents_bf(ts, i, &fft_data, k, exclusion_zone, indices, distances, buf);
+            (extents, indices, i)
         })
-        .min()
-        .unwrap();
+        .fold(
+            || vec![(Distance::infinity(), Vec::new()); k],
+            |mut minima, (extents, indices, _root)| {
+                for i in 1..k {
+                    if extents[i] < minima[i].0 {
+                        minima[i] = (extents[i], indices[..=i].to_owned());
+                    }
+                }
+                minima
+            },
+        )
+        .reduce(
+            || vec![(Distance::infinity(), Vec::new()); k],
+            |mut m1, m2| {
+                for i in 1..k {
+                    if m2[i].0 < m1[i].0 {
+                        m1[i] = m2[i].clone();
+                    }
+                }
+                m1
+            },
+        );
     pl.finish_and_clear();
-    (extent.0, indices)
+    motiflets
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -483,9 +553,9 @@ impl Iterator for MotifletsIterator {
 #[cfg(test)]
 mod test {
     use super::*;
-    
+
     use crate::load::loadts;
-    use std::collections::{HashMap};
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     fn run_motiflet_test(ts: Arc<WindowedTimeseries>, k: usize, seed: u64) {
@@ -504,6 +574,7 @@ mod test {
         let motiflets: HashMap<usize, Motiflet> = iter.map(|m| (m.support(), m)).collect();
         dbg!(&motiflets);
 
+        let brute_force = brute_force_motiflets(&ts, k, exclusion_zone);
         for k in 2..=k {
             dbg!(k);
             let motiflet = &motiflets[&k];
@@ -511,8 +582,7 @@ mod test {
             eprintln!("Extent of discovered motiflet {}", motiflet.extent());
             motiflet_indices.sort();
 
-            let (ground_extent, mut ground_indices): (f64, Vec<usize>) =
-                brute_force_motiflets(&ts, k, exclusion_zone);
+            let (ground_extent, mut ground_indices) = brute_force[k - 1].clone();
             eprintln!("Ground distance of {} motiflet: {}", k, ground_extent);
             eprintln!("Ground motiflet is {:?}", ground_indices);
             ground_indices.sort();
@@ -587,8 +657,8 @@ mod test {
 
         for ground in grounds {
             let k = ground.len();
-            let (_bf_extent, mut bf_idxs): (f64, Vec<usize>) =
-                brute_force_motiflets(&ts, k, exclusion_zone);
+            let brute_force = brute_force_motiflets(&ts, k, exclusion_zone);
+            let (_bf_extent, mut bf_idxs): (Distance, Vec<usize>) = brute_force[k - 1].clone();
             dbg!(_bf_extent);
             bf_idxs.sort();
             for (i_expected, i_actual) in ground.iter().zip(&bf_idxs) {

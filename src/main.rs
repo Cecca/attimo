@@ -128,8 +128,11 @@ fn main() -> Result<()> {
 
     if let Some(support) = config.motiflets {
         let motiflets: Vec<Motiflet> = if config.exact {
-            let (extent, indices) = brute_force_motiflets(&ts, support, ts.w);
-            vec![Motiflet::new(indices, extent)]
+            let motiflets = brute_force_motiflets(&ts, support, ts.w);
+            motiflets
+                .into_iter()
+                .map(|(extent, indices)| Motiflet::new(indices, extent.into()))
+                .collect()
         } else {
             let max_memory = if let Some(max_mem_str) = config.max_memory {
                 Bytes::from_str(&max_mem_str)?
