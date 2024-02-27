@@ -199,10 +199,17 @@ impl MotifletsIterator {
     ) -> Self {
         let start = Instant::now();
         let n = ts.num_subsequences();
+        let mem_gauge = MemoryGauge::allocated();
         let fft_data = FFTData::new(&ts);
+        info!("Computed fft_data: {}", mem_gauge.measure());
 
+        let mem_gauge = MemoryGauge::allocated();
         let index = LSHIndex::from_ts(&ts, &fft_data, seed);
-        debug!("Computed hash values in {:?}", start.elapsed());
+        info!(
+            "Computed initial hash values in {:?}, {}",
+            start.elapsed(),
+            mem_gauge.measure()
+        );
 
         let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
         debug!(

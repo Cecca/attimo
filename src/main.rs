@@ -1,6 +1,6 @@
 use anyhow::Result;
 use argh::FromArgs;
-use attimo::allocator::{self, allocated, Bytes, CountingAllocator};
+use attimo::allocator::{self, Bytes, CountingAllocator, MemoryGauge};
 use attimo::load::*;
 use attimo::motiflets::{brute_force_motiflets, Motiflet, MotifletsIterator};
 use attimo::motifs::{motifs, Motif};
@@ -93,23 +93,24 @@ fn main() -> Result<()> {
 
     let path = config.path.clone();
     let w = config.window;
+    let mem = MemoryGauge::allocated();
     let timer = Instant::now();
     let ts: Vec<f64> = loadts(path, config.prefix)?;
-    log::info!("Loaded raw data in {:?}", timer.elapsed());
+    log::info!(
+        "Loaded raw data in {:?}: {}",
+        timer.elapsed(),
+        mem.measure()
+    );
     let timer = Instant::now();
-    let mem_before = allocated();
     let ts = WindowedTimeseries::new(ts, w, config.precise);
-    let ts_bytes = allocated() - mem_before;
+    let ts_bytes = mem.measure();
     let input_elapsed = timer.elapsed();
     log::info!(
-        "Create windowed time series with {} subsequences in {:?}, taking {}",
+        "Create windowed time series with {} subsequences in {:?}, taking {} ({})",
         ts.num_subsequences(),
         input_elapsed,
-        Bytes(ts_bytes)
-    );
-    log::debug!(
-        "time_s" = input_elapsed.as_secs_f64();
-        "input reading"
+        ts_bytes,
+        ts.memory()
     );
 
     let profiler = if config.profile {

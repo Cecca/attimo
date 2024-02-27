@@ -1,10 +1,9 @@
-use crate::allocator::allocated;
+use crate::allocator::Bytes;
 use crate::distance::{zdot, zeucl};
 use rand_distr::num_traits::Zero;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
-use std::ops::{Add, Sub};
-use std::str::FromStr;
-use std::{cell::RefCell, convert::TryFrom, fmt::Display, sync::Arc};
+use std::cell::RefCell;
+use std::sync::Arc;
 use thread_local::ThreadLocal;
 
 pub trait Overlaps<T> {
@@ -83,6 +82,12 @@ impl WindowedTimeseries {
             rolling_avg,
             rolling_sd,
         }
+    }
+
+    pub fn memory(&self) -> Bytes {
+        let m = std::mem::size_of::<f64>()
+            * (self.data.len() + self.rolling_sd.len() + self.rolling_avg.len());
+        Bytes(m)
     }
 
     //// We have the possiblity of generating a random walk windowed

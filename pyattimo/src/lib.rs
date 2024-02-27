@@ -1,5 +1,6 @@
+use attimo::allocator::Bytes;
 use attimo::motifs::{MotifsEnumerator, PairMotifState};
-use attimo::timeseries::{Bytes, WindowedTimeseries};
+use attimo::timeseries::WindowedTimeseries;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::str::FromStr;

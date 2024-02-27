@@ -356,7 +356,6 @@ impl LSHIndex {
 
         self.functions.extend(new_hashers);
 
-        info!("Allocation after new repetitions {}", Bytes::allocated());
         average_time
     }
 
