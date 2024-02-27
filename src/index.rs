@@ -418,7 +418,6 @@ impl LSHIndex {
     pub fn collisions(&self, repetition: usize, prefix: usize) -> CollisionEnumerator {
         assert!(prefix > 0 && prefix <= K, "illegal prefix {}", prefix);
         let rep = self.repetitions[repetition].get();
-        // CollisionEnumerator::new(rep.get_hashes(), rep.get_indices(), prefix)
         CollisionEnumerator::new(rep, prefix)
     }
 }
@@ -426,8 +425,6 @@ impl LSHIndex {
 pub struct CollisionEnumerator<'index> {
     prefix: usize,
     handle: RepetitionHandle<'index>,
-    // hashes: &'index [HashValue],
-    // indices: &'index [u32],
     current_range: Range<usize>,
     i: usize,
     j: usize,
@@ -438,8 +435,6 @@ impl<'index> CollisionEnumerator<'index> {
         let mut slf = Self {
             prefix,
             handle,
-            // hashes: handle.get_hashes(),
-            // indices: handle.get_indices(),
             current_range: 0..0,
             i: 0,
             j: 1,
@@ -601,8 +596,6 @@ impl IndexStats {
     ) -> Self {
         let mut max_repetitions = 4.min(index.get_repetitions());
         while LSHIndex::required_memory(ts, 1 + max_repetitions) <= max_memory {
-            // while LSHIndex::required_memory(ts, 2 * max_repetitions) <= max_memory {
-            // max_repetitions *= 2;
             max_repetitions += 1;
         }
         info!(
