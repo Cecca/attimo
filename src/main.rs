@@ -5,6 +5,7 @@ use attimo::load::*;
 use attimo::motiflets::{brute_force_motiflets, Motiflet, MotifletsIterator};
 use attimo::motifs::{motifs, Motif};
 use attimo::timeseries::*;
+use pprof::ProfilerGuard;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
@@ -170,6 +171,18 @@ fn main() -> Result<()> {
         output_csv(&config.output, &motifs)?;
     }
 
+    save_profile(profiler);
+
+    monitor_flag.store(false, std::sync::atomic::Ordering::SeqCst);
+    monitor.join().unwrap();
+
+    println!("Total time {:?}", total_timer.elapsed());
+
+    Ok(())
+}
+
+fn save_profile(profiler: Option<ProfilerGuard>) {
+    log::info!("Saving profile");
     if let Some(profiler) = profiler {
         use pprof::protos::Message;
         use std::io::Write;
@@ -185,13 +198,6 @@ fn main() -> Result<()> {
             Err(_) => {}
         };
     }
-
-    monitor_flag.store(false, std::sync::atomic::Ordering::SeqCst);
-    monitor.join().unwrap();
-
-    println!("Total time {:?}", total_timer.elapsed());
-
-    Ok(())
 }
 
 fn output_csv<P: AsRef<Path>>(path: P, motifs: &[Motif]) -> Result<()> {
