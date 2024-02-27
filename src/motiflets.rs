@@ -108,7 +108,7 @@ pub fn brute_force_motiflets(
     buf.resize(ts.w, 0.0f64);
 
     // compute all k-nearest neighborhoods
-    let (extent, indices, root) = (0..n)
+    let (extent, indices, _root) = (0..n)
         .into_par_iter()
         .map_with((indices, distances, buf), |(indices, distances, buf), i| {
             pl.inc(1);
@@ -483,9 +483,9 @@ impl Iterator for MotifletsIterator {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::distance::zeucl;
+    
     use crate::load::loadts;
-    use std::collections::{BTreeSet, HashMap};
+    use std::collections::{HashMap};
     use std::sync::Arc;
 
     fn run_motiflet_test(ts: Arc<WindowedTimeseries>, k: usize, seed: u64) {

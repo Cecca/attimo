@@ -1,4 +1,4 @@
-use log::{debug, info, warn};
+use log::{info, warn};
 use rand::prelude::*;
 use rand_distr::{num_traits::ToBytes, Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
