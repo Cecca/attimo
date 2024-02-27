@@ -138,7 +138,7 @@ fn main() -> Result<()> {
                 log::info!("System has {} memory, using {} at most", sysmem, mem);
                 mem
             };
-            let exclusion_zone = ts.w;
+            let exclusion_zone = ts.w / 2;
             MotifletsIterator::new(
                 Arc::new(ts),
                 support,

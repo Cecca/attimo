@@ -352,6 +352,7 @@ impl LSHIndex {
         );
         self.repetitions.par_extend(new_reps);
         let elapsed = timer.elapsed();
+        info!("Added {} new repetitions in {:?}", new_repetitions, elapsed);
         let average_time = elapsed / new_repetitions as u32;
 
         self.functions.extend(new_hashers);
