@@ -1,9 +1,10 @@
+use crate::allocator::*;
 use crate::{
     distance::zeucl_threshold,
     index::{IndexStats, LSHIndex},
     knn::*,
     // lsh::{ColumnBuffers, HashCollection, HashCollectionStats, Hasher, RepetitionIndex},
-    timeseries::{Bytes, FFTData, Overlaps, WindowedTimeseries},
+    timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 use log::*;
 use rayon::prelude::*;

@@ -26,10 +26,11 @@
 //// As such, the dominant component of the complexity is the `O(n log n)` of the Fast Fourier Transform:
 //// we save a factor `w` in the complexity, where `w` is the motif length.
 
+use crate::allocator::*;
 use crate::distance::zeucl;
 use crate::knn::Distance;
 use crate::motifs::Motif;
-use crate::timeseries::{Bytes, FFTData, Overlaps, WindowedTimeseries};
+use crate::timeseries::{FFTData, Overlaps, WindowedTimeseries};
 use log::info;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};

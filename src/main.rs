@@ -1,6 +1,6 @@
 use anyhow::Result;
 use argh::FromArgs;
-use attimo::allocator::{self, allocated, CountingAllocator};
+use attimo::allocator::{self, allocated, Bytes, CountingAllocator};
 use attimo::load::*;
 use attimo::motiflets::{brute_force_motiflets, Motiflet, MotifletsIterator};
 use attimo::motifs::{motifs, Motif};

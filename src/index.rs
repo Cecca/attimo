@@ -13,9 +13,10 @@ use std::{
 };
 
 use crate::{
+    allocator::Bytes,
     distance::zeucl,
     knn::Distance,
-    timeseries::{Bytes, FFTData, Overlaps, WindowedTimeseries},
+    timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 
 pub const K: usize = 8;
