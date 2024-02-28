@@ -1,4 +1,5 @@
 use attimo::allocator::Bytes;
+use attimo::motiflets::brute_force_motiflets;
 use attimo::motifs::{MotifsEnumerator, PairMotifState};
 use attimo::timeseries::WindowedTimeseries;
 use pyo3::prelude::*;
@@ -233,9 +234,20 @@ impl MotifsIterator {
     }
 }
 
+const BRUTE_FORCE_THRESHOLD: usize = 100000;
+
+/// Inner implementation of the motiflets iterator, which precomputes
+/// the motiflets if the time series is small enough, otherwise defers
+/// the computation to the enumerator proper.
+enum MotifletsIteratorImpl {
+    Enumerator(attimo::motiflets::MotifletsIterator),
+    BruteForce(usize, Vec<KMotiflet>),
+}
+
 #[pyclass]
 struct MotifletsIterator {
-    inner: attimo::motiflets::MotifletsIterator,
+    // inner: attimo::motiflets::MotifletsIterator,
+    inner: MotifletsIteratorImpl,
 }
 
 #[pymethods]
@@ -258,23 +270,39 @@ impl MotifletsIterator {
             "max_k * exclusion_zone should be less than the number of subsequences. We have instead {} * {} > {}",
             max_k, exclusion_zone, ts.num_subsequences()
         );
-        let max_memory = if let Some(max_mem_str) = max_memory {
-            Bytes::from_str(&max_mem_str).expect("cannot parse memory string")
+        if ts.num_subsequences() > BRUTE_FORCE_THRESHOLD {
+            let max_memory = if let Some(max_mem_str) = max_memory {
+                Bytes::from_str(&max_mem_str).expect("cannot parse memory string")
+            } else {
+                let sysmem = Bytes::system_memory();
+                sysmem.divide(2)
+            };
+            let inner =
+                MotifletsIteratorImpl::Enumerator(attimo::motiflets::MotifletsIterator::new(
+                    ts,
+                    max_k,
+                    max_memory,
+                    delta,
+                    exclusion_zone,
+                    seed,
+                    false,
+                ));
+            Self { inner }
         } else {
-            let sysmem = Bytes::system_memory();
-            let mem = sysmem.divide(2);
-            mem
-        };
-        let inner = attimo::motiflets::MotifletsIterator::new(
-            ts,
-            max_k,
-            max_memory,
-            delta,
-            exclusion_zone,
-            seed,
-            false,
-        );
-        Self { inner }
+            println!("Brute forcing the solution");
+            let motiflets = brute_force_motiflets(&ts, max_k, exclusion_zone)
+                .into_iter()
+                .map(|(extent, indices)| KMotiflet {
+                    support: indices.len(),
+                    indices,
+                    extent: extent.into(),
+                    ts: Arc::clone(&ts),
+                })
+                .collect();
+            Self {
+                inner: MotifletsIteratorImpl::BruteForce(0, motiflets),
+            }
+        }
     }
 
     fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
@@ -283,11 +311,23 @@ impl MotifletsIterator {
 
     fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<KMotiflet>> {
         let py = slf.py();
-        let res = slf
-            .inner
-            .next_interruptible(|| Python::check_signals(py))?
-            .map(|m| KMotiflet::new(m.extent(), m.indices(), m.support(), slf.inner.get_ts()));
-        Ok(res)
+        match &mut slf.inner {
+            MotifletsIteratorImpl::Enumerator(inner) => {
+                let res = inner
+                    .next_interruptible(|| Python::check_signals(py))?
+                    .map(|m| KMotiflet::new(m.extent(), m.indices(), m.support(), inner.get_ts()));
+                Ok(res)
+            }
+            MotifletsIteratorImpl::BruteForce(pos, motiflets) => {
+                if *pos >= motiflets.len() {
+                    Ok(None)
+                } else {
+                    let m = motiflets[*pos].clone();
+                    *pos += 1;
+                    Ok(Some(m))
+                }
+            }
+        }
     }
 }
 

@@ -128,7 +128,7 @@ fn main() -> Result<()> {
 
     if let Some(support) = config.motiflets {
         let motiflets: Vec<Motiflet> = if config.exact {
-            let motiflets = brute_force_motiflets(&ts, support, ts.w);
+            let motiflets = brute_force_motiflets(&ts, support, ts.w / 2);
             motiflets
                 .into_iter()
                 .map(|(extent, indices)| Motiflet::new(indices, extent.into()))
