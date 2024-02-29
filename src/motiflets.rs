@@ -1,6 +1,6 @@
 use crate::allocator::*;
+use crate::distance::zeucl;
 use crate::{
-    distance::zeucl_threshold,
     index::{IndexStats, LSHIndex},
     knn::*,
     // lsh::{ColumnBuffers, HashCollection, HashCollectionStats, Hasher, RepetitionIndex},
@@ -297,17 +297,14 @@ impl MotifletsIterator {
                     // longer prefix. The caveat now is that we might do different number of
                     // repetitions at different prefixes
                     // TODO: maybe skip pairs with only one collision
-                    if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
-                        let d = Distance(d);
-                        if d <= threshold {
-                            // we only schedule the pair to update the respective
-                            // neighborhoods if it can result in a better motiflet.
-                            *dist = d;
-                        } else {
-                            *dist = Distance(std::f64::INFINITY);
-                        }
+                    let d = Distance(zeucl(ts, a, b));
+                    if d <= threshold {
+                        // we only schedule the pair to update the respective
+                        // neighborhoods if it can result in a better motiflet.
+                        *dist = d;
                         (d.0, 1)
                     } else {
+                        *dist = Distance(std::f64::INFINITY);
                         (0.0, 0)
                     }
                 })
