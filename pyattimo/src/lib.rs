@@ -234,8 +234,6 @@ impl MotifsIterator {
     }
 }
 
-const BRUTE_FORCE_THRESHOLD: usize = 100000;
-
 /// Inner implementation of the motiflets iterator, which precomputes
 /// the motiflets if the time series is small enough, otherwise defers
 /// the computation to the enumerator proper.
@@ -263,6 +261,13 @@ impl MotifletsIterator {
         delta: f64,
         seed: u64,
     ) -> Self {
+        let brute_force_threshold: usize = std::env::var("PYATTIMO_BRUTE_FORCE_THRESHOLD")
+            .map(|s| {
+                s.parse::<usize>()
+                    .expect("cannot parse string into integer")
+            })
+            .unwrap_or(100000);
+
         let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
         let exclusion_zone = exclusion_zone.unwrap_or(w);
         assert!(
@@ -270,7 +275,7 @@ impl MotifletsIterator {
             "max_k * exclusion_zone should be less than the number of subsequences. We have instead {} * {} > {}",
             max_k, exclusion_zone, ts.num_subsequences()
         );
-        if ts.num_subsequences() > BRUTE_FORCE_THRESHOLD {
+        if ts.num_subsequences() > brute_force_threshold {
             let max_memory = if let Some(max_mem_str) = max_memory {
                 Bytes::from_str(&max_mem_str).expect("cannot parse memory string")
             } else {
@@ -289,7 +294,10 @@ impl MotifletsIterator {
                 ));
             Self { inner }
         } else {
-            println!("Brute forcing the solution");
+            println!(
+                "Brute forcing the solution, as the instance is smaller than {} subsequences",
+                brute_force_threshold
+            );
             let motiflets = brute_force_motiflets(&ts, max_k, exclusion_zone)
                 .into_iter()
                 .map(|(extent, indices)| KMotiflet {
