@@ -502,7 +502,6 @@ impl<'index> CollisionEnumerator<'index> {
         exclusion_zone: usize,
     ) -> Option<usize> {
         let mut idx = 0;
-        output.fill((0, 0, Distance(0.0)));
         while self.current_range.end < self.handle.get_hashes().len() {
             let hashes = self.handle.get_hashes();
             let indices = self.handle.get_indices();
