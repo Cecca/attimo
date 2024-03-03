@@ -1,5 +1,6 @@
 use crate::allocator::*;
 use crate::distance::zeucl;
+use crate::index::INITIAL_REPETITIONS;
 use crate::{
     index::{IndexStats, LSHIndex},
     knn::*,
@@ -162,8 +163,6 @@ impl Motiflet {
         self.indices.clone()
     }
 }
-
-const INITIAL_REPETITIONS: usize = 32;
 
 #[derive(Debug, Clone, Default)]
 pub struct MotifletsIteratorStats {
@@ -405,48 +404,50 @@ impl MotifletsIterator {
                 .iter()
                 .filter(|tup| tup.0.is_finite())
                 .find_map(|tup| if !tup.2 { Some(tup.0) } else { None });
-            debug!("First non confirmed distance {:?}", first_unconfirmed);
+            debug!(
+                "[{}@{}] First non confirmed distance {:?}",
+                self.rep, self.prefix, first_unconfirmed
+            );
 
-            let best_prefix = if self.rep < INITIAL_REPETITIONS && self.previous_prefix.is_none() {
-                // stay at the current prefix for the first few repetitions, to allow discovery
-                // of at least a few pairs
-                debug!("Still in the initial repetitions, continuing with the current prefix");
-                self.prefix
-            } else if let Some(first_unconfirmed) = first_unconfirmed {
-                // let graph_stats = self.graph.stats();
-                // graph_stats.total_neighbors;
-
-                let costs = self.index_stats.costs_to_confirm(
-                    self.prefix,
-                    first_unconfirmed,
-                    self.delta,
-                    &self.index,
-                );
-                debug!("Costs: {:?}", costs);
-                let (best_prefix, (best_cost, required_repetitions)) = costs
-                    .iter()
-                    .enumerate()
-                    .min_by(|(_, tup1), (_, tup2)| tup1.0.total_cmp(&tup2.0))
-                    .unwrap();
-                if best_prefix <= self.prefix {
-                    debug!(
-                        "Best prefix to confirm {} is {} with {} repetitions with cost {}",
-                        first_unconfirmed, best_prefix, required_repetitions, best_cost
+            let next_prefix =
+                if self.rep + 1 < INITIAL_REPETITIONS && self.previous_prefix.is_none() {
+                    // stay at the current prefix for the first few repetitions, to allow discovery
+                    // of at least a few pairs
+                    debug!("Still in the initial repetitions, continuing with the current prefix");
+                    self.prefix
+                } else if let Some(first_unconfirmed) = first_unconfirmed {
+                    let costs = self.index_stats.costs_to_confirm(
+                        self.prefix,
+                        first_unconfirmed,
+                        self.delta,
+                        &self.index,
                     );
-                }
-                if *required_repetitions >= self.index.get_repetitions() {
-                    self.index.add_repetitions(
-                        &self.ts,
-                        &self.fft_data,
-                        (1 + required_repetitions).next_power_of_two(),
-                    );
-                }
-                best_prefix
-            } else {
-                self.prefix
-            };
+                    debug!("Costs: {:?}", costs);
+                    let (best_prefix, (best_cost, required_repetitions)) = costs
+                        .iter()
+                        .enumerate()
+                        .min_by(|(_, tup1), (_, tup2)| tup1.0.total_cmp(&tup2.0))
+                        .unwrap();
+                    if best_prefix <= self.prefix {
+                        debug!(
+                            "Best prefix to confirm {} is {} with {} repetitions with cost {}",
+                            first_unconfirmed, best_prefix, required_repetitions, best_cost
+                        );
+                    }
+                    if *required_repetitions >= self.index.get_repetitions() {
+                        debug!("Adding repetitions");
+                        self.index.add_repetitions(
+                            &self.ts,
+                            &self.fft_data,
+                            (1 + required_repetitions).next_power_of_two(),
+                        );
+                    }
+                    best_prefix
+                } else {
+                    self.prefix
+                };
 
-            if best_prefix >= self.prefix {
+            if next_prefix >= self.prefix {
                 // Advance on the current prefix
                 self.rep += 1;
                 debug!("Advancing to repetition {}", self.rep);
@@ -462,7 +463,7 @@ impl MotifletsIterator {
                 self.previous_prefix_repetitions.replace(self.rep);
                 self.rep = 0;
                 self.previous_prefix.replace(self.prefix);
-                self.prefix = best_prefix;
+                self.prefix = next_prefix;
             }
             assert!(self.prefix > 0);
         }

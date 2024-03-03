@@ -280,6 +280,8 @@ pub struct LSHIndex {
     max_repetitions_in_memory: usize,
 }
 
+pub const INITIAL_REPETITIONS: usize = 8;
+
 impl LSHIndex {
     /// How much memory would it be required to store information for these many repetitions?
     pub fn required_memory(ts: &WindowedTimeseries, repetitions: usize) -> Bytes {
@@ -292,7 +294,6 @@ impl LSHIndex {
     /// and a `Hasher`.
     pub fn from_ts(ts: &WindowedTimeseries, fft_data: &FFTData, seed: u64) -> Self {
         let rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        const INITIAL_REPETITIONS: usize = 8;
 
         let quantization_width = std::env::var("ATTIMO_QUANTIZATION")
             .map(|q| {
