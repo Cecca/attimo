@@ -1,6 +1,6 @@
 use log::{info, warn};
 use rand::prelude::*;
-use rand_distr::{num_traits::ToBytes, Normal, Uniform};
+use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use std::{
@@ -271,6 +271,7 @@ impl<'data> RepetitionHandle<'data> {
 
 pub struct LSHIndex {
     rng: Xoshiro256PlusPlus,
+    quantization_width: f64,
     functions: Vec<Hasher>,
     repetitions: Vec<Repetition>,
     repetitions_setup_time: Duration,
@@ -293,6 +294,14 @@ impl LSHIndex {
         let rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         const INITIAL_REPETITIONS: usize = 8;
 
+        let quantization_width = std::env::var("ATTIMO_QUANTIZATION")
+            .map(|q| {
+                q.parse::<f64>()
+                    .expect("unable to parse ATTIMO_QUANTIZATION as a float")
+            })
+            .unwrap_or_else(|_| Hasher::compute_width(ts));
+        info!("quantization width: {}", quantization_width);
+
         let main_memory_cap = Bytes::system_memory().divide(2);
         let mut max_repetitions_in_memory = 0;
         while Self::required_memory(ts, max_repetitions_in_memory) < main_memory_cap {
@@ -301,6 +310,7 @@ impl LSHIndex {
 
         let mut slf = Self {
             rng,
+            quantization_width,
             functions: Vec::new(),
             repetitions: Vec::new(),
             repetitions_setup_time: Duration::from_secs(0),
@@ -323,14 +333,13 @@ impl LSHIndex {
         assert!(total_repetitions > self.get_repetitions());
         let dimension = ts.w;
         let n = ts.num_subsequences();
-        let width = Hasher::compute_width(ts);
         let starting_repetitions = self.get_repetitions();
         let new_repetitions = total_repetitions - starting_repetitions;
         let max_repetitions_in_memory = self.max_repetitions_in_memory;
         info!("Adding {} new repetitions", new_repetitions);
 
         let new_hashers: Vec<Hasher> = (0..new_repetitions)
-            .map(|_| Hasher::new(dimension, width, &mut self.rng))
+            .map(|_| Hasher::new(dimension, self.quantization_width, &mut self.rng))
             .collect();
 
         let timer = Instant::now();
