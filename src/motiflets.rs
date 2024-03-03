@@ -275,7 +275,7 @@ impl MotifletsIterator {
         let mut cnt_candidates = 0;
         let mut sum_dist = 0.0;
         let mut cnt_distances = 0;
-        let mut enumerator = index.collisions(rep, prefix);
+        let mut enumerator = index.collisions(rep, prefix, self.previous_prefix);
         while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone) {
             cnt_candidates += cnt;
             if cnt_candidates > num_collisions_threshold {
@@ -293,10 +293,6 @@ impl MotifletsIterator {
                 .map(|(a, b, dist)| {
                     let a = *a as usize;
                     let b = *b as usize;
-                    // TODO: Re-introduce the check to verify if a pair has been verified iwth a
-                    // longer prefix. The caveat now is that we might do different number of
-                    // repetitions at different prefixes
-                    // TODO: maybe skip pairs with only one collision
                     let d = Distance(zeucl(ts, a, b));
                     if d <= threshold {
                         // we only schedule the pair to update the respective

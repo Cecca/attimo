@@ -424,25 +424,32 @@ impl LSHIndex {
         IndexStats::new(self, ts, max_memory, exclusion_zone)
     }
 
-    pub fn collisions(&self, repetition: usize, prefix: usize) -> CollisionEnumerator {
+    pub fn collisions(
+        &self,
+        repetition: usize,
+        prefix: usize,
+        prev_prefix: Option<usize>,
+    ) -> CollisionEnumerator {
         assert!(prefix > 0 && prefix <= K, "illegal prefix {}", prefix);
         let rep = self.repetitions[repetition].get();
-        CollisionEnumerator::new(rep, prefix)
+        CollisionEnumerator::new(rep, prefix, prev_prefix)
     }
 }
 
 pub struct CollisionEnumerator<'index> {
     prefix: usize,
+    prev_prefix: Option<usize>,
     handle: RepetitionHandle<'index>,
     current_range: Range<usize>,
     i: usize,
     j: usize,
 }
 impl<'index> CollisionEnumerator<'index> {
-    fn new(handle: RepetitionHandle<'index>, prefix: usize) -> Self {
+    fn new(handle: RepetitionHandle<'index>, prefix: usize, prev_prefix: Option<usize>) -> Self {
         assert!(prefix > 0 && prefix <= K);
         let mut slf = Self {
             prefix,
+            prev_prefix,
             handle,
             current_range: 0..0,
             i: 0,
@@ -451,19 +458,6 @@ impl<'index> CollisionEnumerator<'index> {
         slf.next_range();
         slf
     }
-    // fn new(hashes: &'index [HashValue], indices: &'index [u32], prefix: usize) -> Self {
-    //     assert!(prefix > 0 && prefix <= K);
-    //     let mut slf = Self {
-    //         prefix,
-    //         hashes,
-    //         indices,
-    //         current_range: 0..0,
-    //         i: 0,
-    //         j: 1,
-    //     };
-    //     slf.next_range();
-    //     slf
-    // }
 
     /// efficiently the enumerator to the next range of equal (by prefix)
     /// hash values
@@ -523,8 +517,16 @@ impl<'index> CollisionEnumerator<'index> {
                     let b = indices[self.j];
                     let ha = hashes[self.i];
                     let hb = hashes[self.j];
-                    assert!(ha.prefix_eq(&hb, self.prefix));
-                    if !a.overlaps(b, exclusion_zone) {
+                    debug_assert!(ha.prefix_eq(&hb, self.prefix));
+                    if // did the points collide previously?
+                        !self
+                        .prev_prefix
+                        .map(|pp| ha.prefix_eq(&hb, pp))
+                        .unwrap_or(false)
+                        && 
+                        // are the corresponding repetitions overlapping?
+                        !a.overlaps(b, exclusion_zone)
+                    {
                         output[idx] = (a.min(b), a.max(b), Distance(f64::INFINITY));
                         idx += 1;
                     }
@@ -661,7 +663,7 @@ impl IndexStats {
         exclusion_zone: usize,
     ) -> usize {
         index
-            .collisions(repetition, prefix)
+            .collisions(repetition, prefix, None)
             .estimate_num_collisions(exclusion_zone)
     }
 
