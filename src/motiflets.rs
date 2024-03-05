@@ -272,8 +272,6 @@ impl MotifletsIterator {
         let threshold = self.best_motiflet[self.max_k - 1].0;
 
         let mut cnt_candidates = 0;
-        let mut sum_dist = 0.0;
-        let mut cnt_distances = 0;
         let mut enumerator = index.collisions(rep, prefix, self.previous_prefix);
         while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone) {
             cnt_candidates += cnt;
@@ -307,9 +305,6 @@ impl MotifletsIterator {
                     || (0.0f64, 0usize),
                     |accum, pair| (accum.0 + pair.0, accum.1 + pair.1),
                 );
-
-            sum_dist += d;
-            cnt_distances += c;
 
             // Update the neighborhoods
             graph.update_batch(self.pairs_buffer.as_mut_slice());

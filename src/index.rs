@@ -275,8 +275,6 @@ pub struct LSHIndex {
     functions: Vec<Hasher>,
     repetitions: Vec<Repetition>,
     repetitions_setup_time: Duration,
-    /// How much main memory the index will use before swapping out repetitions to disk
-    main_memory_cap: Bytes,
     max_repetitions_in_memory: usize,
 }
 
@@ -315,7 +313,6 @@ impl LSHIndex {
             functions: Vec::new(),
             repetitions: Vec::new(),
             repetitions_setup_time: Duration::from_secs(0),
-            main_memory_cap,
             max_repetitions_in_memory,
         };
 

@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use thread_local::ThreadLocal;
 
 use crate::{
@@ -174,14 +176,6 @@ impl KnnGraph {
         self.extents[idx][k]
     }
 
-    pub fn subgraph(&self, idxs: &[usize]) -> Vec<(usize, Vec<usize>)> {
-        let mut out = Vec::new();
-        for i in idxs {
-            out.push((*i, self.neighborhoods[*i].iter().map(|tup| tup.1).collect()));
-        }
-        out
-    }
-
     /// Mark the neighbors that are not overlapped by others
     fn fix_flags(&mut self) {
         use rayon::prelude::*;
@@ -189,38 +183,34 @@ impl KnnGraph {
             .par_iter_mut()
             .zip(self.changed.par_iter_mut())
             .zip(self.neighborhoods.par_iter_mut())
-            .for_each(|((dirty, changed), neighborhood)| {
-                if !*dirty {
-                    *changed = false;
-                    return;
-                }
-                let mut i = 0;
-                let mut change = false;
-                while i < neighborhood.len() {
-                    // is the subsequence shadowed because it overlaps with an earlier one?
-                    let shadowed =
-                        neighborhood[i].overlaps(&neighborhood[..i], self.exclusion_zone);
-                    // store if we are flipping the flag
-                    change |= neighborhood[i].2 != !shadowed;
-                    // possibly flip the flag
-                    neighborhood[i].2 = !shadowed;
-                    i += 1;
-                }
-                *changed = change;
-                *dirty = false;
-            });
-    }
-
-    /// Return the maximum distance of the k-th neighbor in
-    /// this graph.
-    pub fn farthest_kth(&self) -> Option<Distance> {
-        self.neighborhoods
-            .iter()
-            .filter_map(|nn| {
-                let mut active = ActiveNeighborhood::new(nn);
-                active.nth(self.max_k).map(|tup| tup.0)
-            })
-            .max()
+            .for_each_with(
+                ExclusionVec::new(self.exclusion_zone),
+                |exclusion_vec, ((dirty, changed), neighborhood)| {
+                    if !*dirty {
+                        *changed = false;
+                        return;
+                    }
+                    exclusion_vec.clear();
+                    let mut i = 0;
+                    let mut change = false;
+                    while i < neighborhood.len() {
+                        // is the subsequence shadowed because it overlaps with an earlier one?
+                        let shadowed = exclusion_vec.overlaps(neighborhood[i].1);
+                        if !shadowed {
+                            exclusion_vec.insert(neighborhood[i].1);
+                        }
+                        // let shadowed =
+                        //     neighborhood[i].overlaps(&neighborhood[..i], self.exclusion_zone);
+                        // store if we are flipping the flag
+                        change |= neighborhood[i].2 != !shadowed;
+                        // possibly flip the flag
+                        neighborhood[i].2 = !shadowed;
+                        i += 1;
+                    }
+                    *changed = change;
+                    *dirty = false;
+                },
+            );
     }
 
     pub fn extents(&self, idx: usize) -> &[Distance] {
@@ -390,5 +380,40 @@ impl KnnGraph {
             batch,
             |tup| (tup.1 as usize, tup.0 as usize),
         );
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ExclusionVec {
+    exclusion_zone: usize,
+    intervals: BTreeSet<usize>,
+}
+
+impl ExclusionVec {
+    fn new(exclusion_zone: usize) -> Self {
+        Self {
+            exclusion_zone,
+            intervals: Default::default(),
+        }
+    }
+
+    fn insert(&mut self, x: usize) {
+        self.intervals.insert(x);
+    }
+
+    /// returns true if the given x is withing `exclusion_zone` from any
+    /// of the indices in this exclusion_vec.
+    fn overlaps(&self, x: usize) -> bool {
+        let start = if x < self.exclusion_zone {
+            0
+        } else {
+            x - self.exclusion_zone
+        };
+        let end = x + self.exclusion_zone;
+        self.intervals.range(start..=end).next().is_some()
+    }
+
+    fn clear(&mut self) {
+        self.intervals.clear()
     }
 }
