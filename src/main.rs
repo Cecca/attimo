@@ -114,14 +114,9 @@ fn main() -> Result<()> {
         ts.memory()
     );
 
-    let profiler = if config.profile {
-        Some(
-            pprof::ProfilerGuardBuilder::default()
-                .frequency(999)
-                .blocklist(&["libc", "libgcc", "pthread", "vdso"])
-                .build()
-                .unwrap(),
-        )
+    let _profiler = if config.profile {
+        // The profile will be saved on drop
+        Some(Profiler::start())
     } else {
         None
     };
@@ -174,8 +169,6 @@ fn main() -> Result<()> {
         output_csv(&config.output, &motifs)?;
     }
 
-    save_profile(profiler);
-
     monitor_flag.store(false, std::sync::atomic::Ordering::SeqCst);
     monitor.join().unwrap();
 
@@ -184,12 +177,29 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn save_profile(profiler: Option<ProfilerGuard>) {
-    log::info!("Saving profile");
-    if let Some(profiler) = profiler {
+struct Profiler<'a> {
+    profiler: ProfilerGuard<'a>,
+}
+
+impl<'a> Profiler<'a> {
+    fn start() -> Self {
+        log::info!("Start profiler");
+        let profiler = pprof::ProfilerGuardBuilder::default()
+            .frequency(999)
+            .blocklist(&["libc", "libgcc", "pthread", "vdso", "rayon_core"])
+            .build()
+            .unwrap();
+        Self { profiler }
+    }
+}
+
+impl<'a> Drop for Profiler<'a> {
+    fn drop(&mut self) {
         use pprof::protos::Message;
         use std::io::Write;
-        match profiler.report().build() {
+
+        log::info!("Saving profile");
+        match self.profiler.report().build() {
             Ok(report) => {
                 let mut file = std::fs::File::create("profile.pb").unwrap();
                 let profile = report.pprof().unwrap();
