@@ -6,6 +6,7 @@
 
 pub mod allocator;
 pub mod distance;
+pub mod graph;
 pub mod index;
 pub mod knn;
 pub mod load;
