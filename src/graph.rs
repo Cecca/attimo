@@ -2,6 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{knn::Distance, timeseries::Overlaps};
 
+#[derive(Clone, Copy, Debug)]
+pub struct GraphStats {
+    num_edges: usize,
+}
+
 /// This graph data structure maintains the edges in increasing order
 pub struct Graph {
     exclusion_zone: usize,
@@ -16,13 +21,20 @@ impl Graph {
         }
     }
 
+    pub fn stats(&self) -> GraphStats {
+        GraphStats {
+            num_edges: self.num_edges(),
+        }
+    }
+
     pub fn num_edges(&self) -> usize {
         self.edges.len()
     }
 
     /// inserts an edge in the graph, if it does not exist already
     pub fn insert(&mut self, d: Distance, a: usize, b: usize) {
-        assert!(a < b);
+        assert!(a < b, "{} >= {}", a, b);
+        assert!(d.is_finite());
         assert!(!a.overlaps(b, self.exclusion_zone));
         self.edges.insert((d, a, b));
     }

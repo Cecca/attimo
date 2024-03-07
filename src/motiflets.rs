@@ -1,5 +1,6 @@
 use crate::allocator::*;
 use crate::distance::zeucl;
+use crate::graph::Graph;
 use crate::index::INITIAL_REPETITIONS;
 use crate::{
     index::{IndexStats, LSHIndex},
@@ -173,8 +174,9 @@ pub struct MotifletsIterator {
     pub max_k: usize,
     ts: Arc<WindowedTimeseries>,
     fft_data: FFTData,
-    best_motiflet: Vec<(Distance, usize, bool)>,
-    graph: KnnGraph,
+    best_motiflet: Vec<(Distance, Vec<usize>, bool)>,
+    next_to_confirm: Option<Distance>,
+    graph: Graph,
     to_return: Vec<Motiflet>,
     delta: f64,
     exclusion_zone: usize,
@@ -224,7 +226,9 @@ impl MotifletsIterator {
             ts.maximum_distance(),
         );
 
-        let best_motiflet = vec![(Distance(std::f64::INFINITY), 0, false); max_k];
+        let mut best_motiflet = vec![(Distance(std::f64::INFINITY), Vec::new(), false); max_k + 1];
+        best_motiflet[0].2 = true;
+        best_motiflet[1].2 = true;
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
 
         let index_stats = index.stats(&ts, max_memory, exclusion_zone);
@@ -236,7 +240,8 @@ impl MotifletsIterator {
             ts,
             fft_data,
             best_motiflet,
-            graph: KnnGraph::new(max_k, n, exclusion_zone),
+            next_to_confirm: None,
+            graph: Graph::new(exclusion_zone),
             max_k,
             to_return: Vec::new(),
             delta,
@@ -257,8 +262,8 @@ impl MotifletsIterator {
         Arc::clone(&self.ts)
     }
 
-    /// Update the neighborhoods with collisions
-    fn update_neighborhoods(&mut self) {
+    /// Update the graph
+    fn update_graph(&mut self) {
         let prefix = self.prefix;
         let rep = self.rep;
         assert!(rep < self.index.get_repetitions());
@@ -290,6 +295,7 @@ impl MotifletsIterator {
                 .map(|(a, b, dist)| {
                     let a = *a as usize;
                     let b = *b as usize;
+                    assert!(a < b);
                     let d = Distance(zeucl(ts, a, b));
                     if d <= threshold {
                         // we only schedule the pair to update the respective
@@ -307,7 +313,11 @@ impl MotifletsIterator {
                 );
 
             // Update the neighborhoods
-            graph.update_batch(self.pairs_buffer.as_mut_slice());
+            for (a, b, d) in self.pairs_buffer.iter() {
+                if d.is_finite() && !a.overlaps(b, exclusion_zone) {
+                    graph.insert(*d, *a as usize, *b as usize);
+                }
+            }
         } // while there are collisions
         debug!("collisions at prefix {}: {}", prefix, cnt_candidates);
     }
@@ -319,28 +329,41 @@ impl MotifletsIterator {
         let previous_prefix = self.previous_prefix;
         let previous_prefix_repetitions = self.previous_prefix_repetitions;
         let rep = self.rep;
-        let mut failure_probabilities = vec![1.0; self.max_k];
+        let mut failure_probabilities = vec![1.0; self.max_k + 1];
 
-        // first we update the best motiflets
-        self.graph.update_extents(&self.ts);
-        let min_extents = self.graph.min_extents();
-        let mut thresholds = Vec::with_capacity(self.max_k);
-        for k in 0..self.max_k {
-            let (extent, root_idx, emitted) = &mut self.best_motiflet[k];
-            if !*emitted {
-                if min_extents[k].0 < *extent {
-                    *extent = min_extents[k].0;
-                    *root_idx = min_extents[k].1;
+        for (dist, ids) in self.graph.neighborhoods() {
+            let fp = self.index.failure_probability(
+                dist,
+                rep,
+                prefix,
+                previous_prefix,
+                previous_prefix_repetitions,
+            );
+            if fp > self.delta && self.best_motiflet.iter().any(|tup| tup.0.is_finite()) {
+                // we don't work on data that cannot be confirmed yet
+                self.next_to_confirm.replace(dist);
+                break;
+            }
+            // FIXME: maybe the following line can be optimized a bit
+            let extent = compute_extent(&self.ts, &ids);
+            let k = ids.len();
+            if k <= self.max_k {
+                let (best_extent, best_indices, emitted) = &mut self.best_motiflet[k];
+                if !*emitted && extent < *best_extent {
+                    *best_extent = extent;
+                    *best_indices = ids;
                 }
-                thresholds.push(*extent);
-            } else {
-                thresholds.push(Distance::infinity());
+            }
+            if let Some(max_extent) = self.best_motiflet.iter().map(|tup| tup.0).max() {
+                if max_extent < dist {
+                    break;
+                }
             }
         }
 
         // finally, we possibly output the points
-        for k in 0..self.max_k {
-            let (extent, root_idx, emitted) = &mut self.best_motiflet[k];
+        for k in 0..=self.max_k {
+            let (extent, indices, emitted) = &mut self.best_motiflet[k];
             if !*emitted && extent.0.is_finite() {
                 let fp = self.index.failure_probability(
                     *extent,
@@ -358,18 +381,12 @@ impl MotifletsIterator {
                 failure_probabilities[k] = fp;
 
                 if fp < self.delta {
-                    let indices = self.graph.get(*root_idx, k);
                     *emitted = true;
-                    let m = Motiflet::new(indices, extent.0);
+                    let m = Motiflet::new(indices.clone(), extent.0);
                     self.to_return.push(m);
                 }
             }
         }
-        log::trace!(
-            "Failure probability at extent {} : {}",
-            min_extents.last().unwrap().0,
-            failure_probabilities.last().unwrap()
-        );
     }
 
     pub fn next_interruptible<E, F: FnMut() -> Result<(), E>>(
@@ -386,22 +403,13 @@ impl MotifletsIterator {
                 return Ok(None);
             }
 
-            self.update_neighborhoods();
+            self.update_graph();
             self.emit_confirmed();
 
-            if self.rep % 512 == 0 {
-                debug!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
-                debug!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
-            }
-
-            let first_unconfirmed = self
-                .best_motiflet
-                .iter()
-                .filter(|tup| tup.0.is_finite())
-                .find_map(|tup| if !tup.2 { Some(tup.0) } else { None });
+            debug!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
             debug!(
                 "[{}@{}] First non confirmed distance {:?}",
-                self.rep, self.prefix, first_unconfirmed
+                self.rep, self.prefix, self.next_to_confirm
             );
 
             let next_prefix =
@@ -410,7 +418,7 @@ impl MotifletsIterator {
                     // of at least a few pairs
                     debug!("Still in the initial repetitions, continuing with the current prefix");
                     self.prefix
-                } else if let Some(first_unconfirmed) = first_unconfirmed {
+                } else if let Some(first_unconfirmed) = self.next_to_confirm {
                     let costs = self.index_stats.costs_to_confirm(
                         self.prefix,
                         first_unconfirmed,
@@ -460,7 +468,11 @@ impl MotifletsIterator {
                 self.previous_prefix.replace(self.prefix);
                 self.prefix = next_prefix;
             }
-            assert!(self.prefix > 0);
+            assert!(
+                self.prefix > 0,
+                "prefix got to zero, motiflets situation:\n{:?}",
+                self.best_motiflet
+            );
         }
 
         Ok(self.to_return.pop())
@@ -576,7 +588,7 @@ mod test {
 
         let mut iter = MotifletsIterator::new(
             Arc::clone(&ts),
-            grounds.last().unwrap().len() - 1,
+            grounds.last().unwrap().len(),
             Bytes::gbytes(8),
             0.01,
             exclusion_zone,
