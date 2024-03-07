@@ -339,7 +339,13 @@ impl MotifletsIterator {
                 previous_prefix,
                 previous_prefix_repetitions,
             );
-            if fp > self.delta && self.best_motiflet.iter().any(|tup| tup.0.is_finite()) {
+            if fp > self.delta
+                && self // this checks if there is a candidate for every motiflet support                     .best_motiflet
+                    .best_motiflet
+                    .iter()
+                    .skip(2)
+                    .all(|tup| tup.0.is_finite())
+            {
                 // we don't work on data that cannot be confirmed yet
                 self.next_to_confirm.replace(dist);
                 break;
@@ -387,6 +393,9 @@ impl MotifletsIterator {
                 }
             }
         }
+
+        self.graph
+            .remove_larger_than(self.best_motiflet.last().unwrap().0);
     }
 
     pub fn next_interruptible<E, F: FnMut() -> Result<(), E>>(
@@ -407,6 +416,7 @@ impl MotifletsIterator {
             self.emit_confirmed();
 
             debug!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
+            debug!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             debug!(
                 "[{}@{}] First non confirmed distance {:?}",
                 self.rep, self.prefix, self.next_to_confirm

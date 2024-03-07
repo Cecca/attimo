@@ -39,7 +39,14 @@ impl Graph {
         self.edges.insert((d, a, b));
     }
 
-    pub fn neighborhoods(&self) -> NeighborhoodsIter {
+    pub fn remove_larger_than(&mut self, dist: Distance) {
+        if dist.is_finite() {
+            let removed = self.edges.split_off(&(dist, 0, 0));
+            log::debug!("Removed {} edges larger than {}", removed.len(), dist);
+        }
+    }
+
+    pub fn neighborhoods(&mut self) -> NeighborhoodsIter {
         NeighborhoodsIter::from_graph(self)
     }
 }
