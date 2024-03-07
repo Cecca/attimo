@@ -332,32 +332,17 @@ impl MotifletsIterator {
         let mut failure_probabilities = vec![1.0; self.max_k + 1];
 
         for (dist, ids) in self.graph.neighborhoods() {
-            let fp = self.index.failure_probability(
-                dist,
-                rep,
-                prefix,
-                previous_prefix,
-                previous_prefix_repetitions,
-            );
-            if fp > self.delta
-                && self // this checks if there is a candidate for every motiflet support                     .best_motiflet
-                    .best_motiflet
-                    .iter()
-                    .skip(2)
-                    .all(|tup| tup.0.is_finite())
-            {
-                // we don't work on data that cannot be confirmed yet
-                self.next_to_confirm.replace(dist);
-                break;
-            }
-            // FIXME: maybe the following line can be optimized a bit
-            let extent = compute_extent(&self.ts, &ids);
             let k = ids.len();
             if k <= self.max_k {
-                let (best_extent, best_indices, emitted) = &mut self.best_motiflet[k];
-                if !*emitted && extent < *best_extent {
-                    *best_extent = extent;
-                    *best_indices = ids;
+                // `dist` is a lower bound to the extent. If it is larger than
+                // the current extent at k we can simply skip running this set of points
+                if dist < self.best_motiflet[k].0 {
+                    let extent = compute_extent(&self.ts, &ids);
+                    let (best_extent, best_indices, emitted) = &mut self.best_motiflet[k];
+                    if !*emitted && extent < *best_extent {
+                        *best_extent = extent;
+                        *best_indices = ids;
+                    }
                 }
             }
             if let Some(max_extent) = self.best_motiflet.iter().map(|tup| tup.0).max() {
@@ -371,6 +356,7 @@ impl MotifletsIterator {
         for k in 0..=self.max_k {
             let (extent, indices, emitted) = &mut self.best_motiflet[k];
             if !*emitted && extent.0.is_finite() {
+                self.next_to_confirm.replace(*extent);
                 let fp = self.index.failure_probability(
                     *extent,
                     rep,

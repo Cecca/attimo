@@ -10,7 +10,7 @@ pub struct GraphStats {
 /// This graph data structure maintains the edges in increasing order
 pub struct Graph {
     exclusion_zone: usize,
-    edges: BTreeSet<(Distance, usize, usize)>,
+    edges: Vec<(Distance, usize, usize)>,
 }
 
 impl Graph {
@@ -36,24 +36,30 @@ impl Graph {
         assert!(a < b, "{} >= {}", a, b);
         assert!(d.is_finite());
         assert!(!a.overlaps(b, self.exclusion_zone));
-        self.edges.insert((d, a, b));
+        self.edges.push((d, a, b));
     }
 
     pub fn remove_larger_than(&mut self, dist: Distance) {
         if dist.is_finite() {
-            let removed = self.edges.split_off(&(dist, 0, 0));
-            log::debug!("Removed {} edges larger than {}", removed.len(), dist);
+            let pos = match self.edges.binary_search(&(dist, 0, 0)) {
+                Ok(p) | Err(p) => p,
+            };
+            let removed = self.edges.len() - pos;
+            self.edges.truncate(pos);
+            log::debug!("Removed {} edges larger than {}", removed, dist);
         }
     }
 
     pub fn neighborhoods(&mut self) -> NeighborhoodsIter {
+        self.edges.sort_unstable();
+        self.edges.dedup();
         NeighborhoodsIter::from_graph(self)
     }
 }
 
 pub struct NeighborhoodsIter<'graph> {
     exclusion_zone: usize,
-    edges: std::collections::btree_set::Iter<'graph, (Distance, usize, usize)>,
+    edges: std::slice::Iter<'graph, (Distance, usize, usize)>,
     neighborhoods: BTreeMap<usize, BTreeSet<usize>>,
     parking: Option<(Distance, Vec<usize>)>,
 }
