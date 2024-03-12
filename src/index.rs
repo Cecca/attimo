@@ -328,7 +328,7 @@ impl LSHIndex {
         fft_data: &FFTData,
         total_repetitions: usize,
     ) -> Duration {
-        assert!(total_repetitions > self.get_repetitions());
+        assert!(total_repetitions > self.get_repetitions(), "total_repetitions {} is not > self.get_repetitions() {}", total_repetitions, self.get_repetitions());
         let dimension = ts.w;
         let n = ts.num_subsequences();
         let starting_repetitions = self.get_repetitions();

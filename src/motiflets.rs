@@ -433,13 +433,11 @@ impl MotifletsIterator {
                             first_unconfirmed, best_prefix, required_repetitions, best_cost
                         );
                     }
-                    if *required_repetitions >= self.index.get_repetitions() {
-                        debug!("Adding repetitions");
-                        self.index.add_repetitions(
-                            &self.ts,
-                            &self.fft_data,
-                            (1 + required_repetitions).next_power_of_two(),
-                        );
+                    if *required_repetitions > self.index.get_repetitions() {
+                        let new_total_repetitions: usize = (*required_repetitions)
+                            .min(self.index.get_repetitions() + rayon::current_num_threads());
+                        self.index
+                            .add_repetitions(&self.ts, &self.fft_data, new_total_repetitions);
                     }
                     best_prefix
                 } else {
