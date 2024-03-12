@@ -14,7 +14,7 @@ pub struct Graph {
     n: usize,
     exclusion_zone: usize,
     edges: Vec<(Distance, usize, usize, bool)>,
-    adjacencies: HashMap<usize, BTreeSet<(usize, Distance)>>,
+    adjacencies: HashMap<usize, Vec<(Distance, usize)>>,
 }
 
 impl Graph {
@@ -75,7 +75,7 @@ impl Graph {
 pub struct NeighborhoodsIter<'graph> {
     exclusion_zone: usize,
     edges: std::slice::Iter<'graph, (Distance, usize, usize, bool)>,
-    neighborhoods: &'graph mut HashMap<usize, BTreeSet<(usize, Distance)>>,
+    neighborhoods: &'graph mut HashMap<usize, Vec<(Distance, usize)>>,
     updated: BitVec,
     parking: Option<(Distance, Vec<usize>)>,
     cnt_emitted: usize,
@@ -106,27 +106,23 @@ impl<'graph> NeighborhoodsIter<'graph> {
         dist: Distance,
         exclusion_zone: usize,
     ) -> Option<Vec<usize>> {
-        let start = if dst < exclusion_zone {
-            (0, Distance(0.0))
-        } else {
-            (dst - exclusion_zone, Distance(0.0))
-        };
-        let end = (dst + exclusion_zone, Distance::infinity());
-        // we update the neighborhood only if the edge is new
         if new_edge || self.updated[src] {
-            self.updated.set(src, true);
-
             let neighborhood = self.neighborhoods.entry(src).or_insert_with(|| {
-                let mut set = BTreeSet::new();
-                set.insert((src, Distance(0.0)));
-                set
+                self.updated.set(src, true);
+                vec![(Distance(0.0), src)]
             });
 
-            neighborhood.retain(|(_, d)| d <= &dist);
-            if neighborhood.range(start..=end).next().is_none() {
+            let cutoff = neighborhood.partition_point(|(d, _)| d <= &dist);
+            neighborhood.truncate(cutoff);
+            if !neighborhood
+                .iter()
+                .any(|(_, x)| x.overlaps(dst, exclusion_zone))
+            {
                 // no overlap
-                neighborhood.insert((dst, dist));
-                Some(neighborhood.iter().map(|pair| pair.0).collect())
+                neighborhood.push((dist, dst));
+                self.updated.set(src, true);
+                debug_assert!(neighborhood.is_sorted_by_key(|pair| pair.0));
+                Some(neighborhood.iter().map(|pair| pair.1).collect())
             } else {
                 None
             }
