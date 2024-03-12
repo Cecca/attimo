@@ -251,7 +251,7 @@ struct MotifletsIterator {
 #[pymethods]
 impl MotifletsIterator {
     #[new]
-    #[pyo3(signature=(ts, w, max_k = 10, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234))]
+    #[pyo3(signature=(ts, w, max_k = 10, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000))]
     fn new(
         ts: Vec<f64>,
         w: usize,
@@ -260,14 +260,8 @@ impl MotifletsIterator {
         exclusion_zone: Option<usize>,
         delta: f64,
         seed: u64,
+        brute_force_threshold: usize,
     ) -> Self {
-        let brute_force_threshold: usize = std::env::var("PYATTIMO_BRUTE_FORCE_THRESHOLD")
-            .map(|s| {
-                s.parse::<usize>()
-                    .expect("cannot parse string into integer")
-            })
-            .unwrap_or(100000);
-
         let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
         let exclusion_zone = exclusion_zone.unwrap_or(w);
         assert!(
