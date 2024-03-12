@@ -22,6 +22,7 @@ flate2 = "1"
 pprof = { version = "0.13", features = ["cpp", "prost", "prost-codec"] }
 sysinfo = "0.30.5"
 once_cell = "1.19.0"
+bitvec = "1.0.1"
 
 [profile.release]
 debug = true

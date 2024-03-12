@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use bitvec::prelude::*;
+
 use crate::{knn::Distance, timeseries::Overlaps};
 
 #[derive(Clone, Copy, Debug)]
@@ -9,14 +11,16 @@ pub struct GraphStats {
 
 /// This graph data structure maintains the edges in increasing order
 pub struct Graph {
+    n: usize,
     exclusion_zone: usize,
     edges: Vec<(Distance, usize, usize, bool)>,
-    adjacencies: HashMap<usize, (bool, BTreeSet<(usize, Distance)>)>,
+    adjacencies: HashMap<usize, BTreeSet<(usize, Distance)>>,
 }
 
 impl Graph {
-    pub fn new(exclusion_zone: usize) -> Self {
+    pub fn new(n: usize, exclusion_zone: usize) -> Self {
         Self {
+            n,
             exclusion_zone,
             edges: Default::default(),
             adjacencies: Default::default(),
@@ -71,21 +75,22 @@ impl Graph {
 pub struct NeighborhoodsIter<'graph> {
     exclusion_zone: usize,
     edges: std::slice::Iter<'graph, (Distance, usize, usize, bool)>,
-    neighborhoods: &'graph mut HashMap<usize, (bool, BTreeSet<(usize, Distance)>)>,
+    neighborhoods: &'graph mut HashMap<usize, BTreeSet<(usize, Distance)>>,
+    updated: BitVec,
     parking: Option<(Distance, Vec<usize>)>,
     cnt_emitted: usize,
 }
 impl<'graph> NeighborhoodsIter<'graph> {
     fn from_graph(graph: &'graph mut Graph) -> Self {
         let neighborhoods = &mut graph.adjacencies;
-        for nn in neighborhoods.values_mut() {
-            nn.0 = false; // reset the "updated" flags
-        }
+        let mut updated = BitVec::new();
+        updated.resize(graph.n, false);
 
         Self {
             exclusion_zone: graph.exclusion_zone,
             edges: graph.edges.iter(),
             neighborhoods,
+            updated,
             parking: None,
             cnt_emitted: 0,
         }
@@ -107,20 +112,21 @@ impl<'graph> NeighborhoodsIter<'graph> {
             (dst - exclusion_zone, Distance(0.0))
         };
         let end = (dst + exclusion_zone, Distance::infinity());
-        let neighborhood = self.neighborhoods.entry(src).or_insert_with(|| {
-            let mut set = BTreeSet::new();
-            set.insert((src, Distance(0.0)));
-            (true, set)
-        });
-
         // we update the neighborhood only if the edge is new
-        if new_edge || neighborhood.0 {
-            neighborhood.1.retain(|(_, d)| d <= &dist);
-            if neighborhood.1.range(start..=end).next().is_none() {
+        if new_edge || self.updated[src] {
+            self.updated.set(src, true);
+
+            let neighborhood = self.neighborhoods.entry(src).or_insert_with(|| {
+                let mut set = BTreeSet::new();
+                set.insert((src, Distance(0.0)));
+                set
+            });
+
+            neighborhood.retain(|(_, d)| d <= &dist);
+            if neighborhood.range(start..=end).next().is_none() {
                 // no overlap
-                neighborhood.1.insert((dst, dist));
-                neighborhood.0 = true;
-                Some(neighborhood.1.iter().map(|pair| pair.0).collect())
+                neighborhood.insert((dst, dist));
+                Some(neighborhood.iter().map(|pair| pair.0).collect())
             } else {
                 None
             }
@@ -187,7 +193,7 @@ mod test {
         let fft_data = FFTData::new(&ts);
         let mut dists = vec![0.0f64; ts.num_subsequences()];
         let mut buf = vec![0.0f64; w];
-        let mut graph = Graph::new(exclusion_zone);
+        let mut graph = Graph::new(ts.num_subsequences(), exclusion_zone);
 
         for i in 0..ts.num_subsequences() {
             ts.distance_profile(&fft_data, i, &mut dists, &mut buf);

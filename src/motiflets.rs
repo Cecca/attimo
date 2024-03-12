@@ -242,7 +242,7 @@ impl MotifletsIterator {
             fft_data,
             best_motiflet,
             next_to_confirm: None,
-            graph: Graph::new(exclusion_zone),
+            graph: Graph::new(n, exclusion_zone),
             max_k,
             to_return: Vec::new(),
             delta,
