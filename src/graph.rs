@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::{knn::Distance, timeseries::Overlaps};
 
@@ -60,7 +60,7 @@ impl Graph {
 pub struct NeighborhoodsIter<'graph> {
     exclusion_zone: usize,
     edges: std::slice::Iter<'graph, (Distance, usize, usize)>,
-    neighborhoods: BTreeMap<usize, BTreeSet<usize>>,
+    neighborhoods: HashMap<usize, BTreeSet<usize>>,
     parking: Option<(Distance, Vec<usize>)>,
 }
 impl<'graph> NeighborhoodsIter<'graph> {
@@ -68,7 +68,7 @@ impl<'graph> NeighborhoodsIter<'graph> {
         Self {
             exclusion_zone: graph.exclusion_zone,
             edges: graph.edges.iter(),
-            neighborhoods: BTreeMap::new(),
+            neighborhoods: HashMap::new(),
             parking: None,
         }
     }
