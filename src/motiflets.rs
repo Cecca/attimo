@@ -81,6 +81,7 @@ pub fn brute_force_motiflets(
     k: usize,
     exclusion_zone: usize,
 ) -> Vec<(Distance, Vec<usize>)> {
+    #[cfg(not(test))]
     debug_assert!(false, "Should run only in `release mode`");
     // pre-compute the FFT for the time series
     let fft_data = FFTData::new(ts);
@@ -271,6 +272,7 @@ impl MotifletsIterator {
         let index = &mut self.index;
         let ts = &self.ts;
         let graph = &mut self.graph;
+        graph.reset_flags();
 
         let num_collisions_threshold = ts.num_subsequence_pairs() / 2;
 

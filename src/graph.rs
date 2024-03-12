@@ -10,7 +10,8 @@ pub struct GraphStats {
 /// This graph data structure maintains the edges in increasing order
 pub struct Graph {
     exclusion_zone: usize,
-    edges: Vec<(Distance, usize, usize)>,
+    edges: Vec<(Distance, usize, usize, bool)>,
+    adjacencies: HashMap<usize, (bool, BTreeSet<(usize, Distance)>)>,
 }
 
 impl Graph {
@@ -18,6 +19,7 @@ impl Graph {
         Self {
             exclusion_zone,
             edges: Default::default(),
+            adjacencies: Default::default(),
         }
     }
 
@@ -36,12 +38,12 @@ impl Graph {
         assert!(a < b, "{} >= {}", a, b);
         assert!(d.is_finite());
         assert!(!a.overlaps(b, self.exclusion_zone));
-        self.edges.push((d, a, b));
+        self.edges.push((d, a, b, true));
     }
 
     pub fn remove_larger_than(&mut self, dist: Distance) {
         if dist.is_finite() {
-            let pos = match self.edges.binary_search(&(dist, 0, 0)) {
+            let pos = match self.edges.binary_search(&(dist, 0, 0, false)) {
                 Ok(p) | Err(p) => p,
             };
             let removed = self.edges.len() - pos;
@@ -50,26 +52,42 @@ impl Graph {
         }
     }
 
+    pub fn reset_flags(&mut self) {
+        for e in self.edges.iter_mut() {
+            e.3 = false;
+        }
+    }
+
     pub fn neighborhoods(&mut self) -> NeighborhoodsIter {
-        self.edges.sort_unstable();
-        self.edges.dedup();
+        use rayon::prelude::*;
+        self.edges.par_sort();
+        // remove duplicates ignoring the "new" flag: since false < true the effect is that
+        // edges that are duplicates because they were already inserted are not considered new
+        self.edges.dedup_by_key(|tup| (tup.0, tup.1, tup.2));
         NeighborhoodsIter::from_graph(self)
     }
 }
 
 pub struct NeighborhoodsIter<'graph> {
     exclusion_zone: usize,
-    edges: std::slice::Iter<'graph, (Distance, usize, usize)>,
-    neighborhoods: HashMap<usize, BTreeSet<usize>>,
+    edges: std::slice::Iter<'graph, (Distance, usize, usize, bool)>,
+    neighborhoods: &'graph mut HashMap<usize, (bool, BTreeSet<(usize, Distance)>)>,
     parking: Option<(Distance, Vec<usize>)>,
+    cnt_emitted: usize,
 }
 impl<'graph> NeighborhoodsIter<'graph> {
-    fn from_graph(graph: &'graph Graph) -> Self {
+    fn from_graph(graph: &'graph mut Graph) -> Self {
+        let neighborhoods = &mut graph.adjacencies;
+        for nn in neighborhoods.values_mut() {
+            nn.0 = false; // reset the "updated" flags
+        }
+
         Self {
             exclusion_zone: graph.exclusion_zone,
             edges: graph.edges.iter(),
-            neighborhoods: HashMap::new(),
+            neighborhoods,
             parking: None,
+            cnt_emitted: 0,
         }
     }
 
@@ -77,25 +95,35 @@ impl<'graph> NeighborhoodsIter<'graph> {
     /// it returns None.
     fn update_and_get(
         &mut self,
+        new_edge: bool,
         src: usize,
         dst: usize,
+        dist: Distance,
         exclusion_zone: usize,
     ) -> Option<Vec<usize>> {
         let start = if dst < exclusion_zone {
-            0
+            (0, Distance(0.0))
         } else {
-            dst - exclusion_zone
+            (dst - exclusion_zone, Distance(0.0))
         };
-        let end = dst + exclusion_zone;
+        let end = (dst + exclusion_zone, Distance::infinity());
         let neighborhood = self.neighborhoods.entry(src).or_insert_with(|| {
             let mut set = BTreeSet::new();
-            set.insert(src);
-            set
+            set.insert((src, Distance(0.0)));
+            (true, set)
         });
-        if neighborhood.range(start..=end).next().is_none() {
-            // no overlap
-            neighborhood.insert(dst);
-            Some(neighborhood.iter().copied().collect())
+
+        // we update the neighborhood only if the edge is new
+        if new_edge || neighborhood.0 {
+            neighborhood.1.retain(|(_, d)| d <= &dist);
+            if neighborhood.1.range(start..=end).next().is_none() {
+                // no overlap
+                neighborhood.1.insert((dst, dist));
+                neighborhood.0 = true;
+                Some(neighborhood.1.iter().map(|pair| pair.0).collect())
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -110,22 +138,30 @@ impl<'graph> Iterator for NeighborhoodsIter<'graph> {
         }
         let exclusion_zone = self.exclusion_zone;
 
-        while let Some(&(d, a, b)) = self.edges.next() {
-            let neighs_a = self.update_and_get(a, b, exclusion_zone);
-            let neighs_b = self.update_and_get(b, a, exclusion_zone);
+        while let Some(&(d, a, b, new_edge)) = self.edges.next() {
+            let neighs_a = self.update_and_get(new_edge, a, b, d, exclusion_zone);
+            let neighs_b = self.update_and_get(new_edge, b, a, d, exclusion_zone);
 
             match (neighs_a, neighs_b) {
                 (Some(na), Some(nb)) => {
+                    self.cnt_emitted += 2;
                     self.parking.replace((d, nb));
                     return Some((d, na));
                 }
                 (Some(nn), None) | (None, Some(nn)) => {
+                    self.cnt_emitted += 1;
                     return Some((d, nn));
                 }
                 (None, None) => (), // nothing to do in this case, we go to the next iteration
             }
         }
         None
+    }
+}
+
+impl<'graph> Drop for NeighborhoodsIter<'graph> {
+    fn drop(&mut self) {
+        log::trace!("Emitted {} neighborhoods", self.cnt_emitted);
     }
 }
 
@@ -205,4 +241,21 @@ mod test {
         dbg!(&motiflets);
         assert_eq!(motiflets.len(), max_k - 1);
     }
+}
+
+/// check that the deduplication by partial keys keeps the first entry
+#[test]
+fn dedup_with_flags() {
+    assert!(false < true);
+    let mut edges = vec![
+        (Distance(0.3), 0, 2, true),
+        (Distance(0.3), 0, 2, false),
+        (Distance(0.5), 1, 2, true),
+    ];
+
+    let expected = vec![(Distance(0.3), 0, 2, false), (Distance(0.5), 1, 2, true)];
+
+    edges.sort();
+    edges.dedup_by_key(|tup| (tup.0, tup.1, tup.2));
+    assert_eq!(edges, expected);
 }
