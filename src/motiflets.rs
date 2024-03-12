@@ -359,7 +359,7 @@ impl MotifletsIterator {
                 self.next_to_confirm.replace(*extent);
                 let fp = self.index.failure_probability(
                     *extent,
-                    rep,
+                    rep + 1, // the number of repetitions we did is the repetition index + 1
                     prefix,
                     previous_prefix,
                     previous_prefix_repetitions,
@@ -427,12 +427,10 @@ impl MotifletsIterator {
                         .enumerate()
                         .min_by(|(_, tup1), (_, tup2)| tup1.0.total_cmp(&tup2.0))
                         .unwrap();
-                    if best_prefix <= self.prefix {
-                        debug!(
-                            "Best prefix to confirm {} is {} with {} repetitions with cost {}",
-                            first_unconfirmed, best_prefix, required_repetitions, best_cost
-                        );
-                    }
+                    debug!(
+                        "Best prefix to confirm {} is {} with {} repetitions with cost {}",
+                        first_unconfirmed, best_prefix, required_repetitions, best_cost
+                    );
                     if *required_repetitions > self.index.get_repetitions() {
                         let new_total_repetitions: usize = (*required_repetitions)
                             .min(self.index.get_repetitions() + rayon::current_num_threads());
@@ -449,15 +447,19 @@ impl MotifletsIterator {
                 self.rep += 1;
                 debug!("Advancing to repetition {}", self.rep);
                 if self.rep >= self.index.get_repetitions() {
-                    self.previous_prefix_repetitions.replace(self.rep);
+                    self.previous_prefix_repetitions.replace(self.rep + 1);
                     self.rep = 0;
                     self.previous_prefix.replace(self.prefix);
                     self.prefix -= 1;
-                    debug!("Not enough repetitions, going to prefix {}", self.prefix);
+                    debug!(
+                        "Not enough repetitions ({}), going to prefix {}",
+                        self.index.get_repetitions(),
+                        self.prefix
+                    );
                 }
             } else {
                 // Go to the suggested prefix, and start from the first repetition there
-                self.previous_prefix_repetitions.replace(self.rep);
+                self.previous_prefix_repetitions.replace(self.rep + 1);
                 self.rep = 0;
                 self.previous_prefix.replace(self.prefix);
                 self.prefix = next_prefix;
