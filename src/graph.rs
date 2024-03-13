@@ -269,7 +269,7 @@ impl AdjacencyGraph {
         self.updated.set(b, true);
     }
 
-    fn reset_flags(&mut self) {
+    pub fn reset_flags(&mut self) {
         self.updated.fill(false);
     }
 
@@ -287,9 +287,10 @@ impl AdjacencyGraph {
     }
 
     pub fn neighborhoods(
-        &self,
+        &mut self,
         k: usize,
     ) -> impl Iterator<Item = (Vec<usize>, Vec<Distance>)> + '_ {
+        self.remove_duplicates();
         let exclusion_zone = self.exclusion_zone;
         let updated = &self.updated;
         self.neighborhoods
@@ -303,7 +304,7 @@ impl AdjacencyGraph {
                 let mut distances = Vec::new();
                 indices.push(i);
                 distances.push(Distance(0.0));
-                let mut j = 1;
+                let mut j = 0;
                 while indices.len() < k && j < nn.len() {
                     // find the non-overlapping subsequences
                     let (jd, jj) = nn[j];

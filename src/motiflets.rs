@@ -1,6 +1,6 @@
 use crate::allocator::*;
 use crate::distance::zeucl;
-use crate::graph::Graph;
+use crate::graph::AdjacencyGraph;
 use crate::index::INITIAL_REPETITIONS;
 use crate::{
     index::{IndexStats, LSHIndex},
@@ -177,7 +177,7 @@ pub struct MotifletsIterator {
     fft_data: FFTData,
     best_motiflet: Vec<(Distance, Vec<usize>, bool)>,
     next_to_confirm: Option<Distance>,
-    graph: Graph,
+    graph: AdjacencyGraph,
     to_return: Vec<Motiflet>,
     delta: f64,
     exclusion_zone: usize,
@@ -242,7 +242,7 @@ impl MotifletsIterator {
             fft_data,
             best_motiflet,
             next_to_confirm: None,
-            graph: Graph::new(n, exclusion_zone),
+            graph: AdjacencyGraph::new(n, exclusion_zone),
             max_k,
             to_return: Vec::new(),
             delta,
@@ -333,25 +333,29 @@ impl MotifletsIterator {
         let rep = self.rep;
         let mut failure_probabilities = vec![1.0; self.max_k + 1];
 
-        for (dist, ids) in self.graph.neighborhoods() {
-            let k = ids.len();
-            if k <= self.max_k {
-                // `dist` is a lower bound to the extent. If it is larger than
-                // the current extent at k we can simply skip running this set of points
-                if dist < self.best_motiflet[k].0 {
-                    let extent = compute_extent(&self.ts, &ids);
-                    let (best_extent, best_indices, emitted) = &mut self.best_motiflet[k];
-                    if !*emitted && extent < *best_extent {
-                        *best_extent = extent;
-                        *best_indices = ids;
+        for (neighborhoods_ids, dists) in self.graph.neighborhoods(self.max_k + 1) {
+            for i in 1..neighborhoods_ids.len() {
+                let ids = &neighborhoods_ids[..=i];
+                let dist = dists[i];
+                let k = ids.len();
+                if k <= self.max_k {
+                    // `dist` is a lower bound to the extent. If it is larger than
+                    // the current extent at k we can simply skip running this set of points
+                    if dist < self.best_motiflet[k].0 {
+                        let extent = compute_extent(&self.ts, &ids);
+                        let (best_extent, best_indices, emitted) = &mut self.best_motiflet[k];
+                        if !*emitted && extent < *best_extent {
+                            *best_extent = extent;
+                            *best_indices = ids.to_owned();
+                        }
                     }
                 }
             }
-            if let Some(max_extent) = self.best_motiflet.iter().map(|tup| tup.0).max() {
-                if max_extent < dist {
-                    break;
-                }
-            }
+            // if let Some(max_extent) = self.best_motiflet.iter().map(|tup| tup.0).max() {
+            //     if max_extent < dist {
+            //         break;
+            //     }
+            // }
         }
 
         // finally, we possibly output the points
@@ -382,8 +386,8 @@ impl MotifletsIterator {
             }
         }
 
-        self.graph
-            .remove_larger_than(self.best_motiflet.last().unwrap().0);
+        // self.graph
+        //     .remove_larger_than(self.best_motiflet.last().unwrap().0);
     }
 
     pub fn next_interruptible<E, F: FnMut() -> Result<(), E>>(
@@ -403,7 +407,7 @@ impl MotifletsIterator {
             self.update_graph();
             self.emit_confirmed();
 
-            debug!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
+            // debug!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
             debug!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             debug!(
                 "[{}@{}] First non confirmed distance {:?}",
