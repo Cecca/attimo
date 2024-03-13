@@ -118,6 +118,9 @@ pub fn zdot(a: &[f64], ma: f64, sda: f64, b: &[f64], mb: f64, sdb: f64) -> f64 {
         .sum::<f64>() as f64;
     let ma = Simd::<f64, LANES>::splat(ma);
     let mb = Simd::<f64, LANES>::splat(mb);
+    // OPTIMIZE: looking at the profile, the entire time of this function
+    // is spent running `from_slice`, which in turns ultimately calls
+    // `copy_non_overlapping`.
     let part = ac
         .map(Simd::<f64, LANES>::from_slice)
         .zip(bc.map(Simd::<f64, LANES>::from_slice))

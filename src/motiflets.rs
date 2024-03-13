@@ -334,15 +334,20 @@ impl MotifletsIterator {
         let mut failure_probabilities = vec![1.0; self.max_k + 1];
 
         for (neighborhoods_ids, dists) in self.graph.neighborhoods(self.max_k + 1) {
-            for i in 1..neighborhoods_ids.len() {
-                let ids = &neighborhoods_ids[..=i];
-                let dist = dists[i];
-                let k = ids.len();
-                if k <= self.max_k {
-                    // `dist` is a lower bound to the extent. If it is larger than
-                    // the current extent at k we can simply skip running this set of points
-                    if dist < self.best_motiflet[k].0 {
-                        let extent = compute_extent(&self.ts, &ids);
+            // compute all the extents in one go if one of the
+            // distances is smaller than the correponding extent.
+            if dists
+                .iter()
+                .skip(1)
+                .zip(self.best_motiflet.iter().skip(1))
+                .any(|(d, bm)| *d < bm.0)
+            {
+                let extents = compute_extents(&self.ts, &neighborhoods_ids);
+                for i in 1..neighborhoods_ids.len() {
+                    let ids = &neighborhoods_ids[..=i];
+                    let extent = extents[i];
+                    let k = ids.len();
+                    if k <= self.max_k {
                         let (best_extent, best_indices, emitted) = &mut self.best_motiflet[k];
                         if !*emitted && extent < *best_extent {
                             *best_extent = extent;
@@ -351,11 +356,6 @@ impl MotifletsIterator {
                     }
                 }
             }
-            // if let Some(max_extent) = self.best_motiflet.iter().map(|tup| tup.0).max() {
-            //     if max_extent < dist {
-            //         break;
-            //     }
-            // }
         }
 
         // finally, we possibly output the points
