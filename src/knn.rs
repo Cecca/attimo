@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use bitvec::vec::BitVec;
 use thread_local::ThreadLocal;
 
 use crate::{

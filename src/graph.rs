@@ -1,8 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-
-use bitvec::prelude::*;
-
 use crate::{knn::Distance, timeseries::Overlaps};
+use bitvec::prelude::*;
+use rayon::prelude::*;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug)]
 pub struct GraphStats {
@@ -242,6 +241,80 @@ mod test {
         }
         dbg!(&motiflets);
         assert_eq!(motiflets.len(), max_k - 1);
+    }
+}
+
+pub struct AdjacencyGraph {
+    exclusion_zone: usize,
+    neighborhoods: Vec<Vec<(Distance, usize)>>,
+    updated: BitVec,
+}
+
+impl AdjacencyGraph {
+    pub fn new(n: usize, exclusion_zone: usize) -> Self {
+        let mut updated = BitVec::new();
+        updated.resize(n, false);
+        Self {
+            exclusion_zone,
+            neighborhoods: vec![Default::default(); n],
+            updated,
+        }
+    }
+
+    pub fn insert(&mut self, d: Distance, a: usize, b: usize) {
+        // duplicates will be handled later
+        self.neighborhoods[a].push((d, b));
+        self.neighborhoods[b].push((d, a));
+        self.updated.set(a, true);
+        self.updated.set(b, true);
+    }
+
+    fn reset_flags(&mut self) {
+        self.updated.fill(false);
+    }
+
+    fn remove_duplicates(&mut self) {
+        let updated = &self.updated;
+        self.neighborhoods
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(i, nn)| {
+                if updated[i] {
+                    nn.sort();
+                    nn.dedup();
+                }
+            });
+    }
+
+    pub fn neighborhoods(
+        &self,
+        k: usize,
+    ) -> impl Iterator<Item = (Vec<usize>, Vec<Distance>)> + '_ {
+        let exclusion_zone = self.exclusion_zone;
+        let updated = &self.updated;
+        self.neighborhoods
+            .iter()
+            .enumerate()
+            .filter_map(move |(i, nn)| {
+                if !updated[i] {
+                    return None;
+                }
+                let mut indices = Vec::new();
+                let mut distances = Vec::new();
+                indices.push(i);
+                distances.push(Distance(0.0));
+                let mut j = 1;
+                while indices.len() < k && j < nn.len() {
+                    // find the non-overlapping subsequences
+                    let (jd, jj) = nn[j];
+                    if !jj.overlaps(indices.as_slice(), exclusion_zone) {
+                        indices.push(jj);
+                        distances.push(jd);
+                    }
+                    j += 1;
+                }
+                Some((indices, distances))
+            })
     }
 }
 
