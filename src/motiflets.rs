@@ -407,7 +407,7 @@ impl MotifletsIterator {
             self.update_graph();
             self.emit_confirmed();
 
-            // debug!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
+            debug!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
             debug!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             debug!(
                 "[{}@{}] First non confirmed distance {:?}",

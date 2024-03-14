@@ -6,6 +6,8 @@ use std::collections::HashMap;
 #[derive(Clone, Copy, Debug)]
 pub struct GraphStats {
     num_edges: usize,
+    num_nodes: usize,
+    max_neighborhood_size: usize,
 }
 
 /// This graph data structure maintains the edges in increasing order
@@ -26,11 +28,11 @@ impl Graph {
         }
     }
 
-    pub fn stats(&self) -> GraphStats {
-        GraphStats {
-            num_edges: self.num_edges(),
-        }
-    }
+    // pub fn stats(&self) -> GraphStats {
+    //     GraphStats {
+    //         num_edges: self.num_edges(),
+    //     }
+    // }
 
     pub fn num_edges(&self) -> usize {
         self.edges.len()
@@ -258,6 +260,21 @@ impl AdjacencyGraph {
             exclusion_zone,
             neighborhoods: vec![Default::default(); n],
             updated,
+        }
+    }
+
+    pub fn stats(&self) -> GraphStats {
+        let num_nodes = self
+            .neighborhoods
+            .iter()
+            .filter(|nn| !nn.is_empty())
+            .count();
+        let num_edges = self.neighborhoods.iter().map(|nn| nn.len()).sum::<usize>();
+        let max_neighborhood_size = self.neighborhoods.iter().map(|nn| nn.len()).max().unwrap();
+        GraphStats {
+            num_nodes,
+            num_edges,
+            max_neighborhood_size,
         }
     }
 
