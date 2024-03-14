@@ -1,13 +1,14 @@
-use crate::{knn::Distance, timeseries::Overlaps};
+use crate::{allocator::Bytes, knn::Distance, timeseries::Overlaps};
 use bitvec::prelude::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct GraphStats {
-    num_edges: usize,
-    num_nodes: usize,
-    max_neighborhood_size: usize,
+    pub num_edges: usize,
+    pub num_nodes: usize,
+    pub max_neighborhood_size: usize,
+    pub used_memory: Bytes,
 }
 
 /// This graph data structure maintains the edges in increasing order
@@ -271,10 +272,19 @@ impl AdjacencyGraph {
             .count();
         let num_edges = self.neighborhoods.iter().map(|nn| nn.len()).sum::<usize>();
         let max_neighborhood_size = self.neighborhoods.iter().map(|nn| nn.len()).max().unwrap();
+        let entrysize = std::mem::size_of::<Distance>() + std::mem::size_of::<usize>();
+        let used_memory = self
+            .neighborhoods
+            .iter()
+            .map(|nn| nn.len() * entrysize)
+            .sum::<usize>();
+        let used_memory = Bytes(used_memory);
+
         GraphStats {
             num_nodes,
             num_edges,
             max_neighborhood_size,
+            used_memory,
         }
     }
 

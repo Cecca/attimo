@@ -1,11 +1,10 @@
 use crate::allocator::*;
 use crate::distance::zeucl;
-use crate::graph::AdjacencyGraph;
+use crate::graph::{AdjacencyGraph, GraphStats};
 use crate::index::INITIAL_REPETITIONS;
 use crate::{
     index::{IndexStats, LSHIndex},
     knn::*,
-    // lsh::{ColumnBuffers, HashCollection, HashCollectionStats, Hasher, RepetitionIndex},
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 use log::*;
@@ -169,6 +168,7 @@ impl Motiflet {
 #[derive(Debug, Clone, Default)]
 pub struct MotifletsIteratorStats {
     cnt_candidates: usize,
+    graph_stats: GraphStats,
 }
 
 pub struct MotifletsIterator {
@@ -407,7 +407,8 @@ impl MotifletsIterator {
             self.update_graph();
             self.emit_confirmed();
 
-            debug!("[{}@{}] {:?}", self.rep, self.prefix, self.graph.stats());
+            self.stats.graph_stats = self.graph.stats();
+            debug!("[{}@{}] {:#?}", self.rep, self.prefix, self.stats);
             debug!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             debug!(
                 "[{}@{}] First non confirmed distance {:?}",
