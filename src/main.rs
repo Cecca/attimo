@@ -137,6 +137,7 @@ fn main() -> Result<()> {
                 log::info!("System has {} memory, using {} at most", sysmem, mem);
                 mem
             };
+            let start = Instant::now();
             let exclusion_zone = ts.w / 2;
             MotifletsIterator::new(
                 Arc::new(ts),
@@ -149,7 +150,8 @@ fn main() -> Result<()> {
             )
             .map(|m| {
                 eprintln!(
-                    "discovered motiflet with support {} and extent {}",
+                    "[{:?}] discovered motiflet with support {} and extent {}",
+                    start.elapsed(),
                     m.support(),
                     m.extent()
                 );

@@ -170,6 +170,8 @@ impl Motiflet {
 #[derive(Debug, Clone, Default)]
 pub struct MotifletsIteratorStats {
     cnt_candidates: usize,
+    cnt_skipped: usize,
+    cnt_truncated: usize,
     timeseries_stats: TimeseriesStats,
     graph_stats: GraphStats,
 }
@@ -300,30 +302,36 @@ impl MotifletsIterator {
             self.stats.cnt_candidates += cnt;
             let t = Instant::now();
             // Fixup the distances
-            let (_d, collisions_below_threshold): (f64, usize) = self.pairs_buffer[0..cnt]
+            let (truncated, collisions_below_threshold, skip): (usize, usize, usize) = self
+                .pairs_buffer[0..cnt]
                 .par_iter_mut()
                 .with_min_len(1024)
                 .map(|(a, b, dist)| {
                     let a = *a as usize;
                     let b = *b as usize;
                     assert!(a < b);
-                    if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
+                    if graph.has_edge(a, b) {
+                        *dist = Distance(std::f64::INFINITY);
+                        (0, 0, 1)
+                    } else if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
                         let d = Distance(d);
                         // we only schedule the pair to update the respective
                         // neighborhoods if it can result in a better motiflet.
                         *dist = d;
-                        (d.0, 1)
+                        (0, 1, 0)
                     } else {
                         *dist = Distance(std::f64::INFINITY);
-                        (0.0, 0)
+                        (1, 0, 0)
                     }
                 })
                 .reduce(
-                    || (0.0f64, 0usize),
-                    |accum, pair| (accum.0 + pair.0, accum.1 + pair.1),
+                    || (0usize, 0usize, 0usize),
+                    |accum, tup| (accum.0 + tup.0, accum.1 + tup.1, accum.2 + tup.2),
                 );
             cnt_below_threshold += collisions_below_threshold;
             time_distance_computation += t.elapsed();
+            self.stats.cnt_skipped += skip;
+            self.stats.cnt_truncated += truncated;
 
             // Update the neighborhoods
             for (a, b, d) in self.pairs_buffer.iter() {

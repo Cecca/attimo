@@ -99,6 +99,10 @@ impl AdjacencyGraph {
         self.updated.set(b, true);
     }
 
+    pub fn has_edge(&self, a: usize, b: usize) -> bool {
+        self.neighborhoods[a].iter().any(|(_, x)| *x == b)
+    }
+
     pub fn reset_flags(&mut self) {
         self.updated.fill(false);
         self.neighborhoods.par_iter_mut().for_each(|nn| {
