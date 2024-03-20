@@ -1,5 +1,5 @@
 use crate::allocator::*;
-use crate::distance::zeucl;
+use crate::distance::{zeucl, zeucl_threshold};
 use crate::graph::{AdjacencyGraph, GraphStats};
 use crate::index::INITIAL_REPETITIONS;
 use crate::{
@@ -9,6 +9,7 @@ use crate::{
 };
 use log::*;
 use rayon::prelude::*;
+use std::time::Duration;
 use std::{sync::Arc, time::Instant};
 
 fn k_extents_bf(
@@ -276,9 +277,11 @@ impl MotifletsIterator {
 
         let num_collisions_threshold = ts.num_subsequence_pairs() / 2;
 
-        let threshold = self.best_motiflet[self.max_k - 1].0;
+        let threshold = self.best_motiflet[self.max_k].0;
 
+        let mut time_distance_computation = Duration::default();
         let mut cnt_candidates = 0;
+        let mut cnt_below_threshold = 0;
         let mut enumerator = index.collisions(rep, prefix, self.previous_prefix);
         while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone) {
             cnt_candidates += cnt;
@@ -290,16 +293,17 @@ impl MotifletsIterator {
                 );
             }
             self.stats.cnt_candidates += cnt;
+            let t = Instant::now();
             // Fixup the distances
-            let (_d, _c): (f64, usize) = self.pairs_buffer[0..cnt]
+            let (_d, collisions_below_threshold): (f64, usize) = self.pairs_buffer[0..cnt]
                 .par_iter_mut()
                 .with_min_len(1024)
                 .map(|(a, b, dist)| {
                     let a = *a as usize;
                     let b = *b as usize;
                     assert!(a < b);
-                    let d = Distance(zeucl(ts, a, b));
-                    if d <= threshold {
+                    if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
+                        let d = Distance(d);
                         // we only schedule the pair to update the respective
                         // neighborhoods if it can result in a better motiflet.
                         *dist = d;
@@ -313,6 +317,8 @@ impl MotifletsIterator {
                     || (0.0f64, 0usize),
                     |accum, pair| (accum.0 + pair.0, accum.1 + pair.1),
                 );
+            cnt_below_threshold += collisions_below_threshold;
+            time_distance_computation += t.elapsed();
 
             // Update the neighborhoods
             for (a, b, d) in self.pairs_buffer.iter() {
@@ -321,7 +327,14 @@ impl MotifletsIterator {
                 }
             }
         } // while there are collisions
-        debug!("collisions at prefix {}: {}", prefix, cnt_candidates);
+        debug!(
+            "collisions at prefix {}: {} of which {} below threshold {}",
+            prefix, cnt_candidates, cnt_below_threshold, threshold
+        );
+        debug!(
+            "time to compute distances in update_graph: {:?}",
+            time_distance_computation
+        );
     }
 
     /// adds to `self.to_return` the motiflets that can
@@ -333,16 +346,22 @@ impl MotifletsIterator {
         let rep = self.rep;
         let mut failure_probabilities = vec![1.0; self.max_k + 1];
 
+        let mut time_extents = Duration::from_secs(0);
+        let mut cnt_extents = 0;
+        let mut cnt_skipped = 0;
         for (neighborhoods_ids, dists) in self.graph.neighborhoods(self.max_k + 1) {
             // compute all the extents in one go if one of the
             // distances is smaller than the correponding extent.
             if dists
                 .iter()
                 .skip(1)
-                .zip(self.best_motiflet.iter().skip(1))
+                .zip(self.best_motiflet.iter().skip(2))
                 .any(|(d, bm)| *d < bm.0)
             {
+                cnt_extents += 1;
+                let t = Instant::now();
                 let extents = compute_extents(&self.ts, &neighborhoods_ids);
+                time_extents += t.elapsed();
                 for i in 1..neighborhoods_ids.len() {
                     let ids = &neighborhoods_ids[..=i];
                     let extent = extents[i];
@@ -355,8 +374,16 @@ impl MotifletsIterator {
                         }
                     }
                 }
+            } else {
+                cnt_skipped += 1;
             }
         }
+        log::debug!(
+            "Time spent computing {} extents: {:?} ({} skipped)",
+            cnt_extents,
+            time_extents,
+            cnt_skipped
+        );
 
         // finally, we possibly output the points
         for k in 0..=self.max_k {

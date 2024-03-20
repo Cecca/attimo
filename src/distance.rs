@@ -36,7 +36,6 @@ pub fn zeucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     (2.0 * ts.w as f64 - 2.0 * dotp).sqrt()
 }
 
-// TODO: add thresholding and exit early if the threshold is exceeded
 pub fn zeucl_slow(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
     let mut s = 0.0;
     let mi = ts.mean(i);
@@ -77,12 +76,14 @@ pub fn zeucl_threshold(ts: &WindowedTimeseries, i: usize, j: usize, threshold: f
         }
     }
 
+    let off = simd_mi * simd_sj - simd_mj * simd_si;
     for (x, y) in i_chunks.zip(j_chunks) {
         let x = f64x4::from_slice(x);
         let y = f64x4::from_slice(y);
-        let d = ((x - simd_mi) / simd_si) - ((y - simd_mj) / simd_sj);
+        // let d = ((x - simd_mi) / simd_si) - ((y - simd_mj) / simd_sj);
+        let d = x * simd_sj - y * simd_si - off;
         let d = d * d;
-        s += d.as_array().iter().sum::<f64>();
+        s += d.as_array().iter().sum::<f64>() / (si * sj * si * sj);
         if s > threshold {
             return None;
         }
