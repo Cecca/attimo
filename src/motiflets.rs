@@ -1,7 +1,8 @@
 use crate::allocator::*;
-use crate::distance::{zeucl, zeucl_threshold};
+use crate::distance::zeucl_threshold;
 use crate::graph::{AdjacencyGraph, GraphStats};
 use crate::index::INITIAL_REPETITIONS;
+use crate::timeseries::TimeseriesStats;
 use crate::{
     index::{IndexStats, LSHIndex},
     knn::*,
@@ -169,6 +170,7 @@ impl Motiflet {
 #[derive(Debug, Clone, Default)]
 pub struct MotifletsIteratorStats {
     cnt_candidates: usize,
+    timeseries_stats: TimeseriesStats,
     graph_stats: GraphStats,
 }
 
@@ -238,6 +240,9 @@ impl MotifletsIterator {
         let first_meaningful_prefix = index_stats.first_meaningful_prefix();
         assert!(first_meaningful_prefix > 0);
 
+        let mut stats = MotifletsIteratorStats::default();
+        stats.timeseries_stats = ts.stats();
+
         Self {
             ts,
             fft_data,
@@ -256,7 +261,7 @@ impl MotifletsIterator {
             prefix: first_meaningful_prefix,
             previous_prefix: None,
             previous_prefix_repetitions: None,
-            stats: MotifletsIteratorStats::default(),
+            stats,
         }
     }
 

@@ -522,7 +522,7 @@ impl<'index> CollisionEnumerator<'index> {
                         .map(|pp| ha.prefix_eq(&hb, pp))
                         .unwrap_or(false)
                         && 
-                        // are the corresponding repetitions overlapping?
+                        // are the corresponding subsequences overlapping?
                         !a.overlaps(b, exclusion_zone)
                     {
                         output[idx] = (a.min(b), a.max(b), Distance(f64::INFINITY));
