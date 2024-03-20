@@ -291,7 +291,7 @@ impl MotifletsIterator {
             }
             self.stats.cnt_candidates += cnt;
             // Fixup the distances
-            let (d, c): (f64, usize) = self.pairs_buffer[0..cnt]
+            let (_d, _c): (f64, usize) = self.pairs_buffer[0..cnt]
                 .par_iter_mut()
                 .with_min_len(1024)
                 .map(|(a, b, dist)| {

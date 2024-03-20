@@ -1,12 +1,9 @@
-use std::collections::BTreeSet;
-
-use bitvec::vec::BitVec;
-use thread_local::ThreadLocal;
-
 use crate::{
     distance::zeucl,
     timeseries::{Overlaps, WindowedTimeseries},
 };
+use std::collections::BTreeSet;
+use thread_local::ThreadLocal;
 
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
 pub struct Distance(pub f64);
