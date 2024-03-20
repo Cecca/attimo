@@ -10,9 +10,49 @@ pub struct GraphStats {
     pub used_memory: Bytes,
 }
 
+#[derive(Default, Clone, Copy)]
+struct DistanceWithFlag(f64);
+impl DistanceWithFlag {
+    fn distance(&self) -> Distance {
+        Distance(self.0.abs())
+    }
+    fn flag(&self) -> bool {
+        self.0.is_sign_positive()
+    }
+    fn set_flag(&mut self, flag: bool) {
+        let flip_sign = flag != self.flag();
+        if flip_sign {
+            self.0 = -self.0;
+        }
+    }
+}
+impl From<Distance> for DistanceWithFlag {
+    fn from(value: Distance) -> Self {
+        Self(value.0)
+    }
+}
+impl Eq for DistanceWithFlag {}
+impl PartialEq for DistanceWithFlag {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+impl Ord for DistanceWithFlag {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.distance()
+            .cmp(&other.distance())
+            .then(self.flag().cmp(&other.flag()))
+    }
+}
+impl PartialOrd for DistanceWithFlag {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 pub struct AdjacencyGraph {
     exclusion_zone: usize,
-    neighborhoods: Vec<Vec<(Distance, usize)>>,
+    neighborhoods: Vec<Vec<(DistanceWithFlag, usize)>>,
     updated: BitVec,
 }
 
@@ -53,14 +93,19 @@ impl AdjacencyGraph {
 
     pub fn insert(&mut self, d: Distance, a: usize, b: usize) {
         // duplicates will be handled later
-        self.neighborhoods[a].push((d, b));
-        self.neighborhoods[b].push((d, a));
+        self.neighborhoods[a].push((d.into(), b));
+        self.neighborhoods[b].push((d.into(), a));
         self.updated.set(a, true);
         self.updated.set(b, true);
     }
 
     pub fn reset_flags(&mut self) {
         self.updated.fill(false);
+        self.neighborhoods.par_iter_mut().for_each(|nn| {
+            for x in nn.iter_mut() {
+                x.0.set_flag(false);
+            }
+        });
     }
 
     fn remove_duplicates(&mut self) {
@@ -71,7 +116,7 @@ impl AdjacencyGraph {
             .for_each(|(i, nn)| {
                 if updated[i] {
                     nn.sort();
-                    nn.dedup();
+                    nn.dedup_by_key(|pair| pair.1);
                 }
             });
     }
@@ -94,17 +139,23 @@ impl AdjacencyGraph {
                 let mut distances = Vec::new();
                 indices.push(i);
                 distances.push(Distance(0.0));
+                let mut emit = false;
                 let mut j = 0;
                 while indices.len() < k && j < nn.len() {
                     // find the non-overlapping subsequences
                     let (jd, jj) = nn[j];
                     if !jj.overlaps(indices.as_slice(), exclusion_zone) {
                         indices.push(jj);
-                        distances.push(jd);
+                        distances.push(jd.distance());
+                        emit |= jd.flag(); // collect if there is at least one updated edge
                     }
                     j += 1;
                 }
-                Some((indices, distances))
+                if emit {
+                    Some((indices, distances))
+                } else {
+                    None
+                }
             })
     }
 }
