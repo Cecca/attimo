@@ -59,6 +59,7 @@ pub fn overlap_count<T: for<'a> Overlaps<&'a T>>(
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TimeseriesStats {
     pub num_subsequences: usize,
+    pub num_subsequence_pairs: usize,
     pub used_memory: Bytes,
 }
 
@@ -93,6 +94,7 @@ impl WindowedTimeseries {
     pub fn stats(&self) -> TimeseriesStats {
         TimeseriesStats {
             num_subsequences: self.num_subsequences(),
+            num_subsequence_pairs: self.num_subsequence_pairs(),
             used_memory: self.memory(),
         }
     }
