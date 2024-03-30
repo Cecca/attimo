@@ -402,7 +402,6 @@ impl MotifletsIterator {
         for k in 0..=self.max_k {
             let (extent, indices, emitted) = &mut self.best_motiflet[k];
             if !*emitted && extent.0.is_finite() {
-                self.next_to_confirm.replace(*extent);
                 let fp = self.index.failure_probability(
                     *extent,
                     rep + 1, // the number of repetitions we did is the repetition index + 1
@@ -423,6 +422,12 @@ impl MotifletsIterator {
                     let m = Motiflet::new(indices.clone(), extent.0);
                     self.to_return.push(m);
                 }
+            }
+        }
+        for k in 0..=self.max_k {
+            if !self.best_motiflet[k].2 {
+                self.next_to_confirm.replace(self.best_motiflet[k].0);
+                break;
             }
         }
 
