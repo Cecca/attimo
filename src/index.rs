@@ -182,23 +182,24 @@ impl Hasher {
 
         // now find the pair of non-overlapping subsequences
         // that are one after in the projections and are at minimal distance.
-        let mut min_dist = Distance::infinity();
-        let mut prj_diff = std::f64::INFINITY;
-        let mut pair = (0, 0);
-        for i in 0..dotps.len() {
-            for j in i..dotps.len() {
-                if !dotps[i].1.overlaps(dotps[j].1, exclusion_zone) {
-                    let diff = dotps[j].0 - dotps[i].0;
-                    let dist = Distance(zeucl(ts, dotps[i].1, dotps[j].1));
-                    if dist < min_dist {
-                        min_dist = dist;
-                        prj_diff = diff;
-                        pair = (dotps[i].1, dotps[j].1);
+        let (min_dist, mut prj_diff, pair) = (0..dotps.len())
+            .into_par_iter()
+            .filter_map(|i| {
+                for j in i..dotps.len() {
+                    if !dotps[i].1.overlaps(dotps[j].1, exclusion_zone) {
+                        let diff = dotps[j].0 - dotps[i].0;
+                        let dist = Distance(zeucl(ts, dotps[i].1, dotps[j].1));
+                        return Some((dist, diff, (dotps[i].1, dotps[j].1)));
                     }
-                    break;
                 }
-            }
-        }
+                None
+            })
+            .min_by_key(|tup| tup.0)
+            .unwrap();
+        info!(
+            "Found pair {:?} at distance {} for width estimation",
+            pair, min_dist
+        );
 
         // At this point we compute other 7 projections and see how far away
         // the pair of subsequences are in the projections. That will
