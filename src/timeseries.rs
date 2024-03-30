@@ -638,7 +638,7 @@ mod test {
         for n in [10, 100, 1234, 4000, 50000] {
             for w in [3, 100, 200, 500] {
                 if w < n {
-                    println!("n={}, w={}", n, w);
+                    eprintln!("n={}, w={}", n, w);
                     let ts = WindowedTimeseries::gen_randomwalk(n, w, 12345);
                     let fft_data = FFTData::new(&ts);
 

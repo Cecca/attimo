@@ -174,7 +174,7 @@ fn main() -> Result<()> {
     monitor_flag.store(false, std::sync::atomic::Ordering::SeqCst);
     monitor.join().unwrap();
 
-    println!("Total time {:?}", total_timer.elapsed());
+    eprintln!("Total time {:?}", total_timer.elapsed());
 
     Ok(())
 }

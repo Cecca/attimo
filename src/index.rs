@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     allocator::Bytes,
-    distance::zeucl,
+    distance::{zdot, zeucl},
     knn::Distance,
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
@@ -114,28 +114,29 @@ impl Hasher {
             uniform.sample(rng),
         ];
 
-        fn sample_vec<R: Rng>(dimension: usize, rng: &mut R) -> Vec<f64> {
-            let normal = Normal::new(0.0, 1.0).expect("problem instantiating normal distribution");
-            normal
-                .sample_iter(rng)
-                .take(dimension)
-                .collect::<Vec<f64>>()
-        }
         let vectors = [
-            sample_vec(dimension, rng),
-            sample_vec(dimension, rng),
-            sample_vec(dimension, rng),
-            sample_vec(dimension, rng),
-            sample_vec(dimension, rng),
-            sample_vec(dimension, rng),
-            sample_vec(dimension, rng),
-            sample_vec(dimension, rng),
+            Self::sample_vec(dimension, rng),
+            Self::sample_vec(dimension, rng),
+            Self::sample_vec(dimension, rng),
+            Self::sample_vec(dimension, rng),
+            Self::sample_vec(dimension, rng),
+            Self::sample_vec(dimension, rng),
+            Self::sample_vec(dimension, rng),
+            Self::sample_vec(dimension, rng),
         ];
         Self {
             vectors,
             shifts,
             width,
         }
+    }
+
+    fn sample_vec<R: Rng>(dimension: usize, rng: &mut R) -> Vec<f64> {
+        let normal = Normal::new(0.0, 1.0).expect("problem instantiating normal distribution");
+        normal
+            .sample_iter(rng)
+            .take(dimension)
+            .collect::<Vec<f64>>()
     }
 
     pub fn collision_probability_at(&self, d: Distance) -> f64 {
@@ -148,11 +149,70 @@ impl Hasher {
                 * (1.0 - (-r * r / (2.0 * d * d)).exp())
     }
 
-    pub fn compute_width(ts: &WindowedTimeseries) -> f64 {
+    /// Computes the width to be used for the random projection hashing. Setting this parameter
+    /// correctly is crucial for performance.
+    ///
+    /// The heuristic adopted by this method is the following. First we estimate the maximum dot
+    /// product and we consequently compute the width that allows to fit the discretized dot
+    /// products in 8 bits.
+    ///
+    /// Then we want close pairs of points to collide in 8 consecutive concatenations, so that
+    /// full-hashes make sense. To this end we first find a pair of close subsequences (without
+    /// guarantees on the minimality of their distance: this is just a heuristic). Then we compute
+    /// [[K]] dot products for the two subsequences, and record the maximum absolute difference in
+    /// projections. Twice this number is our guess for the width, or the minimum width described
+    /// in the previous paragraph, whichever is largest.
+    pub fn compute_width<R: Rng>(
+        ts: &WindowedTimeseries,
+        fft_data: &FFTData,
+        exclusion_zone: usize,
+        rng: &mut R,
+    ) -> f64 {
         let n = ts.num_subsequences();
         let subsequence_norm = (ts.w as f64).sqrt();
         let expected_max_dotp = subsequence_norm * (2.0 * (n as f64).ln()).sqrt();
-        expected_max_dotp / 128.0
+        let mut dotps = Vec::new();
+        let min_width = expected_max_dotp / 128.0;
+        // Compute a few dot products
+        let v = Self::sample_vec(ts.w, rng);
+        ts.znormalized_sliding_dot_product_for_each(fft_data, &v, |i, dotp| {
+            dotps.push((dotp, i));
+        });
+        dotps.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+        // now find the pair of non-overlapping subsequences
+        // that are one after in the projections and are at minimal distance.
+        let mut min_dist = Distance::infinity();
+        let mut prj_diff = std::f64::INFINITY;
+        let mut pair = (0, 0);
+        for i in 0..dotps.len() {
+            for j in i..dotps.len() {
+                if !dotps[i].1.overlaps(dotps[j].1, exclusion_zone) {
+                    let diff = dotps[j].0 - dotps[i].0;
+                    let dist = Distance(zeucl(ts, dotps[i].1, dotps[j].1));
+                    if dist < min_dist {
+                        min_dist = dist;
+                        prj_diff = diff;
+                        pair = (dotps[i].1, dotps[j].1);
+                    }
+                    break;
+                }
+            }
+        }
+
+        // At this point we compute other 7 projections and see how far away
+        // the pair of subsequences are in the projections. That will
+        // be the width we return.
+        let (i, j) = pair;
+        for _ in 0..7 {
+            let v = Self::sample_vec(ts.w, rng);
+            let dotp_i = zdot(ts.subsequence(i), ts.mean(i), ts.sd(i), &v, 0.0, 1.0);
+            let dotp_j = zdot(ts.subsequence(j), ts.mean(j), ts.sd(j), &v, 0.0, 1.0);
+            let diff = (dotp_i - dotp_j).abs();
+            prj_diff = prj_diff.max(diff);
+        }
+
+        (2.0 * prj_diff).max(min_width)
     }
 
     /// Hash all the subsequences of the time series to 8 x 8-bit hash values each
@@ -290,15 +350,20 @@ impl LSHIndex {
 
     /// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
     /// and a `Hasher`.
-    pub fn from_ts(ts: &WindowedTimeseries, fft_data: &FFTData, seed: u64) -> Self {
-        let rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+    pub fn from_ts(
+        ts: &WindowedTimeseries,
+        exclusion_zone: usize,
+        fft_data: &FFTData,
+        seed: u64,
+    ) -> Self {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
 
         let quantization_width = std::env::var("ATTIMO_QUANTIZATION")
             .map(|q| {
                 q.parse::<f64>()
                     .expect("unable to parse ATTIMO_QUANTIZATION as a float")
             })
-            .unwrap_or_else(|_| Hasher::compute_width(ts));
+            .unwrap_or_else(|_| Hasher::compute_width(ts, fft_data, exclusion_zone, &mut rng));
         info!("quantization width: {}", quantization_width);
 
         let main_memory_cap = Bytes::system_memory().divide(2);
@@ -328,7 +393,12 @@ impl LSHIndex {
         fft_data: &FFTData,
         total_repetitions: usize,
     ) -> Duration {
-        assert!(total_repetitions > self.get_repetitions(), "total_repetitions {} is not > self.get_repetitions() {}", total_repetitions, self.get_repetitions());
+        assert!(
+            total_repetitions > self.get_repetitions(),
+            "total_repetitions {} is not > self.get_repetitions() {}",
+            total_repetitions,
+            self.get_repetitions()
+        );
         let dimension = ts.w;
         let n = ts.num_subsequences();
         let starting_repetitions = self.get_repetitions();
@@ -516,12 +586,13 @@ impl<'index> CollisionEnumerator<'index> {
                     let ha = hashes[self.i];
                     let hb = hashes[self.j];
                     debug_assert!(ha.prefix_eq(&hb, self.prefix));
-                    if // did the points collide previously?
-                        !self
+                    if
+                    // did the points collide previously?
+                    !self
                         .prev_prefix
                         .map(|pp| ha.prefix_eq(&hb, pp))
                         .unwrap_or(false)
-                        && 
+                        &&
                         // are the corresponding subsequences overlapping?
                         !a.overlaps(b, exclusion_zone)
                     {
@@ -732,7 +803,7 @@ fn test_collision_probability() {
     ];
 
     let fft_data = FFTData::new(&ts);
-    let mut index = LSHIndex::from_ts(&ts, &fft_data, 1234);
+    let mut index = LSHIndex::from_ts(&ts, w / 2, &fft_data, 1234);
     dbg!(index.stats(&ts, Bytes::gbytes(8), w));
     index.add_repetitions(&ts, &fft_data, 4096);
 

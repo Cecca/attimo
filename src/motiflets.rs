@@ -218,7 +218,7 @@ impl MotifletsIterator {
         info!("Computed fft_data: {}", mem_gauge.measure());
 
         let mem_gauge = MemoryGauge::allocated();
-        let index = LSHIndex::from_ts(&ts, &fft_data, seed);
+        let index = LSHIndex::from_ts(&ts, exclusion_zone, &fft_data, seed);
         info!(
             "Computed initial hash values in {:?}, {}",
             start.elapsed(),
