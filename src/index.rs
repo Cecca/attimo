@@ -171,6 +171,7 @@ impl Hasher {
         let n = ts.num_subsequences();
         let subsequence_norm = (ts.w as f64).sqrt();
         let expected_max_dotp = subsequence_norm * (2.0 * (n as f64).ln()).sqrt();
+        info!("Expected max dot product {}", expected_max_dotp);
         let mut dotps = Vec::new();
         let min_width = expected_max_dotp / 128.0;
         // Compute a few dot products
@@ -179,6 +180,19 @@ impl Hasher {
             dotps.push((dotp, i));
         });
         dotps.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (perc1, perc99) = (dotps[dotps.len() / 100].0, dotps[99 * dotps.len() / 100].0);
+        let min_sample_width = perc1.abs().max(perc99.abs()) / 128.0;
+        info!(
+            "dot product 1perc {} 99perc {}",
+            dotps[dotps.len() / 100].0,
+            dotps[99 * dotps.len() / 100].0,
+        );
+        info!(
+            "min dot product {} max dot product {}: min sample width {}",
+            dotps[0].0,
+            dotps[dotps.len() - 1].0,
+            min_sample_width
+        );
 
         // now find the pair of non-overlapping subsequences
         // that are one after in the projections and are at minimal distance.
@@ -212,8 +226,13 @@ impl Hasher {
             let diff = (dotp_i - dotp_j).abs();
             prj_diff = prj_diff.max(diff);
         }
+        log::debug!(
+            "maximum projected difference {} (x2={})",
+            prj_diff,
+            2.0 * prj_diff
+        );
 
-        (2.0 * prj_diff).max(min_width)
+        (2.0 * prj_diff).max(min_width.min(min_sample_width))
     }
 
     /// Hash all the subsequences of the time series to 8 x 8-bit hash values each
@@ -574,6 +593,14 @@ impl<'index> CollisionEnumerator<'index> {
         exclusion_zone: usize,
     ) -> Option<usize> {
         let mut idx = 0;
+        log::trace!(
+            "Current range: {}-{} ({}% overall, i={}, range length {})",
+            self.current_range.start,
+            self.current_range.end,
+            self.i as f64 / self.handle.get_hashes().len() as f64 * 100.0,
+            self.i,
+            self.current_range.len()
+        );
         while self.current_range.end < self.handle.get_hashes().len() {
             let hashes = self.handle.get_hashes();
             let indices = self.handle.get_indices();
@@ -629,7 +656,7 @@ impl<'index> CollisionEnumerator<'index> {
                 // the bucket if _very_ large (relative to the number of subsequences),
                 // so we just pick the square of its size in order to avoid spending
                 // forever in iterating over pairs checking for overlaps
-                log::trace!("Large bucket detected: {}", range.len());
+                // log::trace!("Large bucket detected: {}", range.len());
                 cnt += range.len() * range.len();
             } else {
                 let mut i = range.start;

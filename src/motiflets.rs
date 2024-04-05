@@ -291,6 +291,7 @@ impl MotifletsIterator {
         let mut cnt_below_threshold = 0;
         let mut enumerator = index.collisions(rep, prefix, self.previous_prefix);
         while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone) {
+            log::trace!("Evaluating {} collisions", cnt);
             cnt_candidates += cnt;
             if cnt_candidates > num_collisions_threshold {
                 panic!(
