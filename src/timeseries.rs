@@ -141,6 +141,14 @@ impl WindowedTimeseries {
         self.rolling_sd[i]
     }
 
+    pub fn is_flat(&self, i: usize) -> bool {
+        self.rolling_sd[i] == 0.0
+    }
+
+    pub fn count_flat(&self) -> usize {
+        self.rolling_sd.iter().filter(|sd| **sd == 0.0).count()
+    }
+
     pub fn num_subsequences(&self) -> usize {
         self.data.len() - self.w
     }
@@ -285,10 +293,15 @@ impl WindowedTimeseries {
     ) {
         let sumv: f64 = v.iter().sum();
         self.sliding_dot_product_for_each(fft_data, v, |i, val| {
-            let m = self.mean(i);
             let sd = self.sd(i);
-            assert!(sd > 0.0);
-            action(i, val / sd - sumv * m / sd);
+            if sd == 0.0 {
+                // subsequence is flat, cannot z-normalize
+                action(i, f64::NAN);
+            } else {
+                let m = self.mean(i);
+                assert!(sd > 0.0);
+                action(i, val / sd - sumv * m / sd);
+            }
         });
     }
 

@@ -107,11 +107,12 @@ fn main() -> Result<()> {
     let ts_bytes = mem.measure();
     let input_elapsed = timer.elapsed();
     log::info!(
-        "Create windowed time series with {} subsequences in {:?}, taking {} ({})",
+        "Create windowed time series with {} subsequences in {:?}, taking {} ({}), {} flat subsequences",
         ts.num_subsequences(),
         input_elapsed,
         ts_bytes,
-        ts.memory()
+        ts.memory(),
+        ts.count_flat(),
     );
 
     let _profiler = if config.profile {

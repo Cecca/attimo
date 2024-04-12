@@ -177,7 +177,9 @@ impl Hasher {
         // Compute a few dot products
         let v = Self::sample_vec(ts.w, rng);
         ts.znormalized_sliding_dot_product_for_each(fft_data, &v, |i, dotp| {
-            dotps.push((dotp, i));
+            if !dotp.is_nan() {
+                dotps.push((dotp, i));
+            }
         });
         dotps.sort_by(|a, b| a.0.total_cmp(&b.0));
         let (perc1, perc99) = (dotps[dotps.len() / 100].0, dotps[99 * dotps.len() / 100].0);
@@ -196,14 +198,21 @@ impl Hasher {
         assert_eq!(ts.num_subsequences(), output.len());
         for k in 0..K {
             ts.znormalized_sliding_dot_product_for_each(fft_data, &self.vectors[k], |i, mut h| {
-                h = (h + self.shifts[k]) / self.width;
-                //// Count if the value is out of bounds to be repre
-                if h.abs() > 128.0 {
-                    h = h.signum() * 127.0;
+                if !h.is_nan() {
+                    h = (h + self.shifts[k]) / self.width;
+                    if h.abs() > 128.0 {
+                        h = h.signum() * 127.0;
+                    }
+                    let h = ((h as i64 & 0xFFi64) as i8) as u8;
+                    output[i].0.set_byte(k, h);
+                    output[i].1 = i as u32;
+                } else {
+                    // if the subsequence is flat don't include it
+                    // in subsequent computations by giving it a hash that makes it
+                    // go to the end of the sorted hash-array
+                    output[i].0 = HashValue(u64::MAX);
+                    output[i].1 = u32::MAX;
                 }
-                let h = ((h as i64 & 0xFFi64) as i8) as u8;
-                output[i].0.set_byte(k, h);
-                output[i].1 = i as u32;
             });
         }
     }
@@ -578,6 +587,8 @@ impl<'index> CollisionEnumerator<'index> {
                         .unwrap_or(false)
                         &&
                         // are the corresponding subsequences overlapping?
+                        // this check also excludes the flat subsequences, whose ID is replaced
+                        // with u32::MAX, and thus always overlaps
                         !a.overlaps(b, exclusion_zone)
                     {
                         output[idx] = (a.min(b), a.max(b), Distance(f64::INFINITY));
