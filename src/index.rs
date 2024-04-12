@@ -165,7 +165,7 @@ impl Hasher {
     pub fn compute_width<R: Rng>(
         ts: &WindowedTimeseries,
         fft_data: &FFTData,
-        exclusion_zone: usize,
+        _exclusion_zone: usize,
         rng: &mut R,
     ) -> f64 {
         let n = ts.num_subsequences();
@@ -173,7 +173,7 @@ impl Hasher {
         let expected_max_dotp = subsequence_norm * (2.0 * (n as f64).ln()).sqrt();
         info!("Expected max dot product {}", expected_max_dotp);
         let mut dotps = Vec::new();
-        let min_width = expected_max_dotp / 128.0;
+        // let min_width = expected_max_dotp / 128.0;
         // Compute a few dot products
         let v = Self::sample_vec(ts.w, rng);
         ts.znormalized_sliding_dot_product_for_each(fft_data, &v, |i, dotp| {
@@ -183,56 +183,12 @@ impl Hasher {
         let (perc1, perc99) = (dotps[dotps.len() / 100].0, dotps[99 * dotps.len() / 100].0);
         let min_sample_width = perc1.abs().max(perc99.abs()) / 128.0;
         info!(
-            "dot product 1perc {} 99perc {}",
+            "dot product 1perc {} 99perc {} (min sample width: {})",
             dotps[dotps.len() / 100].0,
             dotps[99 * dotps.len() / 100].0,
-        );
-        info!(
-            "min dot product {} max dot product {}: min sample width {}",
-            dotps[0].0,
-            dotps[dotps.len() - 1].0,
             min_sample_width
         );
-
-        // now find the pair of non-overlapping subsequences
-        // that are one after in the projections and are at minimal distance.
-        let (min_dist, mut prj_diff, pair) = (0..dotps.len())
-            .into_par_iter()
-            .filter_map(|i| {
-                for j in i..dotps.len() {
-                    if !dotps[i].1.overlaps(dotps[j].1, exclusion_zone) {
-                        let diff = dotps[j].0 - dotps[i].0;
-                        let dist = Distance(zeucl(ts, dotps[i].1, dotps[j].1));
-                        return Some((dist, diff, (dotps[i].1, dotps[j].1)));
-                    }
-                }
-                None
-            })
-            .min_by_key(|tup| tup.0)
-            .unwrap();
-        info!(
-            "Found pair {:?} at distance {} for width estimation",
-            pair, min_dist
-        );
-
-        // At this point we compute other 7 projections and see how far away
-        // the pair of subsequences are in the projections. That will
-        // be the width we return.
-        let (i, j) = pair;
-        for _ in 0..7 {
-            let v = Self::sample_vec(ts.w, rng);
-            let dotp_i = zdot(ts.subsequence(i), ts.mean(i), ts.sd(i), &v, 0.0, 1.0);
-            let dotp_j = zdot(ts.subsequence(j), ts.mean(j), ts.sd(j), &v, 0.0, 1.0);
-            let diff = (dotp_i - dotp_j).abs();
-            prj_diff = prj_diff.max(diff);
-        }
-        log::debug!(
-            "maximum projected difference {} (x2={})",
-            prj_diff,
-            2.0 * prj_diff
-        );
-
-        (2.0 * prj_diff).max(min_width.min(min_sample_width))
+        min_sample_width
     }
 
     /// Hash all the subsequences of the time series to 8 x 8-bit hash values each
@@ -714,6 +670,7 @@ impl IndexStats {
         let nreps = 4;
         let repetition_setup_cost = index.repetitions_setup_time.as_secs_f64();
         let mut expected_collisions = vec![0.0; K + 1];
+        info!("Estimating the number of collisions");
         let dat: Vec<(usize, usize, usize)> = (1..=K)
             .into_par_iter()
             .flat_map(|prefix| (0..nreps).into_par_iter().map(move |rep| (prefix, rep)))
@@ -729,6 +686,7 @@ impl IndexStats {
             *c /= nreps as f64;
         }
         expected_collisions[0] = f64::INFINITY; // just to signal that we don't want to go to prefix 0
+        info!("Estimated collisions: {:?}", expected_collisions);
 
         // now we estimate the cost of running a handful of distance computations,
         // as a proxy for the cost of handling the collisions.

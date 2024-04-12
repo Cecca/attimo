@@ -504,7 +504,7 @@ impl MotifletsIterator {
                     self.rep = 0;
                     self.previous_prefix.replace(self.prefix);
                     self.prefix -= 1;
-                    debug!(
+                    info!(
                         "Not enough repetitions ({}), going to prefix {}",
                         self.index.get_repetitions(),
                         self.prefix
@@ -512,6 +512,7 @@ impl MotifletsIterator {
                 }
             } else {
                 // Go to the suggested prefix, and start from the first repetition there
+                info!("Going to prefix {}", next_prefix);
                 self.previous_prefix_repetitions.replace(self.rep + 1);
                 self.rep = 0;
                 self.previous_prefix.replace(self.prefix);
