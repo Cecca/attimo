@@ -190,6 +190,7 @@ impl Hasher {
             dotps[99 * dotps.len() / 100].0,
             min_sample_width
         );
+
         min_sample_width
     }
 

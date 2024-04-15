@@ -63,6 +63,9 @@ pub struct TimeseriesStats {
     pub used_memory: Bytes,
 }
 
+/// The threshold on the standard deviation below which a subsequence is considered flat
+const FLAT_SD_THRESHOLD: f64 = 1e-4;
+
 pub struct WindowedTimeseries {
     pub data: Vec<f64>,
     pub w: usize,
@@ -142,11 +145,24 @@ impl WindowedTimeseries {
     }
 
     pub fn is_flat(&self, i: usize) -> bool {
-        self.rolling_sd[i] == 0.0
+        self.rolling_sd[i] <= FLAT_SD_THRESHOLD
     }
 
     pub fn count_flat(&self) -> usize {
-        self.rolling_sd.iter().filter(|sd| **sd == 0.0).count()
+        self.rolling_sd
+            .iter()
+            .filter(|sd| **sd <= FLAT_SD_THRESHOLD)
+            .count()
+    }
+
+    pub fn dump_standard_deviations(&self, fname: &str) -> anyhow::Result<()> {
+        use std::io::prelude::*;
+        let mut f = std::io::BufWriter::new(std::fs::File::create(fname)?);
+        for s in &self.rolling_sd {
+            writeln!(f, "{}", s)?;
+        }
+
+        Ok(())
     }
 
     pub fn num_subsequences(&self) -> usize {
@@ -294,7 +310,7 @@ impl WindowedTimeseries {
         let sumv: f64 = v.iter().sum();
         self.sliding_dot_product_for_each(fft_data, v, |i, val| {
             let sd = self.sd(i);
-            if sd == 0.0 {
+            if sd < FLAT_SD_THRESHOLD {
                 // subsequence is flat, cannot z-normalize
                 action(i, f64::NAN);
             } else {
