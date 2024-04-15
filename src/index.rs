@@ -620,27 +620,28 @@ impl<'index> CollisionEnumerator<'index> {
             let indices = self.handle.get_indices();
 
             let range = self.current_range.clone();
-            if range.len() as f64 > (hashes.len() as f64).sqrt() {
-                // the bucket if _very_ large (relative to the number of subsequences),
-                // so we just pick the square of its size in order to avoid spending
-                // forever in iterating over pairs checking for overlaps
-                // log::trace!("Large bucket detected: {}", range.len());
-                cnt += range.len() * range.len();
-            } else {
-                let mut i = range.start;
-                while i < range.end {
-                    let mut j = i + 1;
-                    while j < range.end {
-                        let a = indices[i];
-                        let b = indices[j];
-                        if !a.overlaps(b, exclusion_zone) {
-                            cnt += 1;
-                        }
-                        j += 1;
-                    }
-                    i += 1;
-                }
-            }
+            cnt += range.len() * (range.len() - 1) / 2;
+            // if range.len() as f64 > (hashes.len() as f64).sqrt() {
+            //     // the bucket if _very_ large (relative to the number of subsequences),
+            //     // so we just pick the square of its size in order to avoid spending
+            //     // forever in iterating over pairs checking for overlaps
+            //     // log::trace!("Large bucket detected: {}", range.len());
+            //     cnt += range.len() * range.len();
+            // } else {
+            //     let mut i = range.start;
+            //     while i < range.end {
+            //         let mut j = i + 1;
+            //         while j < range.end {
+            //             let a = indices[i];
+            //             let b = indices[j];
+            //             if !a.overlaps(b, exclusion_zone) {
+            //                 cnt += 1;
+            //             }
+            //             j += 1;
+            //         }
+            //         i += 1;
+            //     }
+            // }
 
             self.next_range();
         }
@@ -660,7 +661,7 @@ pub struct IndexStats {
     /// the cost of evaluating a collision
     collision_cost: f64,
     /// the maximum number of repetitions, fitting in the memory limit
-    max_repetitions: usize,
+    pub max_repetitions: usize,
 }
 impl IndexStats {
     fn new(
@@ -761,16 +762,22 @@ impl IndexStats {
             .enumerate()
             .map(|(prefix, collisions)| {
                 let maxreps = self.max_repetitions;
-                let nreps = {
+                let (nreps, fp) = {
                     let mut nreps = 0;
                     let mut fp = 1.0;
                     while fp > delta && nreps < maxreps {
                         fp = index.failure_probability(d, nreps, prefix, None, None);
                         nreps += 1;
                     }
-                    nreps
+                    (nreps, fp)
                 };
                 if nreps >= maxreps {
+                    log::debug!(
+                        "distance {}, at prefix {} failure probability {} with all repetitions",
+                        d,
+                        prefix,
+                        fp
+                    );
                     return (f64::INFINITY, maxreps);
                 }
                 let new_repetitions = if nreps <= index_repetitions {
