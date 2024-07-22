@@ -169,6 +169,7 @@ impl Motiflet {
 
 #[derive(Debug, Clone, Default)]
 pub struct MotifletsIteratorStats {
+    average_distance: Distance,
     cnt_candidates: usize,
     cnt_skipped: usize,
     cnt_truncated: usize,
@@ -244,6 +245,7 @@ impl MotifletsIterator {
 
         let mut stats = MotifletsIteratorStats::default();
         stats.timeseries_stats = ts.stats();
+        stats.average_distance = ts.average_pairwise_distance(1234, exclusion_zone).into();
 
         Self {
             ts,

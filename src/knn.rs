@@ -15,6 +15,12 @@ impl Ord for Distance {
     }
 }
 
+impl Default for Distance {
+    fn default() -> Self {
+        Self(0.0)
+    }
+}
+
 impl Distance {
     pub fn infinity() -> Self {
         Self(f64::INFINITY)
