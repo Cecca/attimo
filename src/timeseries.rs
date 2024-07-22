@@ -192,7 +192,7 @@ impl WindowedTimeseries {
             loop {
                 let i = uniform.sample(&mut rng);
                 let j = uniform.sample(&mut rng);
-                if !i.overlaps(j, exclusion_zone) {
+                if !self.is_flat(i) && !self.is_flat(j) && !i.overlaps(j, exclusion_zone) {
                     sum += zeucl(self, i, j);
                     sampled += 1;
                     break;

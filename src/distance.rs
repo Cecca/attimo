@@ -32,8 +32,29 @@ pub fn zeucl(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {
         ts.mean(j),
         ts.sd(j),
     );
+    let d = if dotp > ts.w as f64 {
+        // this might happen because of floating point errors,
+        // in these rare cases fall back to the slow
+        // but straightforward implementation
+        zeucl_slow(ts, i, j)
+    } else {
+        (2.0 * ts.w as f64 - 2.0 * dotp).sqrt()
+    };
     // The norm of z-normalized vectors of length w is w
-    (2.0 * ts.w as f64 - 2.0 * dotp).sqrt()
+    assert!(
+        !d.is_nan(),
+        "distance between {} and {} is NaN (stds: {} and {}, means {} and {}) 2*dotp {} 2*w={}, check {}",
+        i,
+        j,
+        ts.sd(i),
+        ts.sd(j),
+        ts.mean(i),
+        ts.mean(j),
+        2.0 * dotp,
+        2.0 * ts.w as f64,
+        zeucl_slow(ts, i, j)
+    );
+    d
 }
 
 pub fn zeucl_slow(ts: &WindowedTimeseries, i: usize, j: usize) -> f64 {

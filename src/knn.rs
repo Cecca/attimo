@@ -110,7 +110,19 @@ pub fn compute_extents(ts: &WindowedTimeseries, indices: &[usize]) -> Vec<Distan
     for i in 1..k {
         extents[i] = extents[i - 1];
         for j in 0..i {
-            let d = Distance(zeucl(ts, indices[i], indices[j]));
+            let ii = indices[i];
+            let jj = indices[j];
+            let d = Distance(zeucl(ts, ii, jj));
+            assert!(
+                !d.0.is_nan(),
+                "distance between {} and {} is NaN (stds: {} and {}, means {} and {})",
+                ii,
+                jj,
+                ts.sd(ii),
+                ts.sd(jj),
+                ts.mean(ii),
+                ts.mean(jj)
+            );
             extents[i] = extents[i].max(d);
         }
     }
