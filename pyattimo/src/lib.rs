@@ -77,12 +77,12 @@ impl KMotiflet {
             self.ts.data.clone()
         };
         Python::with_gil(|py| {
-            let locals = PyDict::new(py);
-            locals.set_item("motif", PyCell::new(py, self.clone()).unwrap())?;
+            let locals = PyDict::new_bound(py);
+            locals.set_item("motif", Bound::new(py, self.clone()).unwrap())?;
             locals.set_item("timeseries", timeseries)?;
             locals.set_item("show", show)?;
             locals.set_item("indices", &self.indices)?;
-            py.run(PLOT_SCRIPT_MULTI, None, Some(locals))
+            py.run_bound(PLOT_SCRIPT_MULTI, None, Some(&locals))
         })
     }
 
@@ -165,14 +165,14 @@ impl Motif {
             (self.ts.data.clone(), self.a, self.b)
         };
         Python::with_gil(|py| {
-            let locals = PyDict::new(py);
-            locals.set_item("motif", PyCell::new(py, self.clone()).unwrap())?;
+            let locals = PyDict::new_bound(py);
+            locals.set_item("motif", Bound::new(py, self.clone()).unwrap())?;
             locals.set_item("timeseries", timeseries)?;
             locals.set_item("a", a)?;
             locals.set_item("b", b)?;
             locals.set_item("show", show)?;
             locals.set_item("distance", self.distance)?;
-            py.run(PLOT_SCRIPT, None, Some(locals))
+            py.run_bound(PLOT_SCRIPT, None, Some(&locals))
         })
     }
 
@@ -362,7 +362,7 @@ pub fn motiflet_brute_force(
 }
 
 #[pymodule]
-fn pyattimo(_py: Python, m: &PyModule) -> PyResult<()> {
+fn pyattimo(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     pyo3_log::init();
     m.add_function(wrap_pyfunction!(motiflet_brute_force, m)?)?;
     m.add_class::<MotifsIterator>()?;
