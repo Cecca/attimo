@@ -17,6 +17,7 @@
             python311
             quarto
             ruff
+            zig
           ] ++
           (with pkgs.python311Packages; [
             pip

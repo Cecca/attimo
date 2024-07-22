@@ -5,7 +5,6 @@ use attimo::load::*;
 use attimo::motiflets::{brute_force_motiflets, Motiflet, MotifletsIterator};
 use attimo::motifs::{motifs, Motif};
 use attimo::timeseries::*;
-use pprof::ProfilerGuard;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
@@ -115,7 +114,9 @@ fn main() -> Result<()> {
         ts.count_flat(),
     );
 
+    #[cfg(pprof)]
     let _profiler = if config.profile {
+        use pprof::ProfilerGuard;
         // The profile will be saved on drop
         Some(Profiler::start())
     } else {
@@ -180,10 +181,12 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+#[cfg(pprof)]
 struct Profiler<'a> {
     profiler: ProfilerGuard<'a>,
 }
 
+#[cfg(pprof)]
 impl<'a> Profiler<'a> {
     fn start() -> Self {
         log::info!("Start profiler");
@@ -196,6 +199,7 @@ impl<'a> Profiler<'a> {
     }
 }
 
+#[cfg(pprof)]
 impl<'a> Drop for Profiler<'a> {
     fn drop(&mut self) {
         use pprof::protos::Message;
