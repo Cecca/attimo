@@ -185,10 +185,12 @@ impl Hasher {
         let (perc1, perc99) = (dotps[dotps.len() / 100].0, dotps[99 * dotps.len() / 100].0);
         let min_sample_width = perc1.abs().max(perc99.abs()) / 128.0;
         info!(
-            "dot product 1perc {} 99perc {} (min sample width: {})",
+            "dot product 1perc {} 99perc {} (min sample width: {}) max/min {}/{}",
             dotps[dotps.len() / 100].0,
             dotps[99 * dotps.len() / 100].0,
-            min_sample_width
+            min_sample_width,
+            dotps.iter().min_by(|a, b| a.0.total_cmp(&b.0)).unwrap().0,
+            dotps.iter().max_by(|a, b| a.0.total_cmp(&b.0)).unwrap().0,
         );
 
         min_sample_width
@@ -324,7 +326,7 @@ pub struct LSHIndex {
     max_repetitions_in_memory: usize,
 }
 
-pub const INITIAL_REPETITIONS: usize = 8;
+pub const INITIAL_REPETITIONS: usize = 16;
 
 impl LSHIndex {
     /// How much memory would it be required to store information for these many repetitions?
@@ -613,35 +615,34 @@ impl<'index> CollisionEnumerator<'index> {
         }
     }
 
-    pub fn estimate_num_collisions(mut self, _exclusion_zone: usize) -> usize {
+    pub fn estimate_num_collisions(mut self, exclusion_zone: usize) -> usize {
         let mut cnt = 0;
         while self.current_range.end < self.handle.get_hashes().len() {
-            // let hashes = self.handle.get_hashes();
-            // let indices = self.handle.get_indices();
+            let hashes = self.handle.get_hashes();
+            let indices = self.handle.get_indices();
 
             let range = self.current_range.clone();
-            cnt += range.len() * (range.len() - 1) / 2;
-            // if range.len() as f64 > (hashes.len() as f64).sqrt() {
-            //     // the bucket if _very_ large (relative to the number of subsequences),
-            //     // so we just pick the square of its size in order to avoid spending
-            //     // forever in iterating over pairs checking for overlaps
-            //     // log::trace!("Large bucket detected: {}", range.len());
-            //     cnt += range.len() * range.len();
-            // } else {
-            //     let mut i = range.start;
-            //     while i < range.end {
-            //         let mut j = i + 1;
-            //         while j < range.end {
-            //             let a = indices[i];
-            //             let b = indices[j];
-            //             if !a.overlaps(b, exclusion_zone) {
-            //                 cnt += 1;
-            //             }
-            //             j += 1;
-            //         }
-            //         i += 1;
-            //     }
-            // }
+            if range.len() as f64 > (hashes.len() as f64).sqrt() {
+                // the bucket is _very_ large (relative to the number of subsequences),
+                // so we just pick the square of its size in order to avoid spending
+                // forever in iterating over pairs checking for overlaps
+                // log::trace!("Large bucket detected: {}", range.len());
+                cnt += range.len() * range.len();
+            } else {
+                let mut i = range.start;
+                while i < range.end {
+                    let mut j = i + 1;
+                    while j < range.end {
+                        let a = indices[i];
+                        let b = indices[j];
+                        if !a.overlaps(b, exclusion_zone) {
+                            cnt += 1;
+                        }
+                        j += 1;
+                    }
+                    i += 1;
+                }
+            }
 
             self.next_range();
         }
