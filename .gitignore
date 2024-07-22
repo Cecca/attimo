@@ -40,3 +40,5 @@ profile.pb
 profile*.svg
 pyattimo/ecg.csv.gz
 pyattimo/astro.csv.gz
+.direnv
+.venv
