@@ -54,6 +54,7 @@ impl Ord for Motif {
     }
 }
 
+#[allow(clippy::non_canonical_partial_ord_impl)]
 impl PartialOrd for Motif {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.distance

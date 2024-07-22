@@ -227,16 +227,14 @@ impl MotifsIterator {
 
     fn __getitem__(&mut self, idx: isize) -> Motif {
         assert!(idx >= 0);
-        Motif::with_context(
-            self.inner.get_ranked(idx as usize).clone(),
-            self.inner.get_ts(),
-        )
+        Motif::with_context(*self.inner.get_ranked(idx as usize), self.inner.get_ts())
     }
 }
 
 /// Inner implementation of the motiflets iterator, which precomputes
 /// the motiflets if the time series is small enough, otherwise defers
 /// the computation to the enumerator proper.
+#[allow(clippy::large_enum_variant)]
 enum MotifletsIteratorImpl {
     Enumerator(attimo::motiflets::MotifletsIterator),
     BruteForce(usize, Vec<KMotiflet>),
@@ -252,6 +250,7 @@ struct MotifletsIterator {
 impl MotifletsIterator {
     #[new]
     #[pyo3(signature=(ts, w, max_k = 10, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         ts: Vec<f64>,
         w: usize,
