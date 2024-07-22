@@ -21,27 +21,15 @@ use std::time::Duration;
 use std::time::Instant;
 use thread_local::ThreadLocal;
 
-#[derive(Debug, PartialEq, PartialOrd)]
-struct OrderedF64(f64);
-impl Eq for OrderedF64 {}
-impl Ord for OrderedF64 {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap()
-    }
-}
-
-//// ## Support data structures
-//// ### Motifs
-
-//// This data structure stores information about a motif:
-////
-////  - The index of the two subsequences defining the motif
-////  - The distance between the two subsequences
-////  - The LSH collision probability two subsequences
-////  - The elapsed time since the start of the algorithm until
-////    when the motif was found
-////
-//// Some utility functions follow.
+/// This data structure stores information about a motif:
+///
+///  - The index of the two subsequences defining the motif
+///  - The distance between the two subsequences
+///  - The LSH collision probability two subsequences
+///  - The elapsed time since the start of the algorithm until
+///    when the motif was found
+///
+/// Some utility functions follow.
 #[derive(Clone, Copy, Debug)]
 pub struct Motif {
     pub idx_a: usize,
@@ -74,12 +62,12 @@ impl PartialOrd for Motif {
     }
 }
 
-//// An important part of working with motifs is defining and removing
-//// _trivial matches_. With the function `Motif::overlaps` we can detect
-//// whether two motifs overlap according to the given `exclusion_zone`:
-//// if any two indices in the two motifs are at distance less than
-//// `exclusion_zone` from each other, then the motifs overlap and one of them
-//// shall be discarded.
+/// An important part of working with motifs is defining and removing
+/// _trivial matches_. With the function `Motif::overlaps` we can detect
+/// whether two motifs overlap according to the given `exclusion_zone`:
+/// if any two indices in the two motifs are at distance less than
+/// `exclusion_zone` from each other, then the motifs overlap and one of them
+/// shall be discarded.
 impl Overlaps<Motif> for Motif {
     /// Tells whether the two motifs overlap, in order to avoid storing trivial matches
     fn overlaps(&self, other: Self, exclusion_zone: usize) -> bool {

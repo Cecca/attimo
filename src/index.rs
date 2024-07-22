@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     allocator::Bytes,
-    distance::{zdot, zeucl},
+    distance::zeucl,
     knn::Distance,
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
@@ -613,11 +613,11 @@ impl<'index> CollisionEnumerator<'index> {
         }
     }
 
-    pub fn estimate_num_collisions(mut self, exclusion_zone: usize) -> usize {
+    pub fn estimate_num_collisions(mut self, _exclusion_zone: usize) -> usize {
         let mut cnt = 0;
         while self.current_range.end < self.handle.get_hashes().len() {
-            let hashes = self.handle.get_hashes();
-            let indices = self.handle.get_indices();
+            // let hashes = self.handle.get_hashes();
+            // let indices = self.handle.get_indices();
 
             let range = self.current_range.clone();
             cnt += range.len() * (range.len() - 1) / 2;
