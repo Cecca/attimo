@@ -1,7 +1,7 @@
 use crate::allocator::*;
 use crate::distance::zeucl_threshold;
 use crate::graph::{AdjacencyGraph, GraphStats};
-use crate::index::INITIAL_REPETITIONS;
+use crate::index::{LSHIndexStats, INITIAL_REPETITIONS};
 use crate::timeseries::TimeseriesStats;
 use crate::{
     index::{IndexStats, LSHIndex},
@@ -175,6 +175,7 @@ pub struct MotifletsIteratorStats {
     cnt_truncated: usize,
     timeseries_stats: TimeseriesStats,
     graph_stats: GraphStats,
+    index_stats: LSHIndexStats,
 }
 
 pub struct MotifletsIterator {
@@ -456,7 +457,7 @@ impl MotifletsIterator {
             self.emit_confirmed();
 
             self.stats.graph_stats = self.graph.stats();
-            debug!("[{}@{}] {:#?}", self.rep, self.prefix, self.stats);
+            info!("[{}@{}] {:#?}", self.rep, self.prefix, self.stats);
             debug!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             debug!(
                 "[{}@{}] First non confirmed distance {:?}",
@@ -518,6 +519,7 @@ impl MotifletsIterator {
                 } else {
                     self.prefix
                 };
+            self.stats.index_stats = self.index.index_stats();
 
             if next_prefix >= self.prefix {
                 // Advance on the current prefix

@@ -4,7 +4,7 @@
 /// Taken from the [rust documentation](https://doc.rust-lang.org/std/alloc/struct.System.html)
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::fmt::Display;
-use std::ops::{Add, Sub};
+use std::ops::{Add, AddAssign, Sub};
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
@@ -51,6 +51,12 @@ impl Add<Bytes> for Bytes {
     type Output = Bytes;
     fn add(self, rhs: Bytes) -> Self::Output {
         Self(self.0 + rhs.0)
+    }
+}
+
+impl AddAssign<Bytes> for Bytes {
+    fn add_assign(&mut self, rhs: Bytes) {
+        self.0 += rhs.0;
     }
 }
 

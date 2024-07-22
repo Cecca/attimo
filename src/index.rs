@@ -244,6 +244,22 @@ impl Repetition {
         Self::InMemory(hashes, indices)
     }
 
+    fn is_in_memory(&self) -> bool {
+        matches!(self, Self::InMemory(_, _))
+    }
+
+    fn bytes(&self) -> Bytes {
+        match self {
+            Self::InMemory(hashes, _indices) => {
+                let n = hashes.len();
+                Bytes(n * (std::mem::size_of::<HashValue>() + std::mem::size_of::<u32>()))
+            }
+            Self::OnDisk(n, _hashes_path, _indices_path) => {
+                Bytes(n * (std::mem::size_of::<HashValue>() + std::mem::size_of::<u32>()))
+            }
+        }
+    }
+
     fn from_pairs_to_disk<I: IntoIterator<Item = (HashValue, u32)>>(pairs: I) -> Self {
         let dir = std::env::temp_dir().join(format!("attimo-{}", thread_rng().next_u64()));
         assert!(!dir.is_dir());
@@ -317,6 +333,13 @@ impl<'data> RepetitionHandle<'data> {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LSHIndexStats {
+    num_repetitions: usize,
+    main_memory_usage: Bytes,
+    disk_memory_usage: Bytes,
+}
+
 pub struct LSHIndex {
     rng: Xoshiro256PlusPlus,
     quantization_width: f64,
@@ -334,6 +357,25 @@ impl LSHIndex {
         let hashes = repetitions * ts.num_subsequences() * size_of::<HashValue>();
         let indices = repetitions * ts.num_subsequences() * size_of::<u32>();
         Bytes(hashes + indices)
+    }
+
+    pub fn index_stats(&self) -> LSHIndexStats {
+        let mut main_memory_usage = Bytes(0);
+        let mut disk_memory_usage = Bytes(0);
+
+        for rep in self.repetitions.iter() {
+            if rep.is_in_memory() {
+                main_memory_usage += rep.bytes();
+            } else {
+                disk_memory_usage += rep.bytes();
+            }
+        }
+
+        LSHIndexStats {
+            num_repetitions: self.repetitions.len(),
+            main_memory_usage,
+            disk_memory_usage,
+        }
     }
 
     /// With this function we can construct a `HashCollection` from a `WindowedTimeseries`
