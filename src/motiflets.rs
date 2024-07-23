@@ -170,6 +170,8 @@ impl Motiflet {
 #[derive(Debug, Clone, Default)]
 pub struct MotifletsIteratorStats {
     average_distance: Distance,
+    cnt_confirmed: usize,
+    next_distance: Distance,
     cnt_candidates: usize,
     cnt_skipped: usize,
     cnt_truncated: usize,
@@ -247,6 +249,7 @@ impl MotifletsIterator {
         let mut stats = MotifletsIteratorStats::default();
         stats.timeseries_stats = ts.stats();
         stats.average_distance = ts.average_pairwise_distance(1234, exclusion_zone).into();
+        stats.next_distance = Distance::infinity();
 
         Self {
             ts,
@@ -434,6 +437,8 @@ impl MotifletsIterator {
                 break;
             }
         }
+        self.stats.cnt_confirmed = self.best_motiflet[2..].iter().filter(|tup| tup.2).count();
+        self.stats.next_distance = self.next_to_confirm.unwrap_or(Distance::infinity());
 
         // self.graph
         //     .remove_larger_than(self.best_motiflet.last().unwrap().0);
@@ -478,7 +483,7 @@ impl MotifletsIterator {
                             self.delta,
                             &self.index,
                         );
-                        debug!("Costs: {:?}", costs);
+                        info!("Costs: {:?}", costs);
                         let (best_prefix, (best_cost, required_repetitions)) = costs
                             .iter()
                             .enumerate()
