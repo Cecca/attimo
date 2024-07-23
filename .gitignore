@@ -42,3 +42,4 @@ pyattimo/ecg.csv.gz
 pyattimo/astro.csv.gz
 .direnv
 .venv
+observe.json

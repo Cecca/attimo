@@ -4,6 +4,7 @@ use attimo::allocator::{self, Bytes, CountingAllocator, MemoryGauge};
 use attimo::load::*;
 use attimo::motiflets::{brute_force_motiflets, Motiflet, MotifletsIterator};
 use attimo::motifs::{motifs, Motif};
+use attimo::observe::OBSERVER;
 use attimo::timeseries::*;
 use std::path::Path;
 use std::str::FromStr;
@@ -177,6 +178,8 @@ fn main() -> Result<()> {
     monitor.join().unwrap();
 
     eprintln!("Total time {:?}", total_timer.elapsed());
+
+    OBSERVER.lock().unwrap().flush();
 
     Ok(())
 }

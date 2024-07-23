@@ -2,6 +2,7 @@ use crate::allocator::*;
 use crate::distance::zeucl_threshold;
 use crate::graph::{AdjacencyGraph, GraphStats};
 use crate::index::{LSHIndexStats, INITIAL_REPETITIONS};
+use crate::observe::*;
 use crate::timeseries::TimeseriesStats;
 use crate::{
     index::{IndexStats, LSHIndex},
@@ -294,7 +295,9 @@ impl MotifletsIterator {
 
         let mut time_distance_computation = Duration::default();
         let mut cnt_candidates = 0;
+        let mut cnt_skipped = 0;
         let mut cnt_below_threshold = 0;
+        let mut cnt_truncated = 0;
         let mut enumerator = index.collisions(rep, prefix, self.previous_prefix);
         while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone) {
             log::trace!("Evaluating {} collisions", cnt);
@@ -318,7 +321,7 @@ impl MotifletsIterator {
                     let b = *b as usize;
                     assert!(a < b);
                     if graph.has_edge(a, b) {
-                        *dist = Distance(std::f64::INFINITY);
+                        *dist = Distance::infinity();
                         (0, 0, 1)
                     } else if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
                         let d = Distance(d);
@@ -327,7 +330,7 @@ impl MotifletsIterator {
                         *dist = d;
                         (0, 1, 0)
                     } else {
-                        *dist = Distance(std::f64::INFINITY);
+                        *dist = Distance::infinity();
                         (1, 0, 0)
                     }
                 })
@@ -336,6 +339,8 @@ impl MotifletsIterator {
                     |accum, tup| (accum.0 + tup.0, accum.1 + tup.1, accum.2 + tup.2),
                 );
             cnt_below_threshold += collisions_below_threshold;
+            cnt_skipped += skip;
+            cnt_truncated += truncated;
             time_distance_computation += t.elapsed();
             self.stats.cnt_skipped += skip;
             self.stats.cnt_truncated += truncated;
@@ -354,6 +359,16 @@ impl MotifletsIterator {
         debug!(
             "time to compute distances in update_graph: {:?}",
             time_distance_computation
+        );
+        observe!(rep, prefix, "cnt_candidates", cnt_candidates);
+        observe!(rep, prefix, "cnt_below_threshold", cnt_below_threshold);
+        observe!(rep, prefix, "cnt_truncated", cnt_truncated);
+        observe!(rep, prefix, "cnt_skipped", cnt_skipped);
+        observe!(
+            rep,
+            prefix,
+            "time_distance_computation_s",
+            time_distance_computation.as_secs_f64()
         );
     }
 
@@ -439,6 +454,18 @@ impl MotifletsIterator {
         }
         self.stats.cnt_confirmed = self.best_motiflet[2..].iter().filter(|tup| tup.2).count();
         self.stats.next_distance = self.next_to_confirm.unwrap_or(Distance::infinity());
+        observe!(
+            rep,
+            prefix,
+            "iterator_cnt_confirmed",
+            self.best_motiflet[2..].iter().filter(|tup| tup.2).count()
+        );
+        observe!(
+            rep,
+            prefix,
+            "next_distance",
+            self.next_to_confirm.unwrap_or(Distance::infinity())
+        );
 
         // self.graph
         //     .remove_larger_than(self.best_motiflet.last().unwrap().0);
@@ -461,7 +488,16 @@ impl MotifletsIterator {
             self.update_graph();
             self.emit_confirmed();
 
-            self.stats.graph_stats = self.graph.stats();
+            let graph_stats = self.graph.stats();
+            self.stats.graph_stats = graph_stats;
+            observe!(self.rep, self.prefix, "graph_edges", graph_stats.num_edges);
+            observe!(self.rep, self.prefix, "graph_nodes", graph_stats.num_nodes);
+            observe!(
+                self.rep,
+                self.prefix,
+                "graph_memory",
+                graph_stats.used_memory.0
+            );
             info!("[{}@{}] {:#?}", self.rep, self.prefix, self.stats);
             debug!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             debug!(
@@ -524,7 +560,26 @@ impl MotifletsIterator {
                 } else {
                     self.prefix
                 };
-            self.stats.index_stats = self.index.index_stats();
+            let index_stats = self.index.index_stats();
+            self.stats.index_stats = index_stats;
+            observe!(
+                self.rep,
+                self.prefix,
+                "index_repetitions",
+                index_stats.num_repetitions
+            );
+            observe!(
+                self.rep,
+                self.prefix,
+                "index_main_memory",
+                index_stats.main_memory_usage.0
+            );
+            observe!(
+                self.rep,
+                self.prefix,
+                "index_disk_memory",
+                index_stats.disk_memory_usage.0
+            );
 
             if next_prefix >= self.prefix {
                 // Advance on the current prefix

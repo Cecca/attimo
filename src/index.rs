@@ -335,9 +335,9 @@ impl<'data> RepetitionHandle<'data> {
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LSHIndexStats {
-    num_repetitions: usize,
-    main_memory_usage: Bytes,
-    disk_memory_usage: Bytes,
+    pub num_repetitions: usize,
+    pub main_memory_usage: Bytes,
+    pub disk_memory_usage: Bytes,
 }
 
 pub struct LSHIndex {

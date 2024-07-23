@@ -13,6 +13,7 @@ pub mod load;
 pub mod lsh;
 pub mod motiflets;
 pub mod motifs;
+pub mod observe;
 pub mod sort;
 mod stats;
 /// Implements an LSH-based index for a time series.
