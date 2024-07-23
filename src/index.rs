@@ -388,7 +388,7 @@ impl LSHIndex {
     ) -> Self {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
 
-        let quantization_width = std::env::var("ATTIMO_QUANTIZATION")
+        let mut quantization_width = std::env::var("ATTIMO_QUANTIZATION")
             .map(|q| {
                 q.parse::<f64>()
                     .expect("unable to parse ATTIMO_QUANTIZATION as a float")
@@ -402,19 +402,29 @@ impl LSHIndex {
             max_repetitions_in_memory += 1;
         }
 
-        let mut slf = Self {
-            rng,
-            quantization_width,
-            functions: Vec::new(),
-            repetitions: Vec::new(),
-            repetitions_setup_time: Duration::from_secs(0),
-            max_repetitions_in_memory,
-        };
+        // Try to build the index until we get a version that has collisions at the deepest level
+        loop {
+            let mut slf = Self {
+                rng: rng.clone(),
+                quantization_width,
+                functions: Vec::new(),
+                repetitions: Vec::new(),
+                repetitions_setup_time: Duration::from_secs(0),
+                max_repetitions_in_memory,
+            };
 
-        let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS);
-        slf.repetitions_setup_time = avg_dur;
+            slf.add_repetitions(ts, fft_data, 1);
 
-        slf
+            let enumerator = slf.collisions(0, K, None);
+            if enumerator.estimate_num_collisions(exclusion_zone) > 0 {
+                let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS - 1);
+                slf.repetitions_setup_time = avg_dur;
+                return slf;
+            } else {
+                quantization_width *= 2.0;
+                warn!("Doubling the quantization width to {}", quantization_width);
+            }
+        }
     }
 
     pub fn add_repetitions(
