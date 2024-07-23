@@ -419,7 +419,7 @@ impl LSHIndex {
 
             let enumerator = slf.collisions(0, K, None);
             if enumerator.estimate_num_collisions(exclusion_zone) > 0 {
-                let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS - 1);
+                let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS);
                 slf.repetitions_setup_time = avg_dur;
                 observe!(0, 0, "time_setup_s", t.elapsed().as_secs_f64());
                 return slf;
