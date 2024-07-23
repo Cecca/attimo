@@ -45,7 +45,6 @@ pub static OBSERVER: Lazy<Mutex<Observer>> = Lazy::new(|| Mutex::new(Observer::n
 #[cfg(feature = "observe")]
 macro_rules! observe {
     ($rep: expr, $prefix: expr, $name: literal, $value: expr) => {
-        eprintln!("observing");
         OBSERVER
             .lock()
             .unwrap()
