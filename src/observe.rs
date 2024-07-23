@@ -10,17 +10,28 @@ pub struct Observer {
 
 impl Observer {
     fn new(path: &str) -> Self {
-        let output = BufWriter::new(File::create(path).unwrap());
+        let mut output = BufWriter::new(File::create(path).unwrap());
+        writeln!(output, "elapsed_s,repetition,prefix,name,value").unwrap();
         let start = Instant::now();
         Self { start, output }
     }
 
     pub fn append<V: Display>(&mut self, repetition: usize, prefix: usize, name: &str, value: V) {
+        // writeln!(
+        //     self.output,
+        //     "{{\"elapsed_s\": {}, \"repetition\": {}, \"prefix\": {}, \"name\": \"{}\", \"value\": {}}}",
+        //     self.start.elapsed().as_secs_f64(),
+        //     repetition, prefix, name, value
+        // )
+        // .unwrap()
         writeln!(
             self.output,
-            "{{\"elapsed_s\": {}, \"repetition\": {}, \"prefix\": {}, \"name\": \"{}\", \"value\": {}}}",
+            "{},{},{},{},{}",
             self.start.elapsed().as_secs_f64(),
-            repetition, prefix, name, value
+            repetition,
+            prefix,
+            name,
+            value
         )
         .unwrap()
     }
@@ -32,13 +43,11 @@ impl Observer {
 
 impl Drop for Observer {
     fn drop(&mut self) {
-        eprintln!("DROPPING!");
         self.output.flush().unwrap();
     }
 }
 
-pub static OBSERVER: Lazy<Mutex<Observer>> =
-    Lazy::new(|| Mutex::new(Observer::new("observe.json")));
+pub static OBSERVER: Lazy<Mutex<Observer>> = Lazy::new(|| Mutex::new(Observer::new("observe.csv")));
 
 macro_rules! observe {
     ($rep: expr, $prefix: expr, $name: literal, $value: expr) => {

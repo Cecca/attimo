@@ -16,6 +16,7 @@ use crate::{
     allocator::Bytes,
     distance::zeucl,
     knn::Distance,
+    observe::*,
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 
@@ -403,6 +404,7 @@ impl LSHIndex {
         }
 
         // Try to build the index until we get a version that has collisions at the deepest level
+        let t = Instant::now();
         loop {
             let mut slf = Self {
                 rng: rng.clone(),
@@ -419,6 +421,7 @@ impl LSHIndex {
             if enumerator.estimate_num_collisions(exclusion_zone) > 0 {
                 let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS - 1);
                 slf.repetitions_setup_time = avg_dur;
+                observe!(0, 0, "time_setup_s", t.elapsed().as_secs_f64());
                 return slf;
             } else {
                 quantization_width *= 2.0;

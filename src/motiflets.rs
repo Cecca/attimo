@@ -419,6 +419,12 @@ impl MotifletsIterator {
             time_extents,
             cnt_skipped
         );
+        observe!(
+            self.rep,
+            self.prefix,
+            "time_extents_s",
+            time_extents.as_secs_f64()
+        );
 
         // finally, we possibly output the points
         for k in 0..=self.max_k {
@@ -553,8 +559,15 @@ impl MotifletsIterator {
                     if required_repetitions > self.index.get_repetitions() {
                         let new_total_repetitions: usize = (required_repetitions)
                             .min(self.index.get_repetitions() + rayon::current_num_threads());
+                        let t = Instant::now();
                         self.index
                             .add_repetitions(&self.ts, &self.fft_data, new_total_repetitions);
+                        observe!(
+                            self.rep,
+                            self.prefix,
+                            "time_add_repetitions_s",
+                            t.elapsed().as_secs_f64()
+                        );
                     }
                     best_prefix
                 } else {
