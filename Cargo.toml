@@ -24,6 +24,9 @@ sysinfo = "0.30.5"
 once_cell = "1.19.0"
 bitvec = "1.0.1"
 
+[features]
+observe = []
+
 [profile.release]
 debug = true
 

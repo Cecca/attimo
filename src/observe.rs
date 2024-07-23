@@ -17,13 +17,6 @@ impl Observer {
     }
 
     pub fn append<V: Display>(&mut self, repetition: usize, prefix: usize, name: &str, value: V) {
-        // writeln!(
-        //     self.output,
-        //     "{{\"elapsed_s\": {}, \"repetition\": {}, \"prefix\": {}, \"name\": \"{}\", \"value\": {}}}",
-        //     self.start.elapsed().as_secs_f64(),
-        //     repetition, prefix, name, value
-        // )
-        // .unwrap()
         writeln!(
             self.output,
             "{},{},{},{},{}",
@@ -49,13 +42,20 @@ impl Drop for Observer {
 
 pub static OBSERVER: Lazy<Mutex<Observer>> = Lazy::new(|| Mutex::new(Observer::new("observe.csv")));
 
+#[cfg(feature = "observe")]
 macro_rules! observe {
     ($rep: expr, $prefix: expr, $name: literal, $value: expr) => {
+        eprintln!("observing");
         OBSERVER
             .lock()
             .unwrap()
             .append($rep, $prefix, $name, $value);
     };
+}
+
+#[cfg(not(feature = "observe"))]
+macro_rules! observe {
+    ($rep: expr, $prefix: expr, $name: literal, $value: expr) => {};
 }
 
 pub(crate) use observe;

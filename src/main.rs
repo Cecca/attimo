@@ -179,6 +179,7 @@ fn main() -> Result<()> {
 
     eprintln!("Total time {:?}", total_timer.elapsed());
 
+    #[cfg(feature = "observe")]
     OBSERVER.lock().unwrap().flush();
 
     Ok(())
