@@ -459,23 +459,20 @@ impl LSHIndex {
             .collect();
 
         let timer = Instant::now();
-        let new_reps = new_hashers.par_iter().enumerate().map_with(
-            (Vec::new(), Vec::new()),
-            |(tmp, scratch), (i, hasher)| {
-                let rep_idx = starting_repetitions + i;
-                tmp.resize(n, (HashValue::default(), 0u32));
-                scratch.resize(n, (HashValue::default(), 0u32));
-                hasher.hash(ts, fft_data, tmp);
-                crate::sort::sort_hash_pairs(tmp.as_mut_slice(), scratch);
-                if rep_idx > max_repetitions_in_memory {
-                    warn!("Creating repetition on disk!");
-                    Repetition::from_pairs_to_disk(tmp.iter().copied())
-                } else {
-                    Repetition::from_pairs(tmp.iter().copied())
-                }
-            },
-        );
-        self.repetitions.par_extend(new_reps);
+        let mut tmp = Vec::new();
+        let new_reps = new_hashers.iter().enumerate().map(|(i, hasher)| {
+            let rep_idx = starting_repetitions + i;
+            tmp.resize(n, (HashValue::default(), 0u32));
+            hasher.hash(ts, fft_data, &mut tmp);
+            tmp.par_sort_unstable_by_key(|pair| pair.0);
+            if rep_idx > max_repetitions_in_memory {
+                warn!("Creating repetition on disk!");
+                Repetition::from_pairs_to_disk(tmp.iter().copied())
+            } else {
+                Repetition::from_pairs(tmp.iter().copied())
+            }
+        });
+        self.repetitions.extend(new_reps);
         let elapsed = timer.elapsed();
         info!("Added {} new repetitions in {:?}", new_repetitions, elapsed);
         let average_time = elapsed / new_repetitions as u32;
