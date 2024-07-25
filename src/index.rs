@@ -201,23 +201,28 @@ impl Hasher {
     fn hash(&self, ts: &WindowedTimeseries, fft_data: &FFTData, output: &mut [(HashValue, u32)]) {
         assert_eq!(ts.num_subsequences(), output.len());
         for k in 0..K {
-            ts.znormalized_sliding_dot_product_for_each(fft_data, &self.vectors[k], |i, mut h| {
-                if !h.is_nan() {
-                    h = (h + self.shifts[k]) / self.width;
-                    if h.abs() > 128.0 {
-                        h = h.signum() * 127.0;
+            ts.znormalized_sliding_dot_product_write(
+                fft_data,
+                &self.vectors[k],
+                output,
+                |i, mut h, out| {
+                    if !h.is_nan() {
+                        h = (h + self.shifts[k]) / self.width;
+                        if h.abs() > 128.0 {
+                            h = h.signum() * 127.0;
+                        }
+                        let h = ((h as i64 & 0xFFi64) as i8) as u8;
+                        out.0.set_byte(k, h);
+                        out.1 = i as u32;
+                    } else {
+                        // if the subsequence is flat don't include it
+                        // in subsequent computations by giving it a hash that makes it
+                        // go to the end of the sorted hash-array
+                        out.0 = HashValue(u64::MAX);
+                        out.1 = u32::MAX;
                     }
-                    let h = ((h as i64 & 0xFFi64) as i8) as u8;
-                    output[i].0.set_byte(k, h);
-                    output[i].1 = i as u32;
-                } else {
-                    // if the subsequence is flat don't include it
-                    // in subsequent computations by giving it a hash that makes it
-                    // go to the end of the sorted hash-array
-                    output[i].0 = HashValue(u64::MAX);
-                    output[i].1 = u32::MAX;
-                }
-            });
+                },
+            );
         }
     }
 }

@@ -272,6 +272,73 @@ impl WindowedTimeseries {
         }
     }
 
+    pub fn sliding_dot_product_write<O, F: Fn(usize, f64, &mut O)>(
+        &self,
+        fft_data: &FFTData,
+        v: &[f64],
+        out: &mut [O],
+        func: F,
+    ) {
+        assert_eq!(v.len(), self.w);
+        assert_eq!(out.len(), self.num_subsequences());
+
+        let stride = fft_data.fft_length - self.w;
+
+        //// Get local scratch vectors, to avoid allocations
+        let fft_length = fft_data.fft_length;
+        let mut vfft = fft_data
+            .buf_vfft
+            .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
+            .borrow_mut();
+        let mut ivfft = fft_data
+            .buf_ivfft
+            .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
+            .borrow_mut();
+        let mut scratch = fft_data
+            .scratch
+            .get_or(|| {
+                RefCell::new(vec![
+                    Complex::zero();
+                    fft_data.ifftfun.get_inplace_scratch_len()
+                ])
+            })
+            .borrow_mut();
+
+        //// Then compute the FFT of the reversed input vector, padded with zeros
+        vfft.fill(Complex::zero());
+        for (i, &x) in v.iter().enumerate() {
+            vfft[self.w - i - 1] = Complex { re: x, im: 0.0 };
+        }
+        fft_data
+            .fftfun
+            .process_with_scratch(&mut vfft, &mut scratch);
+
+        //// Iterate over the chunks
+        for (chunk_idx, chunk) in fft_data.fft_chunks.iter().enumerate() {
+            ivfft.fill(Complex::zero());
+            //// Then compute the element-wise multiplication between the dot products, inplace
+            for i in 0..fft_data.fft_length {
+                ivfft[i] = vfft[i] * chunk[i];
+            }
+
+            //// And go back to the time domain
+            fft_data
+                .ifftfun
+                .process_with_scratch(&mut ivfft, &mut scratch);
+
+            //// Callback with the output value, rescaling on the go (`rustfft`
+            //// does not perform normalization automatically)
+            let offset = chunk_idx * stride;
+            for i in 0..(fft_data.fft_length - self.w) {
+                if i + offset < self.num_subsequences() {
+                    let val = ivfft[(i + v.len() - 1) % fft_data.fft_length].re
+                        / fft_data.fft_length as f64;
+                    func(i + offset, val, &mut out[i + offset]);
+                }
+            }
+        }
+    }
+
     pub fn sliding_dot_product(&self, fft_data: &FFTData, v: &[f64], output: &mut [f64]) {
         self.sliding_dot_product_for_each(fft_data, v, |i, v| output[i] = v);
     }
@@ -317,6 +384,27 @@ impl WindowedTimeseries {
                 let m = self.mean(i);
                 assert!(sd > 0.0);
                 action(i, val / sd - sumv * m / sd);
+            }
+        });
+    }
+
+    pub fn znormalized_sliding_dot_product_write<O, F: Fn(usize, f64, &mut O)>(
+        &self,
+        fft_data: &FFTData,
+        v: &[f64],
+        out: &mut [O],
+        func: F,
+    ) {
+        let sumv: f64 = v.iter().sum();
+        self.sliding_dot_product_write(fft_data, v, out, |i, val, out| {
+            let sd = self.sd(i);
+            if sd < FLAT_SD_THRESHOLD {
+                // subsequence is flat, cannot z-normalize
+                func(i, f64::NAN, out);
+            } else {
+                let m = self.mean(i);
+                assert!(sd > 0.0);
+                func(i, val / sd - sumv * m / sd, out);
             }
         });
     }
