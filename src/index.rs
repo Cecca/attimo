@@ -419,7 +419,7 @@ impl LSHIndex {
 
             let enumerator = slf.collisions(0, K, None);
             if enumerator.estimate_num_collisions(exclusion_zone) > 0 {
-                let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS);
+                let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS - 1);
                 slf.repetitions_setup_time = avg_dur;
                 observe!(0, 0, "time_setup_s", t.elapsed().as_secs_f64());
                 return slf;
@@ -544,6 +544,89 @@ impl LSHIndex {
         assert!(prefix > 0 && prefix <= K, "illegal prefix {}", prefix);
         let rep = self.repetitions[repetition].get();
         CollisionEnumerator::new(rep, prefix, prev_prefix)
+    }
+
+    /// Estimates, for each level in the given repetition index, the number of
+    /// non-trivial collisions
+    fn collision_profile_at(&self, repetition: usize, exclusion_zone: usize) -> Vec<f64> {
+        let handle = self.repetitions[repetition].get();
+        let hashes = handle.get_hashes();
+        let indices = handle.get_indices();
+
+        // let mut counts = vec![0.0; K + 1];
+        // counts[0] = f64::INFINITY;
+
+        // First we count, checking for overlaps, the collisions at the longest prefix, under the
+        // assumption that most trivial collisions happen at the longest prefix
+        let counts = (0..=K)
+            .into_par_iter()
+            .map(|prefix| {
+                if prefix == 0 {
+                    return (f64::INFINITY, 0);
+                }
+                let mut cnt = 0;
+                let mut trivial = 0;
+                let mut start = 0;
+                while start < hashes.len() {
+                    let end = start
+                        + hashes[start..].partition_point(|h| h.prefix_eq(&hashes[start], prefix));
+                    assert!(start < end);
+                    if prefix == K {
+                        let mut cnt_collisions = 0;
+                        for i in start..end {
+                            for j in start..i {
+                                if !indices[i].overlaps(indices[j], exclusion_zone) {
+                                    cnt_collisions += 1;
+                                } else {
+                                    trivial += 1;
+                                }
+                            }
+                        }
+                        cnt += cnt_collisions;
+                    } else {
+                        let n = end - start;
+                        let estimate_collisions = n * (n - 1) / 2;
+                        cnt += estimate_collisions;
+                    }
+                    start = end;
+                }
+                (cnt as f64, trivial)
+            })
+            .collect::<Vec<(f64, usize)>>();
+
+        let trivial = counts.last().unwrap().1;
+        let (mut counts, _): (Vec<f64>, Vec<usize>) = counts.into_iter().unzip();
+
+        // Adjust the estimates by removing trivial collisions, except for the last one where
+        // collisions have been counted exactly
+        for c in counts[1..K].iter_mut() {
+            *c -= trivial as f64;
+            assert!(*c >= 0.0);
+        }
+
+        counts
+    }
+
+    fn collision_profile(&self, exclusion_zone: usize) -> Vec<f64> {
+        let reps = self.get_repetitions().min(4);
+        let mut counts = (0..reps)
+            .into_par_iter()
+            .map(|rep| self.collision_profile_at(rep, exclusion_zone))
+            .reduce(
+                || vec![0.0; K + 1],
+                |mut a, b| {
+                    for (aa, bb) in a.iter_mut().zip(b) {
+                        *aa += bb;
+                    }
+                    a
+                },
+            );
+
+        for acc in counts.iter_mut() {
+            *acc /= reps as f64;
+        }
+
+        counts
     }
 }
 
@@ -736,26 +819,14 @@ impl IndexStats {
             LSHIndex::required_memory(ts, max_repetitions)
         );
 
-        let nreps = 4;
         let repetition_setup_cost = index.repetitions_setup_time.as_secs_f64();
-        let mut expected_collisions = vec![0.0; K + 1];
-        info!("Estimating the number of collisions");
-        let dat: Vec<(usize, usize, usize)> = (1..=K)
-            .into_par_iter()
-            .flat_map(|prefix| (0..nreps).into_par_iter().map(move |rep| (prefix, rep)))
-            .map(|(prefix, rep)| {
-                let collisions = Self::num_collisions(index, rep, prefix, exclusion_zone);
-                (prefix, rep, collisions)
-            })
-            .collect();
-        for (prefix, _rep, collisions) in dat {
-            expected_collisions[prefix] += collisions as f64;
-        }
-        for c in expected_collisions.iter_mut() {
-            *c /= nreps as f64;
-        }
-        expected_collisions[0] = f64::INFINITY; // just to signal that we don't want to go to prefix 0
-        info!("Estimated collisions: {:?}", expected_collisions);
+        let t = Instant::now();
+        let expected_collisions = index.collision_profile(exclusion_zone);
+        info!(
+            "Collisions profile ({:?}): {:?}",
+            t.elapsed(),
+            expected_collisions
+        );
 
         // now we estimate the cost of running a handful of distance computations,
         // as a proxy for the cost of handling the collisions.
