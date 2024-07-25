@@ -350,7 +350,7 @@ pub struct LSHIndex {
     max_repetitions_in_memory: usize,
 }
 
-pub const INITIAL_REPETITIONS: usize = 16;
+pub const INITIAL_REPETITIONS: usize = 4;
 
 impl LSHIndex {
     /// How much memory would it be required to store information for these many repetitions?
@@ -847,19 +847,6 @@ impl IndexStats {
             collision_cost,
             max_repetitions,
         }
-    }
-
-    /// Counts the number of collision at a given repetition and prefix length,
-    /// and the cost of setting up the repetition
-    fn num_collisions(
-        index: &LSHIndex,
-        repetition: usize,
-        prefix: usize,
-        exclusion_zone: usize,
-    ) -> usize {
-        index
-            .collisions(repetition, prefix, None)
-            .estimate_num_collisions(exclusion_zone)
     }
 
     pub fn first_meaningful_prefix(&self) -> usize {
