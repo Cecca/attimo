@@ -169,20 +169,32 @@ impl Hasher {
         _exclusion_zone: usize,
         rng: &mut R,
     ) -> f64 {
+        let timer = Instant::now();
         let n = ts.num_subsequences();
         let subsequence_norm = (ts.w as f64).sqrt();
         let expected_max_dotp = subsequence_norm * (2.0 * (n as f64).ln()).sqrt();
         info!("Expected max dot product {}", expected_max_dotp);
-        let mut dotps = Vec::new();
+        let mut dotps = vec![(0.0, 0); n];
         // let min_width = expected_max_dotp / 128.0;
         // Compute a few dot products
         let v = Self::sample_vec(ts.w, rng);
-        ts.znormalized_sliding_dot_product_for_each(fft_data, &v, |i, dotp| {
+        ts.znormalized_sliding_dot_product_write(fft_data, &v, &mut dotps, |i, dotp, out| {
             if !dotp.is_nan() {
-                dotps.push((dotp, i));
+                *out = (dotp, i);
+            } else {
+                *out = (f64::INFINITY, usize::MAX);
             }
         });
-        dotps.sort_by(|a, b| a.0.total_cmp(&b.0));
+        dotps.par_sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+        // remove the infinity values (that are placeholders for NaN values in the dot products)
+        while let Some(last) = dotps.last() {
+            if last.0.is_infinite() {
+                dotps.pop();
+            } else {
+                break;
+            }
+        }
+
         let (perc1, perc99) = (dotps[dotps.len() / 100].0, dotps[99 * dotps.len() / 100].0);
         let min_sample_width = perc1.abs().max(perc99.abs()) / 128.0;
         info!(
@@ -192,6 +204,11 @@ impl Hasher {
             min_sample_width,
             dotps.iter().min_by(|a, b| a.0.total_cmp(&b.0)).unwrap().0,
             dotps.iter().max_by(|a, b| a.0.total_cmp(&b.0)).unwrap().0,
+        );
+        info!(
+            "width: {} computed in {:?}",
+            min_sample_width,
+            timer.elapsed()
         );
 
         min_sample_width
