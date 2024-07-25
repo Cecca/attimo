@@ -205,7 +205,7 @@ impl Hasher {
                 fft_data,
                 &self.vectors[k],
                 output,
-                |i, mut h, out| {
+                move |i, mut h, out| {
                     if !h.is_nan() {
                         h = (h + self.shifts[k]) / self.width;
                         if h.abs() > 128.0 {

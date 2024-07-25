@@ -1,6 +1,7 @@
 use crate::allocator::Bytes;
 use crate::distance::{zdot, zeucl};
 use rand_distr::num_traits::Zero;
+use rayon::prelude::*;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -272,7 +273,7 @@ impl WindowedTimeseries {
         }
     }
 
-    pub fn sliding_dot_product_write<O, F: Fn(usize, f64, &mut O)>(
+    pub fn sliding_dot_product_write<O: Send + Sync, F: Fn(usize, f64, &mut O) + Send + Sync>(
         &self,
         fft_data: &FFTData,
         v: &[f64],
@@ -282,18 +283,10 @@ impl WindowedTimeseries {
         assert_eq!(v.len(), self.w);
         assert_eq!(out.len(), self.num_subsequences());
 
-        let stride = fft_data.fft_length - self.w;
-
-        //// Get local scratch vectors, to avoid allocations
+        let stride = fft_data.chunk_size;
         let fft_length = fft_data.fft_length;
-        let mut vfft = fft_data
-            .buf_vfft
-            .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
-            .borrow_mut();
-        let mut ivfft = fft_data
-            .buf_ivfft
-            .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
-            .borrow_mut();
+
+        // Get local scratch vectors, to avoid allocations
         let mut scratch = fft_data
             .scratch
             .get_or(|| {
@@ -304,7 +297,8 @@ impl WindowedTimeseries {
             })
             .borrow_mut();
 
-        //// Then compute the FFT of the reversed input vector, padded with zeros
+        // Then compute the FFT of the reversed input vector, padded with zeros
+        let mut vfft = vec![Complex::zero(); fft_length];
         vfft.fill(Complex::zero());
         for (i, &x) in v.iter().enumerate() {
             vfft[self.w - i - 1] = Complex { re: x, im: 0.0 };
@@ -312,31 +306,55 @@ impl WindowedTimeseries {
         fft_data
             .fftfun
             .process_with_scratch(&mut vfft, &mut scratch);
+        drop(scratch); // Free up the borrow of scratch
 
-        //// Iterate over the chunks
-        for (chunk_idx, chunk) in fft_data.fft_chunks.iter().enumerate() {
-            ivfft.fill(Complex::zero());
-            //// Then compute the element-wise multiplication between the dot products, inplace
-            for i in 0..fft_data.fft_length {
-                ivfft[i] = vfft[i] * chunk[i];
-            }
+        let out_chunks = out.par_chunks_mut(fft_data.chunk_size);
 
-            //// And go back to the time domain
-            fft_data
-                .ifftfun
-                .process_with_scratch(&mut ivfft, &mut scratch);
+        // Iterate over the chunks
+        fft_data
+            .fft_chunks
+            .par_iter()
+            .zip(out_chunks)
+            .enumerate()
+            .for_each(move |(chunk_idx, (chunk, out))| {
+                assert_eq!(chunk.len(), fft_length);
 
-            //// Callback with the output value, rescaling on the go (`rustfft`
-            //// does not perform normalization automatically)
-            let offset = chunk_idx * stride;
-            for i in 0..(fft_data.fft_length - self.w) {
-                if i + offset < self.num_subsequences() {
-                    let val = ivfft[(i + v.len() - 1) % fft_data.fft_length].re
-                        / fft_data.fft_length as f64;
-                    func(i + offset, val, &mut out[i + offset]);
+                let mut ivfft = fft_data
+                    .buf_ivfft
+                    .get_or(|| RefCell::new(vec![Complex::zero(); fft_length]))
+                    .borrow_mut();
+                let mut scratch = fft_data
+                    .scratch
+                    .get_or(|| {
+                        RefCell::new(vec![
+                            Complex::zero();
+                            fft_data.ifftfun.get_inplace_scratch_len()
+                        ])
+                    })
+                    .borrow_mut();
+
+                ivfft.fill(Complex::zero());
+                // Then compute the element-wise multiplication between the dot products, inplace
+                for i in 0..fft_data.fft_length {
+                    ivfft[i] = vfft[i] * chunk[i];
                 }
-            }
-        }
+
+                // And go back to the time domain
+                fft_data
+                    .ifftfun
+                    .process_with_scratch(&mut ivfft, &mut scratch);
+
+                // Callback with the output value, rescaling on the go (`rustfft`
+                // does not perform normalization automatically)
+                let offset = chunk_idx * stride;
+                for i in 0..(fft_data.fft_length - self.w) {
+                    if i < out.len() {
+                        let val = ivfft[(i + v.len() - 1) % fft_data.fft_length].re
+                            / fft_data.fft_length as f64;
+                        func(i + offset, val, &mut out[i]);
+                    }
+                }
+            });
     }
 
     pub fn sliding_dot_product(&self, fft_data: &FFTData, v: &[f64], output: &mut [f64]) {
@@ -388,7 +406,10 @@ impl WindowedTimeseries {
         });
     }
 
-    pub fn znormalized_sliding_dot_product_write<O, F: Fn(usize, f64, &mut O)>(
+    pub fn znormalized_sliding_dot_product_write<
+        O: Send + Sync,
+        F: Fn(usize, f64, &mut O) + Send + Sync,
+    >(
         &self,
         fft_data: &FFTData,
         v: &[f64],
@@ -639,6 +660,8 @@ fn rolling_stat_slow(ts: &[f64], w: usize) -> (Vec<f64>, Vec<f64>) {
 }
 
 pub struct FFTData {
+    /// The size of chunks is terms of subsequences
+    chunk_size: usize,
     fft_length: usize,
     /// We maintain the fft transform for computing dot products in chunks
     /// of size `fft_length` (or the smallest power of 2 after w, whichever largest), in order to
@@ -682,6 +705,7 @@ impl FFTData {
             begin += fft_length - ts.w;
         }
         Self {
+            chunk_size: fft_length - ts.w,
             fft_length,
             fft_chunks,
             fftfun,
