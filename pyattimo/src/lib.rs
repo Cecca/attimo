@@ -360,10 +360,17 @@ pub fn motiflet_brute_force(
         .collect()
 }
 
+#[pyfunction]
+#[pyo3(signature=(path, prefix=None))]
+pub fn loadts(path: &str, prefix: Option<usize>) -> Vec<f64> {
+    attimo::load::loadts(path, prefix).expect("error loading time series")
+}
+
 #[pymodule]
 fn pyattimo(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     pyo3_log::init();
     m.add_function(wrap_pyfunction!(motiflet_brute_force, m)?)?;
+    m.add_function(wrap_pyfunction!(loadts, m)?)?;
     m.add_class::<MotifsIterator>()?;
     m.add_class::<MotifletsIterator>()?;
     Ok(())
