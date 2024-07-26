@@ -356,6 +356,38 @@ impl<'data> RepetitionHandle<'data> {
     }
 }
 
+/// Finds the split point to partition the given slice of hash values roughly in half,
+/// so that no bucket crosses the splitting point at any prefix length.
+fn split_index(hashes: &[HashValue], prefix: usize) -> usize {
+    let mut i = hashes.len() / 2;
+    while i > 0 && hashes[i - 1].prefix_eq(&hashes[i], prefix) {
+        i -= 1;
+    }
+    i
+}
+
+/// Finds ranges partitioning the slice of hashes so that no bucket is crosses
+/// a splitting point.
+fn split_ranges(hashes: &[HashValue], nranges: usize, prefix: usize) -> Vec<Range<usize>> {
+    assert!(nranges > 0);
+    if nranges == 1 {
+        // base case
+        return vec![0..hashes.len()];
+    }
+    let mid = split_index(hashes, prefix);
+    let mut left = split_ranges(&hashes[0..mid], nranges.div_ceil(2), prefix);
+    let mut right = split_ranges(&hashes[mid..], nranges.div_floor(2), prefix);
+    right
+        .iter_mut()
+        .for_each(|range| *range = (range.start + mid)..(range.end + mid));
+
+    left.extend_from_slice(&right);
+
+    assert_eq!(left.last().unwrap().end, hashes.len());
+
+    left
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LSHIndexStats {
     pub num_repetitions: usize,
@@ -594,6 +626,9 @@ impl LSHIndex {
                         let mut cnt_collisions = 0;
                         for i in start..end {
                             for j in start..i {
+                                // TODO: counting these trivial matches is VERY expensive on the
+                                // VCAB dataset, where there are 500 billion such trivial matches.
+                                // It takes 400 seconds just to count them.
                                 if !indices[i].overlaps(indices[j], exclusion_zone) {
                                     cnt_collisions += 1;
                                 } else {
