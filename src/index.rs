@@ -684,6 +684,82 @@ impl LSHIndex {
     }
 }
 
+pub struct EnumeratorIndex {
+    /// the bounds on the valid indices
+    bounds: Range<usize>,
+    /// the current range spanned by i and j
+    range: Range<usize>,
+    prefix: usize,
+    i: usize,
+    j: usize,
+}
+
+impl EnumeratorIndex {
+    pub fn new(bounds: Range<usize>, prefix: usize, hashes: &[HashValue]) -> Self {
+        let mut slf = Self {
+            range: bounds.start..bounds.start,
+            bounds,
+            prefix,
+            i: 0,
+            j: 1,
+        };
+        slf.next_range(hashes);
+        slf
+    }
+
+    fn next(&mut self, hashes: &[HashValue]) -> Option<(usize, usize)> {
+        if self.i >= self.bounds.end {
+            return None;
+        }
+
+        let i = self.i;
+        let j = self.j;
+
+        if self.j + 1 < self.range.end {
+            self.j += 1;
+        } else if self.i + 1 < self.range.end {
+            self.i += 1;
+            self.j = self.i + 1;
+        } else {
+            self.next_range(hashes);
+        }
+
+        Some((i, j))
+    }
+
+    fn next_range(&mut self, hashes: &[HashValue]) {
+        // exponential search
+        let start = self.range.end;
+        let h = hashes[start];
+        let mut offset = 1;
+        let mut low = start;
+        if low >= self.bounds.end {
+            self.range = low..low;
+            return;
+        }
+        while start + offset < self.bounds.end && hashes[start + offset].prefix_eq(&h, self.prefix)
+        {
+            low = start + offset;
+            offset *= 2;
+        }
+        let high = (start + offset).min(self.bounds.end);
+
+        // binary search
+        debug_assert!(
+            hashes[low].prefix_eq(&h, self.prefix),
+            "{:?} != {:?} (prefix {})",
+            hashes[low],
+            h,
+            self.prefix
+        );
+        let off = hashes[low..high].partition_point(|hv| h.prefix_eq(hv, self.prefix));
+        let end = low + off;
+        self.range = start..end;
+        self.i = self.range.start;
+        self.j = self.i + 1;
+    }
+}
+
 pub struct CollisionEnumerator<'index> {
     prefix: usize,
     prev_prefix: Option<usize>,
