@@ -687,7 +687,9 @@ impl LSHIndex {
 pub struct EnumeratorIndex {
     /// the bounds on the valid indices
     bounds: Range<usize>,
-    /// the current range spanned by i and j
+    /// the current range spanned by i and j.
+    /// invariant: i and j are _always_ a pair of indices in a range of size at least 2,
+    /// except when [[next]] returns None.
     range: Range<usize>,
     prefix: usize,
     i: usize,
@@ -701,7 +703,7 @@ impl EnumeratorIndex {
             bounds,
             prefix,
             i: 0,
-            j: 1,
+            j: 0,
         };
         slf.next_range(hashes);
         slf
@@ -714,47 +716,67 @@ impl EnumeratorIndex {
 
         let i = self.i;
         let j = self.j;
+        assert!(self.range.contains(&i));
+        assert!(self.range.contains(&j));
+        assert!(hashes[i].prefix_eq(&hashes[j], self.prefix));
 
-        if self.j + 1 < self.range.end {
-            self.j += 1;
-        } else if self.i + 1 < self.range.end {
+        // set things up for the next call
+        if self.j + 1 >= self.range.end {
             self.i += 1;
             self.j = self.i + 1;
+
+            if self.i >= self.range.end || self.j >= self.range.end {
+                // we have exhausted the range
+                self.next_range(hashes);
+            }
         } else {
-            self.next_range(hashes);
+            self.j += 1;
         }
 
         Some((i, j))
     }
 
     fn next_range(&mut self, hashes: &[HashValue]) {
-        // exponential search
-        let start = self.range.end;
-        let h = hashes[start];
-        let mut offset = 1;
-        let mut low = start;
-        if low >= self.bounds.end {
-            self.range = low..low;
-            return;
-        }
-        while start + offset < self.bounds.end && hashes[start + offset].prefix_eq(&h, self.prefix)
-        {
-            low = start + offset;
-            offset *= 2;
-        }
-        let high = (start + offset).min(self.bounds.end);
+        while self.range.end < self.bounds.end {
+            // exponential search
+            let start = self.range.end;
+            let h = hashes[start];
+            let mut offset = 1;
+            let mut low = start;
+            if low >= self.bounds.end {
+                self.range = low..low;
+                return;
+            }
+            while start + offset < self.bounds.end
+                && hashes[start + offset].prefix_eq(&h, self.prefix)
+            {
+                low = start + offset;
+                offset *= 2;
+            }
+            let high = (start + offset).min(self.bounds.end);
 
-        // binary search
-        debug_assert!(
-            hashes[low].prefix_eq(&h, self.prefix),
-            "{:?} != {:?} (prefix {})",
-            hashes[low],
-            h,
-            self.prefix
-        );
-        let off = hashes[low..high].partition_point(|hv| h.prefix_eq(hv, self.prefix));
-        let end = low + off;
-        self.range = start..end;
+            // binary search
+            debug_assert!(
+                hashes[low].prefix_eq(&h, self.prefix),
+                "{:?} != {:?} (prefix {})",
+                hashes[low],
+                h,
+                self.prefix
+            );
+            let off = hashes[low..high].partition_point(|hv| h.prefix_eq(hv, self.prefix));
+            let end = low + off;
+            self.range = start..end;
+            if self.range.len() >= 2 {
+                break;
+            }
+        }
+        if self.range.len() < 2 {
+            // if after all the effort the range still does not contain a pair, then
+            // set the range past the bounds to mark the enumerator as done
+            self.range = self.bounds.end..self.bounds.end;
+            log::debug!("got to the end!");
+        } else {
+        }
         self.i = self.range.start;
         self.j = self.i + 1;
     }
@@ -804,15 +826,17 @@ impl<'index> CollisionEnumerator<'index> {
             let hb = hashes[j];
             debug_assert!(ha.prefix_eq(&hb, self.prefix));
             if !self
-                        .prev_prefix
-                        .map(|pp| ha.prefix_eq(&hb, pp))
-                        .unwrap_or(false)
-                        &&
-                        // are the corresponding subsequences overlapping?
-                        // this check also excludes the flat subsequences, whose ID is replaced
-                        // with u32::MAX, and thus always overlaps
-                        !a.overlaps(b, exclusion_zone)
+                // did these collide at an earlier prefix?
+                .prev_prefix
+                .map(|pp| ha.prefix_eq(&hb, pp))
+                .unwrap_or(false)
+                &&
+                // are the corresponding subsequences overlapping?
+                // this check also excludes the flat subsequences, whose ID is replaced
+                // with u32::MAX, and thus always overlaps
+                !a.overlaps(b, exclusion_zone)
             {
+                // TODO: actually compute the distance here when we introduce parallelism
                 output[idx] = (a.min(b), a.max(b), Distance(f64::INFINITY));
                 idx += 1;
             }
