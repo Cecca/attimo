@@ -864,9 +864,9 @@ impl<'index> CollisionEnumerator<'index> {
         let indices = self.handle.get_indices();
 
         let chunk_size = output.len().div_ceil(self.indices.len());
-        let out_chunks = output.chunks_mut(chunk_size);
+        let out_chunks = output.par_chunks_mut(chunk_size);
         let emitted = out_chunks
-            .zip(self.indices.iter_mut())
+            .zip(self.indices.par_iter_mut())
             .map(|(output, eindex)| {
                 output.fill((u32::MAX, u32::MAX, Distance::infinity()));
 
