@@ -1,6 +1,6 @@
 use log::{info, warn};
 use rand::prelude::*;
-use rand_distr::{Normal, Uniform};
+use rand_distr::{uniform::SampleRange, Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use std::{
@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     allocator::Bytes,
-    distance::zeucl,
+    distance::{zeucl, zeucl_threshold},
     knn::Distance,
     observe::*,
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
@@ -684,6 +684,7 @@ impl LSHIndex {
     }
 }
 
+#[derive(Debug)]
 struct RangesIterator {
     prefix: usize,
     bounds: Range<usize>,
@@ -826,18 +827,24 @@ pub struct CollisionEnumerator<'index> {
     prefix: usize,
     prev_prefix: Option<usize>,
     handle: RepetitionHandle<'index>,
-    eindex: EnumeratorIndex,
+    // eindex: EnumeratorIndex,
+    indices: Vec<EnumeratorIndex>,
 }
 impl<'index> CollisionEnumerator<'index> {
     fn new(handle: RepetitionHandle<'index>, prefix: usize, prev_prefix: Option<usize>) -> Self {
         assert!(prefix > 0 && prefix <= K);
-        let bounds = 0..handle.get_hashes().len();
-        let eindex = EnumeratorIndex::new(bounds, prefix, handle.get_hashes());
+        let nindices = rayon::current_num_threads();
+        let ranges = split_ranges(handle.get_hashes(), nindices, prefix);
+        let indices = ranges
+            .into_iter()
+            .filter(|r| !r.is_empty())
+            .map(|range| EnumeratorIndex::new(range, prefix, handle.get_hashes()))
+            .collect();
         Self {
             prefix,
             prev_prefix,
             handle,
-            eindex,
+            indices,
         }
     }
 
@@ -850,19 +857,27 @@ impl<'index> CollisionEnumerator<'index> {
         &mut self,
         output: &mut [(u32, u32, Distance)],
         exclusion_zone: usize,
+        ts: &WindowedTimeseries,
+        threshold: Distance,
     ) -> Option<usize> {
-        let mut idx = 0;
-
         let hashes = self.handle.get_hashes();
         let indices = self.handle.get_indices();
 
-        while let Some((i, j)) = self.eindex.next(hashes) {
-            let a = indices[i];
-            let b = indices[j];
-            let ha = hashes[i];
-            let hb = hashes[j];
-            debug_assert!(ha.prefix_eq(&hb, self.prefix));
-            if !self
+        let chunk_size = output.len().div_ceil(self.indices.len());
+        let out_chunks = output.chunks_mut(chunk_size);
+        let emitted = out_chunks
+            .zip(self.indices.iter_mut())
+            .map(|(output, eindex)| {
+                output.fill((u32::MAX, u32::MAX, Distance::infinity()));
+
+                let mut idx = 0;
+                while let Some((i, j)) = eindex.next(hashes) {
+                    let a = indices[i];
+                    let b = indices[j];
+                    let ha = hashes[i];
+                    let hb = hashes[j];
+                    debug_assert!(ha.prefix_eq(&hb, self.prefix));
+                    if !self
                 // did these collide at an earlier prefix?
                 .prev_prefix
                 .map(|pp| ha.prefix_eq(&hb, pp))
@@ -872,20 +887,24 @@ impl<'index> CollisionEnumerator<'index> {
                 // this check also excludes the flat subsequences, whose ID is replaced
                 // with u32::MAX, and thus always overlaps
                 !a.overlaps(b, exclusion_zone)
-            {
-                // TODO: actually compute the distance here when we introduce parallelism
-                output[idx] = (a.min(b), a.max(b), Distance(f64::INFINITY));
-                idx += 1;
-            }
-            if idx >= output.len() {
-                return Some(idx);
-            }
-        }
+                    {
+                        let d = zeucl_threshold(ts, a as usize, b as usize, threshold.0)
+                            .unwrap_or(f64::INFINITY);
+                        output[idx] = (a.min(b), a.max(b), Distance(d));
+                        idx += 1;
+                    }
+                    if idx >= output.len() {
+                        return idx;
+                    }
+                }
+                idx
+            })
+            .sum::<usize>();
 
-        if idx == 0 {
+        if emitted == 0 {
             None
         } else {
-            Some(idx)
+            Some(emitted)
         }
     }
 
@@ -893,11 +912,13 @@ impl<'index> CollisionEnumerator<'index> {
         let hashes = self.handle.get_hashes();
         let indices = self.handle.get_indices();
 
-        while let Some((i, j)) = self.eindex.next(hashes) {
-            let a = indices[i];
-            let b = indices[j];
-            if !a.overlaps(b, exclusion_zone) {
-                return true;
+        for eindex in self.indices.iter_mut() {
+            while let Some((i, j)) = eindex.next(hashes) {
+                let a = indices[i];
+                let b = indices[j];
+                if !a.overlaps(b, exclusion_zone) {
+                    return true;
+                }
             }
         }
 
