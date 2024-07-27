@@ -888,10 +888,10 @@ impl<'index> CollisionEnumerator<'index> {
                 // with u32::MAX, and thus always overlaps
                 !a.overlaps(b, exclusion_zone)
                     {
-                        let d = zeucl_threshold(ts, a as usize, b as usize, threshold.0)
-                            .unwrap_or(f64::INFINITY);
-                        output[idx] = (a.min(b), a.max(b), Distance(d));
-                        idx += 1;
+                        if let Some(d) = zeucl_threshold(ts, a as usize, b as usize, threshold.0) {
+                            output[idx] = (a.min(b), a.max(b), Distance(d));
+                            idx += 1;
+                        }
                     }
                     if idx >= output.len() {
                         return idx;
