@@ -684,101 +684,141 @@ impl LSHIndex {
     }
 }
 
-pub struct EnumeratorIndex {
-    /// the bounds on the valid indices
-    bounds: Range<usize>,
-    /// the current range spanned by i and j.
-    /// invariant: i and j are _always_ a pair of indices in a range of size at least 2,
-    /// except when [[next]] returns None.
-    range: Range<usize>,
+struct RangesIterator {
     prefix: usize,
+    bounds: Range<usize>,
+    previous: Range<usize>,
+}
+
+impl RangesIterator {
+    fn new(bounds: Range<usize>, prefix: usize) -> Self {
+        Self {
+            // position the previous range at the beginning, as an empty range
+            previous: bounds.start..bounds.start,
+            bounds,
+            prefix,
+        }
+    }
+
+    fn next(&mut self, hashes: &[HashValue]) -> Option<Range<usize>> {
+        let start = self.previous.end;
+        if start >= self.bounds.end {
+            return None;
+        }
+
+        // exponential search
+        let h = hashes[start];
+        let mut offset = 1;
+        let mut low = start;
+        if low >= self.bounds.end {
+            self.previous = low..low;
+            return None;
+        }
+        while start + offset < self.bounds.end && hashes[start + offset].prefix_eq(&h, self.prefix)
+        {
+            low = start + offset;
+            offset *= 2;
+        }
+        let high = (start + offset).min(self.bounds.end);
+
+        let off = hashes[low..high].partition_point(|hv| h.prefix_eq(hv, self.prefix));
+        let end = low + off;
+        let res = start..end;
+
+        self.previous = res.clone();
+
+        Some(res)
+    }
+}
+
+#[derive(Debug)]
+struct PairsIterator {
+    range: Range<usize>,
     i: usize,
     j: usize,
 }
 
-impl EnumeratorIndex {
-    pub fn new(bounds: Range<usize>, prefix: usize, hashes: &[HashValue]) -> Self {
-        let mut slf = Self {
-            range: bounds.start..bounds.start,
-            bounds,
-            prefix,
-            i: 0,
-            j: 0,
-        };
-        slf.next_range(hashes);
-        slf
+impl PairsIterator {
+    fn new(range: Range<usize>) -> Self {
+        Self {
+            i: range.start,
+            j: range.start,
+            range,
+        }
     }
 
-    fn next(&mut self, hashes: &[HashValue]) -> Option<(usize, usize)> {
-        if self.i >= self.bounds.end {
+    fn next(&mut self) -> Option<(usize, usize)> {
+        if self.i >= self.range.end {
             return None;
         }
 
-        let i = self.i;
-        let j = self.j;
-        assert!(self.range.contains(&i));
-        assert!(self.range.contains(&j));
-        assert!(hashes[i].prefix_eq(&hashes[j], self.prefix));
-
-        // set things up for the next call
-        if self.j + 1 >= self.range.end {
+        self.j += 1;
+        if self.j >= self.range.end {
             self.i += 1;
             self.j = self.i + 1;
-
-            if self.i >= self.range.end || self.j >= self.range.end {
-                // we have exhausted the range
-                self.next_range(hashes);
-            }
-        } else {
-            self.j += 1;
+        }
+        if self.i >= self.range.end || self.j >= self.range.end {
+            // mark the iterator as exhausted
+            self.i = self.range.end;
+            self.j = self.range.end;
+            return None;
         }
 
-        Some((i, j))
+        Some((self.i, self.j))
+    }
+}
+
+#[test]
+fn test_pairs_iterator() {
+    let mut iter = PairsIterator::new(3..8);
+    let mut pairs = Vec::new();
+    while let Some(pair) = iter.next() {
+        pairs.push(pair);
+    }
+    let expected = vec![
+        (3, 4),
+        (3, 5),
+        (3, 6),
+        (3, 7),
+        (4, 5),
+        (4, 6),
+        (4, 7),
+        (5, 6),
+        (5, 7),
+        (6, 7),
+    ];
+    assert_eq!(pairs, expected);
+}
+
+struct EnumeratorIndex {
+    ranges: RangesIterator,
+    pairs: PairsIterator,
+}
+
+impl EnumeratorIndex {
+    pub fn new(bounds: Range<usize>, prefix: usize, hashes: &[HashValue]) -> Self {
+        let mut ranges = RangesIterator::new(bounds, prefix);
+
+        Self {
+            pairs: PairsIterator::new(ranges.next(hashes).unwrap()),
+            ranges,
+        }
     }
 
-    fn next_range(&mut self, hashes: &[HashValue]) {
-        while self.range.end < self.bounds.end {
-            // exponential search
-            let start = self.range.end;
-            let h = hashes[start];
-            let mut offset = 1;
-            let mut low = start;
-            if low >= self.bounds.end {
-                self.range = low..low;
-                return;
+    fn next(&mut self, hashes: &[HashValue]) -> Option<(usize, usize)> {
+        loop {
+            if let Some(pair) = self.pairs.next() {
+                return Some(pair);
             }
-            while start + offset < self.bounds.end
-                && hashes[start + offset].prefix_eq(&h, self.prefix)
-            {
-                low = start + offset;
-                offset *= 2;
-            }
-            let high = (start + offset).min(self.bounds.end);
 
-            // binary search
-            debug_assert!(
-                hashes[low].prefix_eq(&h, self.prefix),
-                "{:?} != {:?} (prefix {})",
-                hashes[low],
-                h,
-                self.prefix
-            );
-            let off = hashes[low..high].partition_point(|hv| h.prefix_eq(hv, self.prefix));
-            let end = low + off;
-            self.range = start..end;
-            if self.range.len() >= 2 {
-                break;
+            // the current range is exhausted, load the next one
+            if let Some(range) = self.ranges.next(hashes) {
+                self.pairs = PairsIterator::new(range);
+            } else {
+                // there is no next range
+                return None;
             }
         }
-        if self.range.len() < 2 {
-            // if after all the effort the range still does not contain a pair, then
-            // set the range past the bounds to mark the enumerator as done
-            self.range = self.bounds.end..self.bounds.end;
-            log::debug!("got to the end!");
-        } else {
-        }
-        self.i = self.range.start;
-        self.j = self.i + 1;
     }
 }
 
@@ -787,9 +827,6 @@ pub struct CollisionEnumerator<'index> {
     prev_prefix: Option<usize>,
     handle: RepetitionHandle<'index>,
     eindex: EnumeratorIndex,
-    // current_range: Range<usize>,
-    // i: usize,
-    // j: usize,
 }
 impl<'index> CollisionEnumerator<'index> {
     fn new(handle: RepetitionHandle<'index>, prefix: usize, prev_prefix: Option<usize>) -> Self {
