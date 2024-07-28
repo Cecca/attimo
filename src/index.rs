@@ -615,6 +615,7 @@ impl LSHIndex {
                 if prefix == 0 {
                     return (f64::INFINITY, 0);
                 }
+                let timer = Instant::now();
                 let mut cnt = 0;
                 let mut trivial = 0;
                 let mut start = 0;
@@ -644,6 +645,13 @@ impl LSHIndex {
                     }
                     start = end;
                 }
+                log::debug!(
+                    "Thread {:?} counted {} collisions ({} trivial) in {:?}",
+                    rayon::current_thread_index(),
+                    cnt,
+                    trivial,
+                    timer.elapsed()
+                );
                 (cnt as f64, trivial)
             })
             .collect::<Vec<(f64, usize)>>();
@@ -868,25 +876,28 @@ impl<'index> CollisionEnumerator<'index> {
         let emitted = out_chunks
             .zip(self.indices.par_iter_mut())
             .map(|(output, eindex)| {
+                let timer = Instant::now();
                 output.fill((u32::MAX, u32::MAX, Distance::infinity()));
 
+                let mut cnt_candidates = 0;
                 let mut idx = 0;
                 while let Some((i, j)) = eindex.next(hashes) {
+                    cnt_candidates += 1;
                     let a = indices[i];
                     let b = indices[j];
                     let ha = hashes[i];
                     let hb = hashes[j];
                     debug_assert!(ha.prefix_eq(&hb, self.prefix));
                     if !self
-                // did these collide at an earlier prefix?
-                .prev_prefix
-                .map(|pp| ha.prefix_eq(&hb, pp))
-                .unwrap_or(false)
-                &&
-                // are the corresponding subsequences overlapping?
-                // this check also excludes the flat subsequences, whose ID is replaced
-                // with u32::MAX, and thus always overlaps
-                !a.overlaps(b, exclusion_zone)
+                        // did these collide at an earlier prefix?
+                        .prev_prefix
+                        .map(|pp| ha.prefix_eq(&hb, pp))
+                        .unwrap_or(false)
+                        &&
+                        // are the corresponding subsequences overlapping?
+                        // this check also excludes the flat subsequences, whose ID is replaced
+                        // with u32::MAX, and thus always overlaps
+                        !a.overlaps(b, exclusion_zone)
                     {
                         if let Some(d) = zeucl_threshold(ts, a as usize, b as usize, threshold.0) {
                             output[idx] = (a.min(b), a.max(b), Distance(d));
@@ -897,6 +908,13 @@ impl<'index> CollisionEnumerator<'index> {
                         return idx;
                     }
                 }
+                log::debug!(
+                    "Thread {:?} discovered {} collisions in {:?}, evaluating {}",
+                    rayon::current_thread_index(),
+                    idx,
+                    timer.elapsed(),
+                    cnt_candidates
+                );
                 idx
             })
             .sum::<usize>();
