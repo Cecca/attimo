@@ -1,6 +1,6 @@
 use log::{info, warn};
 use rand::prelude::*;
-use rand_distr::{uniform::SampleRange, Normal, Uniform};
+use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use std::{
@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     allocator::Bytes,
-    distance::{zeucl, zeucl_threshold},
+    distance::zeucl,
     knn::Distance,
     observe::*,
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
@@ -356,38 +356,6 @@ impl<'data> RepetitionHandle<'data> {
     }
 }
 
-/// Finds the split point to partition the given slice of hash values roughly in half,
-/// so that no bucket crosses the splitting point at any prefix length.
-fn split_index(hashes: &[HashValue], prefix: usize) -> usize {
-    let mut i = hashes.len() / 2;
-    while i > 0 && hashes[i - 1].prefix_eq(&hashes[i], prefix) {
-        i -= 1;
-    }
-    i
-}
-
-/// Finds ranges partitioning the slice of hashes so that no bucket is crosses
-/// a splitting point.
-fn split_ranges(hashes: &[HashValue], nranges: usize, prefix: usize) -> Vec<Range<usize>> {
-    assert!(nranges > 0);
-    if nranges == 1 {
-        // base case
-        return vec![0..hashes.len()];
-    }
-    let mid = split_index(hashes, prefix);
-    let mut left = split_ranges(&hashes[0..mid], nranges.div_ceil(2), prefix);
-    let mut right = split_ranges(&hashes[mid..], nranges.div_floor(2), prefix);
-    right
-        .iter_mut()
-        .for_each(|range| *range = (range.start + mid)..(range.end + mid));
-
-    left.extend_from_slice(&right);
-
-    assert_eq!(left.last().unwrap().end, hashes.len());
-
-    left
-}
-
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LSHIndexStats {
     pub num_repetitions: usize,
@@ -472,7 +440,7 @@ impl LSHIndex {
             slf.add_repetitions(ts, fft_data, 1);
 
             let enumerator = slf.collisions(0, K, None);
-            if enumerator.has_non_trivial_collision(exclusion_zone) {
+            if enumerator.estimate_num_collisions(exclusion_zone) > 0 {
                 let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS);
                 slf.repetitions_setup_time = avg_dur;
                 observe!(0, 0, "time_setup_s", t.elapsed().as_secs_f64());
@@ -615,7 +583,6 @@ impl LSHIndex {
                 if prefix == 0 {
                     return (f64::INFINITY, 0);
                 }
-                let timer = Instant::now();
                 let mut cnt = 0;
                 let mut trivial = 0;
                 let mut start = 0;
@@ -627,9 +594,6 @@ impl LSHIndex {
                         let mut cnt_collisions = 0;
                         for i in start..end {
                             for j in start..i {
-                                // TODO: counting these trivial matches is VERY expensive on the
-                                // VCAB dataset, where there are 500 billion such trivial matches.
-                                // It takes 400 seconds just to count them.
                                 if !indices[i].overlaps(indices[j], exclusion_zone) {
                                     cnt_collisions += 1;
                                 } else {
@@ -645,13 +609,6 @@ impl LSHIndex {
                     }
                     start = end;
                 }
-                log::debug!(
-                    "Thread {:?} counted {} collisions ({} trivial) in {:?}",
-                    rayon::current_thread_index(),
-                    cnt,
-                    trivial,
-                    timer.elapsed()
-                );
                 (cnt as f64, trivial)
             })
             .collect::<Vec<(f64, usize)>>();
@@ -692,162 +649,62 @@ impl LSHIndex {
     }
 }
 
-#[derive(Debug)]
-struct RangesIterator {
-    prefix: usize,
-    bounds: Range<usize>,
-    previous: Range<usize>,
-}
-
-impl RangesIterator {
-    fn new(bounds: Range<usize>, prefix: usize) -> Self {
-        Self {
-            // position the previous range at the beginning, as an empty range
-            previous: bounds.start..bounds.start,
-            bounds,
-            prefix,
-        }
-    }
-
-    fn next(&mut self, hashes: &[HashValue]) -> Option<Range<usize>> {
-        let start = self.previous.end;
-        if start >= self.bounds.end {
-            return None;
-        }
-
-        // exponential search
-        let h = hashes[start];
-        let mut offset = 1;
-        let mut low = start;
-        if low >= self.bounds.end {
-            self.previous = low..low;
-            return None;
-        }
-        while start + offset < self.bounds.end && hashes[start + offset].prefix_eq(&h, self.prefix)
-        {
-            low = start + offset;
-            offset *= 2;
-        }
-        let high = (start + offset).min(self.bounds.end);
-
-        let off = hashes[low..high].partition_point(|hv| h.prefix_eq(hv, self.prefix));
-        let end = low + off;
-        let res = start..end;
-
-        self.previous = res.clone();
-
-        Some(res)
-    }
-}
-
-#[derive(Debug)]
-struct PairsIterator {
-    range: Range<usize>,
-    i: usize,
-    j: usize,
-}
-
-impl PairsIterator {
-    fn new(range: Range<usize>) -> Self {
-        Self {
-            i: range.start,
-            j: range.start,
-            range,
-        }
-    }
-
-    fn next(&mut self) -> Option<(usize, usize)> {
-        if self.i >= self.range.end {
-            return None;
-        }
-
-        self.j += 1;
-        if self.j >= self.range.end {
-            self.i += 1;
-            self.j = self.i + 1;
-        }
-        if self.i >= self.range.end || self.j >= self.range.end {
-            // mark the iterator as exhausted
-            self.i = self.range.end;
-            self.j = self.range.end;
-            return None;
-        }
-
-        Some((self.i, self.j))
-    }
-}
-
-#[test]
-fn test_pairs_iterator() {
-    let mut iter = PairsIterator::new(3..8);
-    let mut pairs = Vec::new();
-    while let Some(pair) = iter.next() {
-        pairs.push(pair);
-    }
-    let expected = vec![
-        (3, 4),
-        (3, 5),
-        (3, 6),
-        (3, 7),
-        (4, 5),
-        (4, 6),
-        (4, 7),
-        (5, 6),
-        (5, 7),
-        (6, 7),
-    ];
-    assert_eq!(pairs, expected);
-}
-
-struct EnumeratorIndex {
-    ranges: RangesIterator,
-    pairs: PairsIterator,
-}
-
-impl EnumeratorIndex {
-    pub fn new(bounds: Range<usize>, prefix: usize, hashes: &[HashValue]) -> Self {
-        let mut ranges = RangesIterator::new(bounds, prefix);
-
-        Self {
-            pairs: PairsIterator::new(ranges.next(hashes).unwrap()),
-            ranges,
-        }
-    }
-
-    fn next(&mut self, hashes: &[HashValue]) -> Option<(usize, usize)> {
-        loop {
-            if let Some(pair) = self.pairs.next() {
-                return Some(pair);
-            }
-
-            // the current range is exhausted, load the next one
-            if let Some(range) = self.ranges.next(hashes) {
-                self.pairs = PairsIterator::new(range);
-            } else {
-                // there is no next range
-                return None;
-            }
-        }
-    }
-}
-
 pub struct CollisionEnumerator<'index> {
     prefix: usize,
     prev_prefix: Option<usize>,
     handle: RepetitionHandle<'index>,
-    eindex: EnumeratorIndex,
+    current_range: Range<usize>,
+    i: usize,
+    j: usize,
 }
 impl<'index> CollisionEnumerator<'index> {
     fn new(handle: RepetitionHandle<'index>, prefix: usize, prev_prefix: Option<usize>) -> Self {
         assert!(prefix > 0 && prefix <= K);
-        let eindex =
-            EnumeratorIndex::new(0..handle.get_hashes().len(), prefix, handle.get_hashes());
-        Self {
+        let mut slf = Self {
             prefix,
             prev_prefix,
             handle,
-            eindex,
+            current_range: 0..0,
+            i: 0,
+            j: 1,
+        };
+        slf.next_range();
+        slf
+    }
+
+    /// efficiently the enumerator to the next range of equal (by prefix)
+    /// hash values
+    fn next_range(&mut self) {
+        let hashes = self.handle.get_hashes();
+
+        // exponential search
+        let start = self.current_range.end;
+        let h = hashes[start];
+        let mut offset = 1;
+        let mut low = start;
+        if low >= hashes.len() {
+            self.current_range = low..low;
+            return;
         }
+        while start + offset < hashes.len() && hashes[start + offset].prefix_eq(&h, self.prefix) {
+            low = start + offset;
+            offset *= 2;
+        }
+        let high = (start + offset).min(hashes.len());
+
+        // binary search
+        debug_assert!(
+            hashes[low].prefix_eq(&h, self.prefix),
+            "{:?} != {:?} (prefix {})",
+            hashes[low],
+            h,
+            self.prefix
+        );
+        let off = hashes[low..high].partition_point(|hv| h.prefix_eq(hv, self.prefix));
+        let end = low + off;
+        self.current_range = start..end;
+        self.i = self.current_range.start;
+        self.j = self.i + 1;
     }
 
     /// Fills the given output buffer with colliding pairs, and returns the number
@@ -855,43 +712,59 @@ impl<'index> CollisionEnumerator<'index> {
     /// return `None`.
     /// The third `f64` element is there just as a placeholder, which will be initialized
     /// as `f64::INFINITY`: actual distances must be computed somewhere else
-    pub fn next(&mut self, output: &mut [(u32, u32, Distance)]) -> Option<usize> {
-        let hashes = self.handle.get_hashes();
-        let indices = self.handle.get_indices();
-
-        let timer = Instant::now();
-
-        let mut cnt_candidates = 0;
+    pub fn next(
+        &mut self,
+        output: &mut [(u32, u32, Distance)],
+        exclusion_zone: usize,
+    ) -> Option<usize> {
         let mut idx = 0;
-        while let Some((i, j)) = self.eindex.next(hashes) {
-            cnt_candidates += 1;
-            let a = indices[i];
-            let b = indices[j];
-            let ha = hashes[i];
-            let hb = hashes[j];
-            debug_assert!(ha.prefix_eq(&hb, self.prefix));
-            // TODO: move this check outside
-            if !self
-                // did these collide at an earlier prefix?
-                .prev_prefix
-                .map(|pp| ha.prefix_eq(&hb, pp))
-                .unwrap_or(false)
-            {
-                output[idx] = (a.min(b), a.max(b), Distance(f64::NAN));
-                idx += 1;
-            }
-            if idx >= output.len() {
-                return Some(idx);
-            }
-        }
-        log::debug!(
-            "Thread {:?} discovered {} collisions in {:?}, evaluating {}",
-            rayon::current_thread_index(),
-            idx,
-            timer.elapsed(),
-            cnt_candidates
+        log::trace!(
+            "Current range: {}-{} ({}% overall, i={}, range length {})",
+            self.current_range.start,
+            self.current_range.end,
+            self.i as f64 / self.handle.get_hashes().len() as f64 * 100.0,
+            self.i,
+            self.current_range.len()
         );
+        while self.current_range.end < self.handle.get_hashes().len() {
+            let hashes = self.handle.get_hashes();
+            let indices = self.handle.get_indices();
+            let range = self.current_range.clone();
+            while self.i < range.end {
+                while self.j < range.end {
+                    assert!(range.contains(&self.i));
+                    assert!(range.contains(&self.j));
+                    let a = indices[self.i];
+                    let b = indices[self.j];
+                    let ha = hashes[self.i];
+                    let hb = hashes[self.j];
+                    debug_assert!(ha.prefix_eq(&hb, self.prefix));
+                    if
+                    // did the points collide previously?
+                    !self
+                        .prev_prefix
+                        .map(|pp| ha.prefix_eq(&hb, pp))
+                        .unwrap_or(false)
+                        &&
+                        // are the corresponding subsequences overlapping?
+                        // this check also excludes the flat subsequences, whose ID is replaced
+                        // with u32::MAX, and thus always overlaps
+                        !a.overlaps(b, exclusion_zone)
+                    {
+                        output[idx] = (a.min(b), a.max(b), Distance(f64::INFINITY));
+                        idx += 1;
+                    }
+                    self.j += 1;
+                    if idx >= output.len() {
+                        return Some(idx);
+                    }
+                }
+                self.i += 1;
+                self.j = self.i + 1;
+            }
 
+            self.next_range();
+        }
         if idx == 0 {
             None
         } else {
@@ -899,19 +772,39 @@ impl<'index> CollisionEnumerator<'index> {
         }
     }
 
-    pub fn has_non_trivial_collision(mut self, exclusion_zone: usize) -> bool {
-        let hashes = self.handle.get_hashes();
-        let indices = self.handle.get_indices();
+    pub fn estimate_num_collisions(mut self, exclusion_zone: usize) -> usize {
+        let mut cnt = 0;
+        while self.current_range.end < self.handle.get_hashes().len() {
+            let hashes = self.handle.get_hashes();
+            let indices = self.handle.get_indices();
 
-        while let Some((i, j)) = self.eindex.next(hashes) {
-            let a = indices[i];
-            let b = indices[j];
-            if !a.overlaps(b, exclusion_zone) {
-                return true;
+            let range = self.current_range.clone();
+            if range.len() as f64 > (hashes.len() as f64).sqrt() {
+                // the bucket is _very_ large (relative to the number of subsequences),
+                // so we just pick the square of its size in order to avoid spending
+                // forever in iterating over pairs checking for overlaps
+                // log::trace!("Large bucket detected: {}", range.len());
+                cnt += range.len() * range.len();
+            } else {
+                let mut i = range.start;
+                while i < range.end {
+                    let mut j = i + 1;
+                    while j < range.end {
+                        let a = indices[i];
+                        let b = indices[j];
+                        if !a.overlaps(b, exclusion_zone) {
+                            cnt += 1;
+                        }
+                        j += 1;
+                    }
+                    i += 1;
+                }
             }
+
+            self.next_range();
         }
 
-        false
+        cnt
     }
 }
 

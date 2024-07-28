@@ -237,11 +237,10 @@ impl MotifletsIterator {
             ts.maximum_distance(),
         );
 
-        let mut best_motiflet = vec![(Distance::infinity(), Vec::new(), false); max_k + 1];
+        let mut best_motiflet = vec![(Distance(std::f64::INFINITY), Vec::new(), false); max_k + 1];
         best_motiflet[0].2 = true;
         best_motiflet[1].2 = true;
-        let buffer_size = 4096 * rayon::current_num_threads();
-        let pairs_buffer = vec![(0, 0, Distance(0.0)); buffer_size];
+        let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
 
         let index_stats = index.stats(&ts, max_memory, exclusion_zone);
         info!("Pools stats: {:?}", index_stats);
@@ -282,7 +281,6 @@ impl MotifletsIterator {
     /// Update the graph
     fn update_graph(&mut self) {
         let prefix = self.prefix;
-        let prev_prefix = self.previous_prefix;
         let rep = self.rep;
         assert!(rep < self.index.get_repetitions());
         let exclusion_zone = self.exclusion_zone;
@@ -301,7 +299,7 @@ impl MotifletsIterator {
         let mut cnt_below_threshold = 0;
         let mut cnt_truncated = 0;
         let mut enumerator = index.collisions(rep, prefix, self.previous_prefix);
-        while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice()) {
+        while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone) {
             log::trace!("Evaluating {} collisions", cnt);
             cnt_candidates += cnt;
             if cnt_candidates > num_collisions_threshold {
@@ -321,10 +319,6 @@ impl MotifletsIterator {
                 .map(|(a, b, dist)| {
                     let a = *a as usize;
                     let b = *b as usize;
-                    if a.overlaps(b, exclusion_zone) {
-                        // Skip overlaps
-                        return (0, 0, 0);
-                    }
                     assert!(a < b);
                     if graph.has_edge(a, b) {
                         *dist = Distance::infinity();
