@@ -835,25 +835,18 @@ pub struct CollisionEnumerator<'index> {
     prefix: usize,
     prev_prefix: Option<usize>,
     handle: RepetitionHandle<'index>,
-    // eindex: EnumeratorIndex,
-    indices: Vec<EnumeratorIndex>,
+    eindex: EnumeratorIndex,
 }
 impl<'index> CollisionEnumerator<'index> {
     fn new(handle: RepetitionHandle<'index>, prefix: usize, prev_prefix: Option<usize>) -> Self {
         assert!(prefix > 0 && prefix <= K);
-        let nindices = rayon::current_num_threads();
-        let ranges = split_ranges(handle.get_hashes(), nindices, prefix);
-        log::debug!("Ranges for enumerator: {:?}", ranges);
-        let indices = ranges
-            .into_iter()
-            .filter(|r| !r.is_empty())
-            .map(|range| EnumeratorIndex::new(range, prefix, handle.get_hashes()))
-            .collect();
+        let eindex =
+            EnumeratorIndex::new(0..handle.get_hashes().len(), prefix, handle.get_hashes());
         Self {
             prefix,
             prev_prefix,
             handle,
-            indices,
+            eindex,
         }
     }
 
@@ -862,68 +855,47 @@ impl<'index> CollisionEnumerator<'index> {
     /// return `None`.
     /// The third `f64` element is there just as a placeholder, which will be initialized
     /// as `f64::INFINITY`: actual distances must be computed somewhere else
-    pub fn next(
-        &mut self,
-        output: &mut [(u32, u32, Distance)],
-        exclusion_zone: usize,
-        ts: &WindowedTimeseries,
-        threshold: Distance,
-    ) -> Option<usize> {
+    pub fn next(&mut self, output: &mut [(u32, u32, Distance)]) -> Option<usize> {
         let hashes = self.handle.get_hashes();
         let indices = self.handle.get_indices();
 
-        let chunk_size = output.len().div_ceil(self.indices.len());
-        let out_chunks = output.par_chunks_mut(chunk_size);
-        let emitted = out_chunks
-            .zip(self.indices.par_iter_mut())
-            .map(|(output, eindex)| {
-                let timer = Instant::now();
-                output.fill((u32::MAX, u32::MAX, Distance::infinity()));
+        let timer = Instant::now();
 
-                let mut cnt_candidates = 0;
-                let mut idx = 0;
-                while let Some((i, j)) = eindex.next(hashes) {
-                    cnt_candidates += 1;
-                    let a = indices[i];
-                    let b = indices[j];
-                    let ha = hashes[i];
-                    let hb = hashes[j];
-                    debug_assert!(ha.prefix_eq(&hb, self.prefix));
-                    if !self
-                        // did these collide at an earlier prefix?
-                        .prev_prefix
-                        .map(|pp| ha.prefix_eq(&hb, pp))
-                        .unwrap_or(false)
-                        &&
-                        // are the corresponding subsequences overlapping?
-                        // this check also excludes the flat subsequences, whose ID is replaced
-                        // with u32::MAX, and thus always overlaps
-                        !a.overlaps(b, exclusion_zone)
-                    {
-                        if let Some(d) = zeucl_threshold(ts, a as usize, b as usize, threshold.0) {
-                            output[idx] = (a.min(b), a.max(b), Distance(d));
-                            idx += 1;
-                        }
-                    }
-                    if idx >= output.len() {
-                        return idx;
-                    }
-                }
-                log::debug!(
-                    "Thread {:?} discovered {} collisions in {:?}, evaluating {}",
-                    rayon::current_thread_index(),
-                    idx,
-                    timer.elapsed(),
-                    cnt_candidates
-                );
-                idx
-            })
-            .sum::<usize>();
+        let mut cnt_candidates = 0;
+        let mut idx = 0;
+        while let Some((i, j)) = self.eindex.next(hashes) {
+            cnt_candidates += 1;
+            let a = indices[i];
+            let b = indices[j];
+            let ha = hashes[i];
+            let hb = hashes[j];
+            debug_assert!(ha.prefix_eq(&hb, self.prefix));
+            // TODO: move this check outside
+            if !self
+                // did these collide at an earlier prefix?
+                .prev_prefix
+                .map(|pp| ha.prefix_eq(&hb, pp))
+                .unwrap_or(false)
+            {
+                output[idx] = (a.min(b), a.max(b), Distance(f64::NAN));
+                idx += 1;
+            }
+            if idx >= output.len() {
+                return Some(idx);
+            }
+        }
+        log::debug!(
+            "Thread {:?} discovered {} collisions in {:?}, evaluating {}",
+            rayon::current_thread_index(),
+            idx,
+            timer.elapsed(),
+            cnt_candidates
+        );
 
-        if emitted == 0 {
+        if idx == 0 {
             None
         } else {
-            Some(emitted)
+            Some(idx)
         }
     }
 
@@ -931,13 +903,11 @@ impl<'index> CollisionEnumerator<'index> {
         let hashes = self.handle.get_hashes();
         let indices = self.handle.get_indices();
 
-        for eindex in self.indices.iter_mut() {
-            while let Some((i, j)) = eindex.next(hashes) {
-                let a = indices[i];
-                let b = indices[j];
-                if !a.overlaps(b, exclusion_zone) {
-                    return true;
-                }
+        while let Some((i, j)) = self.eindex.next(hashes) {
+            let a = indices[i];
+            let b = indices[j];
+            if !a.overlaps(b, exclusion_zone) {
+                return true;
             }
         }
 
