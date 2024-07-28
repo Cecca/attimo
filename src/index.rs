@@ -843,6 +843,7 @@ impl<'index> CollisionEnumerator<'index> {
         assert!(prefix > 0 && prefix <= K);
         let nindices = rayon::current_num_threads();
         let ranges = split_ranges(handle.get_hashes(), nindices, prefix);
+        log::debug!("Ranges for enumerator: {:?}", ranges);
         let indices = ranges
             .into_iter()
             .filter(|r| !r.is_empty())
