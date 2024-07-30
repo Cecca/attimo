@@ -14,6 +14,7 @@ use rayon::prelude::*;
 use std::time::Duration;
 use std::{sync::Arc, time::Instant};
 
+#[allow(clippy::too_many_arguments)]
 fn k_extents_bf(
     ts: &WindowedTimeseries,
     from: usize,
@@ -30,12 +31,12 @@ fn k_extents_bf(
     assert_eq!(buf.len(), ts.w);
 
     // Compute the distance profile using the MASS algorithm
-    ts.distance_profile(&fft_data, from, distances, buf);
+    ts.distance_profile(fft_data, from, distances, buf);
 
     // Reset the indices of the subsequences
-    for i in 0..ts.num_subsequences() {
+    (0..ts.num_subsequences()).for_each(|i| {
         indices[i] = i;
-    }
+    });
     // // Find the likely candidates by a (partial) indirect sort of
     // // the indices by increasing distance.
     // let n_candidates = (k * exclusion_zone).min(indices.len() - 1);
@@ -60,7 +61,6 @@ fn k_extents_bf(
         for h in 0..ret.len() {
             let hh = ret[h];
             if jj.overlaps(hh, exclusion_zone) {
-                // if jj.max(hh) - jj.min(hh) < exclusion_zone {
                 overlaps = true;
                 break;
             }
@@ -142,7 +142,7 @@ pub fn brute_force_motiflets(
     motiflets
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Motiflet {
     indices: Vec<usize>,
     extent: f64,
@@ -150,9 +150,28 @@ pub struct Motiflet {
 impl Eq for Motiflet {}
 impl Ord for Motiflet {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.extent.partial_cmp(&other.extent).unwrap()
+        self.partial_cmp(other).unwrap()
     }
 }
+#[allow(clippy::non_canonical_partial_ord_impl)]
+impl PartialOrd for Motiflet {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.extent.partial_cmp(&other.extent)
+    }
+}
+
+impl Overlaps<Self> for Motiflet {
+    fn overlaps(&self, other: Self, exclusion_zone: usize) -> bool {
+        let other_indices = other.indices.as_slice();
+        for i in &self.indices {
+            if i.overlaps(other_indices, exclusion_zone) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 impl Motiflet {
     pub fn new(indices: Vec<usize>, extent: f64) -> Self {
         Self { indices, extent }
