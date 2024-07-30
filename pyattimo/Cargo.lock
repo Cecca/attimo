@@ -53,7 +53,7 @@ dependencies = [
 
 [[package]]
 name = "attimo"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "argh",
@@ -383,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "pyattimo"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "anyhow",
  "attimo",
