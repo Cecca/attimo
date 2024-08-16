@@ -57,6 +57,17 @@ pub fn overlap_count<T: for<'a> Overlaps<&'a T>>(
         .count()
 }
 
+pub fn overlap_count_iter<'a, T: Overlaps<&'a T> + 'a, I: IntoIterator<Item = &'a T>>(
+    x: &T,
+    others: I,
+    exclusion_zone: usize,
+) -> usize {
+    others
+        .into_iter()
+        .filter(|o| x.overlaps(o, exclusion_zone))
+        .count()
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TimeseriesStats {
     pub num_subsequences: usize,

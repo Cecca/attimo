@@ -3,7 +3,7 @@ use crate::distance::zeucl_threshold;
 use crate::graph::{AdjacencyGraph, GraphStats};
 use crate::index::{LSHIndexStats, INITIAL_REPETITIONS};
 use crate::observe::*;
-use crate::timeseries::TimeseriesStats;
+use crate::timeseries::{overlap_count_iter, TimeseriesStats};
 use crate::{
     index::{IndexStats, LSHIndex},
     knn::*,
@@ -11,6 +11,7 @@ use crate::{
 };
 use log::*;
 use rayon::prelude::*;
+use std::collections::BTreeSet;
 use std::time::Duration;
 use std::{sync::Arc, time::Instant};
 
@@ -172,6 +173,18 @@ impl Overlaps<Self> for Motiflet {
     }
 }
 
+impl Overlaps<&Self> for Motiflet {
+    fn overlaps(&self, other: &Self, exclusion_zone: usize) -> bool {
+        let other_indices = other.indices.as_slice();
+        for i in &self.indices {
+            if i.overlaps(other_indices, exclusion_zone) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 impl Motiflet {
     pub fn new(indices: Vec<usize>, extent: f64) -> Self {
         Self { indices, extent }
@@ -184,6 +197,50 @@ impl Motiflet {
     }
     pub fn indices(&self) -> Vec<usize> {
         self.indices.clone()
+    }
+}
+
+struct TopK {
+    k: usize,
+    exclusion_zone: usize,
+    threshold: usize,
+    top: BTreeSet<Motiflet>,
+}
+
+impl TopK {
+    fn insert(&mut self, motiflet: Motiflet) {
+        if self.top.len() == self.threshold {
+            if let Some(last) = self.top.last() {
+                if &motiflet > last {
+                    return;
+                }
+            }
+        }
+        self.top.insert(motiflet);
+        if self.top.len() > self.threshold {
+            self.cleanup()
+        }
+        assert!(self.top.len() <= self.threshold);
+    }
+
+    fn cleanup(&mut self) {
+        let mut clean: BTreeSet<Motiflet> = BTreeSet::new();
+        for motiflet in self.top.iter() {
+            if overlap_count_iter(motiflet, &clean, self.exclusion_zone) >= self.k {
+                clean.insert(motiflet.clone());
+            }
+        }
+        self.top = clean;
+    }
+
+    fn get_top(&self) -> Vec<Motiflet> {
+        let mut res = Vec::new();
+        for motiflet in self.top.iter() {
+            if overlap_count_iter(motiflet, &res, self.exclusion_zone) >= self.k {
+                res.push(motiflet.clone());
+            }
+        }
+        res
     }
 }
 
