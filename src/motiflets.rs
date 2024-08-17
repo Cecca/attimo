@@ -246,7 +246,7 @@ impl TopK {
         self.sned.take();
         self.top.insert(motiflet);
         if self.top.len() > self.threshold {
-            self.cleanup()
+            self.cleanup();
         }
         assert!(self.top.len() <= self.threshold);
     }
@@ -254,7 +254,7 @@ impl TopK {
     fn cleanup(&mut self) {
         let mut clean: BTreeSet<Motiflet> = BTreeSet::new();
         for motiflet in self.top.iter() {
-            if overlap_count_iter(motiflet, &clean, self.exclusion_zone) >= self.k {
+            if overlap_count_iter(motiflet, &clean, self.exclusion_zone) < self.k {
                 clean.insert(motiflet.clone());
             }
         }
