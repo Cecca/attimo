@@ -257,6 +257,9 @@ impl TopK {
             if overlap_count_iter(motiflet, &clean, self.exclusion_zone) < self.k {
                 clean.insert(motiflet.clone());
             }
+            if clean.len() >= self.threshold {
+                break;
+            }
         }
         self.top = clean;
     }
@@ -313,7 +316,6 @@ pub struct MotifletsIterator {
     ts: Arc<WindowedTimeseries>,
     fft_data: FFTData,
     top: Vec<TopK>,
-    emitted: BTreeSet<Motiflet>,
     next_to_confirm: Option<Distance>,
     graph: AdjacencyGraph,
     to_return: Vec<Motiflet>,
@@ -387,7 +389,6 @@ impl MotifletsIterator {
             ts,
             fft_data,
             top,
-            emitted: Default::default(),
             next_to_confirm: None,
             graph: AdjacencyGraph::new(n, exclusion_zone),
             max_k,
@@ -644,7 +645,7 @@ impl MotifletsIterator {
                     debug!("Still in the initial repetitions, continuing with the current prefix");
                     self.prefix
                 } else if let Some(first_unconfirmed) = self.next_to_confirm {
-                    let (best_prefix, required_repetitions) = if first_unconfirmed.is_finite() {
+                    let (best_prefix, _required_repetitions) = if first_unconfirmed.is_finite() {
                         let costs = self.index_stats.costs_to_confirm(
                             self.prefix,
                             first_unconfirmed,
