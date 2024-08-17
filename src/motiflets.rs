@@ -292,6 +292,9 @@ impl TopK {
                     self.sned.replace(Distance(motiflet.extent));
                     break;
                 }
+                if self.emitted.len() >= self.k {
+                    break;
+                }
             }
         }
         res
@@ -570,6 +573,7 @@ impl MotifletsIterator {
                         previous_prefix,
                         previous_prefix_repetitions,
                     );
+                    dbg!(prefix, rep, extent, fp, self.delta);
                     fp < self.delta
                 });
                 if !new_motiflets.is_empty() {
@@ -585,7 +589,10 @@ impl MotifletsIterator {
             .min();
 
         // FIXME: adjust these
-        // self.stats.cnt_confirmed = self.best_motiflet[2..].iter().filter(|tup| tup.2).count();
+        self.stats.cnt_confirmed = self.top[2..]
+            .iter()
+            .map(|top| top.emitted.len())
+            .sum::<usize>();
         // self.stats.next_distance = self.next_to_confirm.unwrap_or(Distance::infinity());
         // observe!(
         //     rep,
