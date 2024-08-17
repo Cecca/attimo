@@ -682,19 +682,6 @@ impl MotifletsIterator {
                         );
                         (self.prefix - 1, 1)
                     };
-                    if required_repetitions > self.index.get_repetitions() {
-                        let new_total_repetitions: usize = (required_repetitions)
-                            .min(self.index.get_repetitions() + rayon::current_num_threads());
-                        let t = Instant::now();
-                        self.index
-                            .add_repetitions(&self.ts, &self.fft_data, new_total_repetitions);
-                        observe!(
-                            self.rep,
-                            self.prefix,
-                            "time_add_repetitions_s",
-                            t.elapsed().as_secs_f64()
-                        );
-                    }
                     best_prefix
                 } else {
                     self.prefix
@@ -725,15 +712,9 @@ impl MotifletsIterator {
                 self.rep += 1;
                 debug!("Advancing to repetition {}", self.rep);
                 if self.rep >= self.index.get_repetitions() {
-                    self.previous_prefix_repetitions.replace(self.rep + 1);
-                    self.rep = 0;
-                    self.previous_prefix.replace(self.prefix);
-                    self.prefix -= 1;
-                    info!(
-                        "Not enough repetitions ({}), going to prefix {}",
-                        self.index.get_repetitions(),
-                        self.prefix
-                    );
+                    info!("Add another repetition");
+                    self.index
+                        .add_repetitions(&self.ts, &self.fft_data, self.rep + 1);
                 }
             } else {
                 // Go to the suggested prefix, and start from the first repetition there
