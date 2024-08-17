@@ -3,8 +3,6 @@ use argh::FromArgs;
 use attimo::allocator::{self, Bytes, CountingAllocator, MemoryGauge};
 use attimo::load::*;
 use attimo::motiflets::{brute_force_motiflets, Motiflet, MotifletsIterator};
-use attimo::motifs::{motifs, Motif};
-use attimo::observe::OBSERVER;
 use attimo::timeseries::*;
 use std::path::Path;
 use std::str::FromStr;
@@ -24,17 +22,9 @@ struct Config {
     /// subsequcence length
     pub window: usize,
 
-    #[argh(option, default = "1")]
-    /// the number of motifs to look for
-    pub motifs: usize,
-
     #[argh(option, default = "0.01")]
     /// failure probability of the LSH scheme
     pub failure_probability: f64,
-
-    #[argh(option, default = "1024")]
-    /// the number of repetitions to perform
-    pub repetitions: usize,
 
     #[argh(option)]
     /// the number of repetitions to perform
@@ -44,9 +34,9 @@ struct Config {
     /// use the exact algorithm
     pub exact: bool,
 
-    #[argh(option)]
-    /// find motiflets, with the specified support
-    pub motiflets: Option<usize>,
+    #[argh(option, default = "2")]
+    /// the maximum support of the motiflets to find
+    pub support: usize,
 
     #[argh(option, default = "1")]
     /// number of motiflets to find for each support value
@@ -60,6 +50,7 @@ struct Config {
     /// seed for the psudorandom number generator
     pub seed: u64,
 
+    #[cfg(pprof)]
     #[argh(switch)]
     /// profile the code while running, and save a `profile.pb` file to open with pprof
     pub profile: bool,
@@ -78,7 +69,7 @@ struct Config {
 }
 
 fn default_output() -> String {
-    "motifs.csv".to_owned()
+    "motiflets.csv".to_owned()
 }
 
 fn main() -> Result<()> {
@@ -128,56 +119,47 @@ fn main() -> Result<()> {
         None
     };
 
-    if let Some(support) = config.motiflets {
-        let motiflets: Vec<Motiflet> = if config.exact {
-            let motiflets = brute_force_motiflets(&ts, support, ts.w / 2);
-            motiflets
-                .into_iter()
-                .map(|(extent, indices)| Motiflet::new(indices, extent.into()))
-                .collect()
-        } else {
-            let max_memory = if let Some(max_mem_str) = config.max_memory {
-                Bytes::from_str(&max_mem_str)?
-            } else {
-                let sysmem = Bytes::system_memory();
-                let mem = sysmem.divide(2);
-                log::info!("System has {} memory, using {} at most", sysmem, mem);
-                mem
-            };
-            let start = Instant::now();
-            let exclusion_zone = ts.w / 2;
-            MotifletsIterator::new(
-                Arc::new(ts),
-                support,
-                config.topk,
-                max_memory,
-                config.failure_probability,
-                exclusion_zone,
-                config.seed,
-                false,
-            )
-            .map(|m| {
-                eprintln!(
-                    "[{:?}] discovered motiflet with support {} and extent {}",
-                    start.elapsed(),
-                    m.support(),
-                    m.extent()
-                );
-                m
-            })
+    let support = config.support;
+    let motiflets: Vec<Motiflet> = if config.exact {
+        let motiflets = brute_force_motiflets(&ts, support, ts.w / 2);
+        motiflets
+            .into_iter()
+            .map(|(extent, indices)| Motiflet::new(indices, extent.into()))
             .collect()
-        };
-        eprintln!("Result: {:?}", motiflets);
     } else {
-        let motifs: Vec<Motif> = motifs(
+        let max_memory = if let Some(max_mem_str) = config.max_memory {
+            Bytes::from_str(&max_mem_str)?
+        } else {
+            let sysmem = Bytes::system_memory();
+            let mem = sysmem.divide(2);
+            log::info!("System has {} memory, using {} at most", sysmem, mem);
+            mem
+        };
+        let start = Instant::now();
+        let exclusion_zone = ts.w / 2;
+        MotifletsIterator::new(
             Arc::new(ts),
-            config.motifs,
-            config.repetitions,
+            support,
+            config.topk,
+            max_memory,
             config.failure_probability,
+            exclusion_zone,
             config.seed,
-        );
-        output_csv(&config.output, &motifs)?;
-    }
+            false,
+        )
+        .map(|m| {
+            eprintln!(
+                "[{:?}] discovered motiflet with support {} and extent {}",
+                start.elapsed(),
+                m.support(),
+                m.extent()
+            );
+            m
+        })
+        .collect()
+    };
+    eprintln!("Result: {:?}", motiflets);
+    output_csv(config.output, &motiflets)?;
 
     monitor_flag.store(false, std::sync::atomic::Ordering::SeqCst);
     monitor.join().unwrap();
@@ -185,7 +167,7 @@ fn main() -> Result<()> {
     eprintln!("Total time {:?}", total_timer.elapsed());
 
     #[cfg(feature = "observe")]
-    OBSERVER.lock().unwrap().flush();
+    attimo::observe::OBSERVER.lock().unwrap().flush();
 
     Ok(())
 }
@@ -229,20 +211,12 @@ impl<'a> Drop for Profiler<'a> {
     }
 }
 
-fn output_csv<P: AsRef<Path>>(path: P, motifs: &[Motif]) -> Result<()> {
+fn output_csv<P: AsRef<Path>>(path: P, motifs: &[Motiflet]) -> Result<()> {
     use std::io::prelude::*;
     let mut f = std::fs::File::create(path.as_ref())?;
     for m in motifs {
-        if let Some(confirmation_time) = m.elapsed {
-            writeln!(
-                f,
-                "{}, {}, {}, {}",
-                m.idx_a,
-                m.idx_b,
-                m.distance,
-                confirmation_time.as_secs_f64()
-            )?;
-        }
+        let istrings: Vec<String> = m.indices().into_iter().map(|i| format!("{}", i)).collect();
+        writeln!(f, "{}, {}", m.extent(), istrings.join(", "))?;
     }
     Ok(())
 }
