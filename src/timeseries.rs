@@ -9,6 +9,10 @@ use thread_local::ThreadLocal;
 
 pub trait Overlaps<T> {
     fn overlaps(&self, other: T, exclusion_zone: usize) -> bool;
+
+    fn overlaps_iter<I: IntoIterator<Item = T>>(&self, others: I, exclusion_zone: usize) -> bool {
+        others.into_iter().any(|o| self.overlaps(o, exclusion_zone))
+    }
 }
 
 impl Overlaps<usize> for usize {

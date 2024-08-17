@@ -48,6 +48,10 @@ struct Config {
     /// find motiflets, with the specified support
     pub motiflets: Option<usize>,
 
+    #[argh(option, default = "1")]
+    /// number of motiflets to find for each support value
+    pub topk: usize,
+
     #[argh(option)]
     /// consider only the given number of points from the input
     pub prefix: Option<usize>,
@@ -145,6 +149,7 @@ fn main() -> Result<()> {
             MotifletsIterator::new(
                 Arc::new(ts),
                 support,
+                config.topk,
                 max_memory,
                 config.failure_probability,
                 exclusion_zone,
