@@ -249,12 +249,13 @@ struct MotifletsIterator {
 #[pymethods]
 impl MotifletsIterator {
     #[new]
-    #[pyo3(signature=(ts, w, max_k = 10, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000))]
+    #[pyo3(signature=(ts, w, support=10, top_k=1, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         ts: Vec<f64>,
         w: usize,
-        max_k: usize,
+        support: usize,
+        top_k: usize,
         max_memory: Option<String>,
         exclusion_zone: Option<usize>,
         delta: f64,
@@ -264,9 +265,9 @@ impl MotifletsIterator {
         let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
         let exclusion_zone = exclusion_zone.unwrap_or(w);
         assert!(
-            max_k * exclusion_zone <= ts.num_subsequences(),
+            support * exclusion_zone <= ts.num_subsequences(),
             "max_k * exclusion_zone should be less than the number of subsequences. We have instead {} * {} > {}",
-            max_k, exclusion_zone, ts.num_subsequences()
+            support, exclusion_zone, ts.num_subsequences()
         );
         if ts.num_subsequences() > brute_force_threshold {
             let max_memory = if let Some(max_mem_str) = max_memory {
@@ -278,7 +279,8 @@ impl MotifletsIterator {
             let inner =
                 MotifletsIteratorImpl::Enumerator(attimo::motiflets::MotifletsIterator::new(
                     ts,
-                    max_k,
+                    support,
+                    top_k,
                     max_memory,
                     delta,
                     exclusion_zone,
@@ -291,7 +293,7 @@ impl MotifletsIterator {
                 "Brute forcing the solution, as the instance is smaller than {} subsequences",
                 brute_force_threshold
             );
-            let motiflets = brute_force_motiflets(&ts, max_k, exclusion_zone)
+            let motiflets = brute_force_motiflets(&ts, support, exclusion_zone)
                 .into_iter()
                 .map(|(extent, indices)| KMotiflet {
                     support: indices.len(),
