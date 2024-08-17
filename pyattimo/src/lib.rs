@@ -250,7 +250,7 @@ struct MotifletsIterator {
 #[pymethods]
 impl MotifletsIterator {
     #[new]
-    #[pyo3(signature=(ts, w, support=10, top_k=1, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000))]
+    #[pyo3(signature=(ts, w, support=2, top_k=1, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         ts: Vec<f64>,
