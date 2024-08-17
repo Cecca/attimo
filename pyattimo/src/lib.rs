@@ -69,19 +69,20 @@ impl KMotiflet {
     fn plot(&self, show: bool) -> Result<(), PyErr> {
         // Downsample the original data, if needed
         let downsampled_len = 100000;
-        let timeseries = if self.ts.data.len() > downsampled_len {
+        let (timeseries, indices) = if self.ts.data.len() > downsampled_len {
             let keep_every = self.ts.data.len() / downsampled_len;
             let timeseries: Vec<f64> = self.ts.data.iter().step_by(keep_every).cloned().collect();
-            timeseries
+            let indices: Vec<usize> = self.indices.iter().map(|i| *i / keep_every).collect();
+            (timeseries, indices)
         } else {
-            self.ts.data.clone()
+            (self.ts.data.clone(), self.indices.clone())
         };
         Python::with_gil(|py| {
             let locals = PyDict::new_bound(py);
             locals.set_item("motif", Bound::new(py, self.clone()).unwrap())?;
             locals.set_item("timeseries", timeseries)?;
             locals.set_item("show", show)?;
-            locals.set_item("indices", &self.indices)?;
+            locals.set_item("indices", &indices)?;
             py.run_bound(PLOT_SCRIPT_MULTI, None, Some(&locals))
         })
     }
