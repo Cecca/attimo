@@ -7,6 +7,13 @@
       forEachSupportedSystem = f: nixpkgs.lib.genAttrs supportedSystems (system: f {
         pkgs = import nixpkgs { inherit system; };
       });
+      overlays = [
+        (final: prev: {
+          quarto = prev.quarto.override {
+            python3 = null;
+          };
+        })
+      ];
     in
     {
       devShells = forEachSupportedSystem ({ pkgs }: {
@@ -16,6 +23,7 @@
             R
             python311
             quarto
+            jupyter
             ruff
             zig
           ] ++
@@ -32,7 +40,7 @@
             tqdm
             icecream
             statsmodels
-            jupyter-console
+            jupyter-cache
           ]) ++
           (with pkgs.rPackages; [
             tidyverse
