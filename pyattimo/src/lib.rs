@@ -30,6 +30,24 @@ impl Motif {
     }
 }
 
+impl TryFrom<KMotiflet> for Motif {
+    type Error = &'static str;
+    fn try_from(motiflet: KMotiflet) -> Result<Self, Self::Error> {
+        if motiflet.indices.len() != 2 {
+            Err("only motiflets of support 2 can be converted to motifs")
+        } else {
+            let a = motiflet.indices[0].min(motiflet.indices[1]);
+            let b = motiflet.indices[0].max(motiflet.indices[1]);
+            Ok(Motif {
+                a,
+                b,
+                distance: motiflet.extent,
+                ts: Arc::clone(&motiflet.ts),
+            })
+        }
+    }
+}
+
 #[pyclass]
 #[derive(Clone)]
 pub struct KMotiflet {
@@ -184,31 +202,35 @@ impl Motif {
 
 #[pyclass]
 struct MotifsIterator {
-    inner: MotifsEnumerator<PairMotifState>,
+    inner: MotifletsIterator,
 }
 
 #[pymethods]
 impl MotifsIterator {
     #[new]
-    #[pyo3(signature=(ts, w, max_k = 100, repetitions=1000, delta = 0.05, seed = 1234))]
+    #[pyo3(signature=(ts, w, top_k=1, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000))]
     fn new(
         ts: Vec<f64>,
         w: usize,
-        max_k: usize,
-        repetitions: usize,
+        top_k: usize,
+        max_memory: Option<String>,
+        exclusion_zone: Option<usize>,
         delta: f64,
         seed: u64,
+        brute_force_threshold: usize,
     ) -> Self {
-        let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
-        let inner = MotifsEnumerator::new(
+        let inner = MotifletsIterator::new(
             ts,
-            max_k,
-            repetitions,
+            w,
+            2,
+            top_k,
+            max_memory,
+            exclusion_zone,
             delta,
-            || PairMotifState::new(max_k, w),
             seed,
-            false,
+            brute_force_threshold,
         );
+
         Self { inner }
     }
 
@@ -216,19 +238,9 @@ impl MotifsIterator {
         slf
     }
 
-    fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<Motif> {
-        slf.inner
-            .next()
-            .map(|m| Motif::with_context(m, slf.inner.get_ts()))
-    }
-
-    fn __len__(&self) -> usize {
-        self.inner.max_k
-    }
-
-    fn __getitem__(&mut self, idx: isize) -> Motif {
-        assert!(idx >= 0);
-        Motif::with_context(*self.inner.get_ranked(idx as usize), self.inner.get_ts())
+    fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<Motif>> {
+        let py = slf.py();
+        slf.inner.next(py).map(|m| m.map(|m| m.try_into().unwrap()))
     }
 }
 
@@ -315,7 +327,30 @@ impl MotifletsIterator {
 
     fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<KMotiflet>> {
         let py = slf.py();
-        match &mut slf.inner {
+        slf.next(py)
+        // match &mut slf.inner {
+        //     MotifletsIteratorImpl::Enumerator(inner) => {
+        //         let res = inner
+        //             .next_interruptible(|| Python::check_signals(py))?
+        //             .map(|m| KMotiflet::new(m.extent(), m.indices(), m.support(), inner.get_ts()));
+        //         Ok(res)
+        //     }
+        //     MotifletsIteratorImpl::BruteForce(pos, motiflets) => {
+        //         if *pos >= motiflets.len() {
+        //             Ok(None)
+        //         } else {
+        //             let m = motiflets[*pos].clone();
+        //             *pos += 1;
+        //             Ok(Some(m))
+        //         }
+        //     }
+        // }
+    }
+}
+
+impl MotifletsIterator {
+    fn next(&mut self, py: Python) -> PyResult<Option<KMotiflet>> {
+        match &mut self.inner {
             MotifletsIteratorImpl::Enumerator(inner) => {
                 let res = inner
                     .next_interruptible(|| Python::check_signals(py))?
