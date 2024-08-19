@@ -104,7 +104,6 @@ fn projection_motifs(
     seed: u64,
 ) -> Vec<Motif> {
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-    let start = Instant::now();
 
     let rngs: Vec<(usize, Xoshiro256PlusPlus)> = (0..repetitions)
         .map(|rep| {
@@ -187,8 +186,7 @@ fn projection_motifs(
                     idx_a: *a,
                     idx_b: *b,
                     distance: d,
-                    elapsed: None,
-                    discovered: start.elapsed(),
+                    confirmed: false,
                 };
                 topk.insert(m);
             }
@@ -197,7 +195,7 @@ fn projection_motifs(
             if topk.len() == motifs {
                 topk.for_each(|m| {
                     dbg!(&m);
-                    m.elapsed = Some(start.elapsed());
+                    m.confirmed = true;
                 });
                 return topk.to_vec();
             }
@@ -263,15 +261,8 @@ fn output_csv(path: &str, motifs: &[Motif]) -> Result<()> {
     use std::io::prelude::*;
     let mut f = std::fs::File::create(path)?;
     for m in motifs {
-        if let Some(confirmation_time) = m.elapsed {
-            writeln!(
-                f,
-                "{}, {}, {}, {}",
-                m.idx_a,
-                m.idx_b,
-                m.distance,
-                confirmation_time.as_secs_f64()
-            )?;
+        if m.confirmed {
+            writeln!(f, "{}, {}, {}", m.idx_a, m.idx_b, m.distance,)?;
         }
     }
     Ok(())

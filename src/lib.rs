@@ -10,7 +10,6 @@ pub mod graph;
 pub mod index;
 pub mod knn;
 pub mod load;
-pub mod lsh;
 pub mod motiflets;
 pub mod motifs;
 pub mod observe;

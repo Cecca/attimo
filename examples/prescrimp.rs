@@ -254,15 +254,8 @@ fn output_csv(path: &str, motifs: &[Motif]) -> Result<()> {
     use std::io::prelude::*;
     let mut f = std::fs::File::create(path)?;
     for m in motifs {
-        if let Some(confirmation_time) = m.elapsed {
-            writeln!(
-                f,
-                "{}, {}, {}, {}",
-                m.idx_a,
-                m.idx_b,
-                m.distance,
-                confirmation_time.as_secs_f64()
-            )?;
+        if m.confirmed {
+            writeln!(f, "{}, {}, {}", m.idx_a, m.idx_b, m.distance,)?;
         }
     }
     Ok(())
@@ -297,8 +290,7 @@ fn main() -> Result<()> {
             idx_a: std::cmp::min(i, *j),
             idx_b: std::cmp::max(i, *j),
             distance: *d,
-            elapsed: None,
-            discovered: timer.elapsed(),
+            confirmed: false,
         };
         topk.insert(m);
     }
@@ -311,7 +303,7 @@ fn main() -> Result<()> {
             m.distance,
             zeucl(&ts, m.idx_a, m.idx_b)
         );
-        m.elapsed.replace(timer.elapsed());
+        m.confirmed = true;
     }
     output_csv(&args.output, &motifs)?;
     eprintln!("Done");
