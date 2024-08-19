@@ -5,8 +5,6 @@ author:
     url: https://www.inf.unibz.it/~ceccarello/
     affiliation: Free University of Bozen/Bolzano
 jupyter: python3
-execute:
-  cache: true
 bibliography: references.bib
 reference-location: margin
 ---
@@ -33,7 +31,7 @@ Then, let's load a dataset from the ones shipped with the python package. On the
 In this example, we are just loading the first million points from the dataset
 
 ```{python}
-ts = pyattimo.load_dataset("ecg", prefix=1000000)
+ts = pyattimo.load_dataset("ecg", prefix=100000)
 ```
 
 The time series looks like the following.
@@ -67,7 +65,7 @@ Constructing the iterator requires a time proportional to the time series length
 On my dual core machine, this is about 7.8 seconds for our example time series of length 1000000.
 
 ```{python}
-%time motifs = pyattimo.MotifsIterator(ts, w=1000, max_k=100)
+%time motifs = pyattimo.MotifsIterator(ts, w=1000, top_k=100)
 ```
 
 Once the index is built, we can ask for the first motif.
@@ -121,21 +119,6 @@ Notice that the time to discover this second motif is much shorter than the time
 
 This explorative process of looking at  can be iterated as long as needed, interactively.
 The motifs are returned by increasing values of distance of their subsequences: as soon as we find a motif whose subsequences are so far away as to no longer be interesting, we can stop the process.
-
-## Getting motifs by index
-
-The library also gives the chance to access motifs directly by their rank:
-
-```{python}
-# Access the top motif
-motifs[0]
-
-# Access the fifth motif, and plot it
-motifs[4].plot()
-```
-
-if a motif has yet to be discovered, then it is first computed and then returned.
-The `motifs` object caches the motifs as it finds them
 
 ## Comparison with `stumpy` and `pyscamp`
 
@@ -291,7 +274,7 @@ fname = ".discover.parquet"
 time_budget = fits["pyscamp"](len(ts))
 if not os.path.isfile(fname):
     start = time.time() 
-    motifs = pyattimo.MotifsIterator(ts, w=1000, max_k=300, repetitions=50, delta=0.01)
+    motifs = pyattimo.MotifsIterator(ts, w=1000, top_k=300, delta=0.01)
     end = time.time()
     index_time = end - start
     cnt, elapsed_times, motifs_list = enumerate_with_budget(motifs, time_budget - index_time)

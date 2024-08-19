@@ -430,7 +430,6 @@ impl MotifletsIterator {
         let threshold = self.top[self.max_k]
             .kth_distance()
             .unwrap_or(Distance::infinity());
-        dbg!(threshold);
 
         let mut time_distance_computation = Duration::default();
         let mut cnt_candidates = 0;
@@ -573,12 +572,9 @@ impl MotifletsIterator {
                         previous_prefix,
                         previous_prefix_repetitions,
                     );
-                    dbg!(prefix, rep, extent, fp, self.delta);
                     fp < self.delta
                 });
-                if !new_motiflets.is_empty() {
-                    dbg!(&new_motiflets);
-                }
+                if !new_motiflets.is_empty() {}
                 self.to_return.extend(new_motiflets);
             }
         }

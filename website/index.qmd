@@ -2,7 +2,7 @@
 title: "Attimo: fast time series motif mining"
 jupyter: python3
 execute:
-  cache: true
+  cache: false
 ---
 
 `Attimo` is a software package for quickly finding motifs in time series.
@@ -32,7 +32,7 @@ import pyattimo
 # Load an example dataset
 ts = pyattimo.load_dataset("ecg", prefix=100000)
 # Build the iterator
-motifs_iter = pyattimo.MotifsIterator(ts, w=1000, max_k=10)
+motifs_iter = pyattimo.MotifsIterator(ts, w=1000, top_k=10)
 # Iterate through the motifs
 for rank, motif in enumerate(motifs_iter):
     print("Motif {} between {} and {} at distance {:.3}".format(

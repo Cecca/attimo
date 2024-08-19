@@ -447,7 +447,7 @@ impl LSHIndex {
                 return slf;
             } else {
                 quantization_width *= 2.0;
-                warn!("Doubling the quantization width to {}", quantization_width);
+                info!("Doubling the quantization width to {}", quantization_width);
             }
         }
     }
