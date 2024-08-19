@@ -7,22 +7,17 @@
       forEachSupportedSystem = f: nixpkgs.lib.genAttrs supportedSystems (system: f {
         pkgs = import nixpkgs { inherit system; };
       });
-      overlays = [
-        (final: prev: {
-          quarto = prev.quarto.override {
-            python3 = null;
-          };
-        })
-      ];
     in
     {
-      devShells = forEachSupportedSystem ({ pkgs }: {
+      devShells = forEachSupportedSystem ({ pkgs }: let
+        my-quarto = pkgs.quarto.override { python3 = null; };
+      in {
         default = pkgs.mkShell {
           venvDir = ".venv";
           packages = with pkgs; [
             R
             python311
-            quarto
+            my-quarto
             jupyter
             ruff
             zig
@@ -40,7 +35,7 @@
             tqdm
             icecream
             statsmodels
-            jupyter-cache
+            # jupyter-cache
           ]) ++
           (with pkgs.rPackages; [
             tidyverse
