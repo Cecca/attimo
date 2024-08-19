@@ -2,8 +2,8 @@
 title: "PyAttimo: scalable time series motifs mining with Python"
 author: 
   - name: Matteo Ceccarello
-    url: https://www.inf.unibz.it/~ceccarello/
-    affiliation: Free University of Bozen/Bolzano
+    url: https://www.dei.unipd.it/~ceccarello/
+    affiliation: University of Padova
 jupyter: python3
 bibliography: references.bib
 reference-location: margin
