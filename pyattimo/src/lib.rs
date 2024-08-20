@@ -1,6 +1,5 @@
 use attimo::allocator::Bytes;
 use attimo::motiflets::brute_force_motiflets;
-use attimo::motifs::{MotifsEnumerator, PairMotifState};
 use attimo::timeseries::WindowedTimeseries;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
