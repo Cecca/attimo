@@ -470,7 +470,7 @@ impl LSHIndex {
         let starting_repetitions = self.get_repetitions();
         let new_repetitions = total_repetitions - starting_repetitions;
         let max_repetitions_in_memory = self.max_repetitions_in_memory;
-        info!("Adding {} new repetitions", new_repetitions);
+        log::trace!("Adding {} new repetitions", new_repetitions);
 
         let new_hashers: Vec<Hasher> = (0..new_repetitions)
             .map(|_| Hasher::new(dimension, self.quantization_width, &mut self.rng))
@@ -492,7 +492,7 @@ impl LSHIndex {
         });
         self.repetitions.extend(new_reps);
         let elapsed = timer.elapsed();
-        info!("Added {} new repetitions in {:?}", new_repetitions, elapsed);
+        log::debug!("Added {} new repetitions in {:?}", new_repetitions, elapsed);
         let average_time = elapsed / new_repetitions as u32;
 
         self.functions.extend(new_hashers);

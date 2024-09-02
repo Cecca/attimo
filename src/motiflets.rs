@@ -354,11 +354,11 @@ impl MotifletsIterator {
         let n = ts.num_subsequences();
         let mem_gauge = MemoryGauge::allocated();
         let fft_data = FFTData::new(&ts);
-        info!("Computed fft_data: {}", mem_gauge.measure());
+        debug!("Computed fft_data: {}", mem_gauge.measure());
 
         let mem_gauge = MemoryGauge::allocated();
         let index = LSHIndex::from_ts(&ts, exclusion_zone, &fft_data, seed);
-        info!(
+        debug!(
             "Computed initial hash values in {:?}, {}",
             start.elapsed(),
             mem_gauge.measure()
@@ -667,7 +667,7 @@ impl MotifletsIterator {
                             self.delta,
                             &self.index,
                         );
-                        info!("Costs: {:?}", costs);
+                        debug!("Costs: {:?}", costs);
                         let (best_prefix, (best_cost, required_repetitions)) = costs
                             .iter()
                             .enumerate()
@@ -677,7 +677,7 @@ impl MotifletsIterator {
                             warn!("Best prefix would be 0, continuing on this level");
                             (self.prefix, self.index_stats.max_repetitions)
                         } else {
-                            info!(
+                            debug!(
                                 "Best prefix to confirm {} is {} with {} repetitions with cost {}",
                                 first_unconfirmed, best_prefix, required_repetitions, best_cost
                             );
@@ -728,13 +728,12 @@ impl MotifletsIterator {
                 self.rep += 1;
                 debug!("Advancing to repetition {}", self.rep);
                 if self.rep >= self.index.get_repetitions() {
-                    info!("Add another repetition");
                     self.index
                         .add_repetitions(&self.ts, &self.fft_data, self.rep + 1);
                 }
             } else {
                 // Go to the suggested prefix, and start from the first repetition there
-                info!("Going to prefix {}", next_prefix);
+                debug!("Going to prefix {}", next_prefix);
                 self.previous_prefix_repetitions.replace(self.rep + 1);
                 self.rep = 0;
                 self.previous_prefix.replace(self.prefix);
