@@ -227,7 +227,7 @@ impl WindowedTimeseries {
         fft_data: &FFTData,
         seed: u64,
         exclusion_zone: usize,
-    ) -> (f64, f64) {
+    ) -> (f64, f64, (usize, usize)) {
         use rand::prelude::*;
         use rand_distr::Uniform;
         use rand_xoshiro::Xoshiro256PlusPlus;
@@ -240,19 +240,23 @@ impl WindowedTimeseries {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         let mut sum = 0.0;
         let mut minimum = f64::INFINITY;
+        let mut min_index_pair = (0, 0);
         let mut sampled = 0;
         while sampled < SAMPLES {
             loop {
                 let i = uniform.sample(&mut rng);
                 if !self.is_flat(i) {
                     self.distance_profile(fft_data, i, &mut dists, &mut buf);
-                    let nn = *dists[..(i.saturating_sub(exclusion_zone))]
+                    let (j, nn) = dists
                         .iter()
-                        .chain(&dists[(i + exclusion_zone).min(self.num_subsequences())..])
-                        .min_by(|a, b| a.total_cmp(b))
+                        .copied()
+                        .enumerate()
+                        .filter(|(j, _)| !j.overlaps(i, exclusion_zone))
+                        .min_by(|a, b| a.1.total_cmp(&b.1))
                         .unwrap();
                     if nn < minimum {
                         minimum = nn;
+                        min_index_pair = (i.min(j), i.max(j));
                     }
                     sum += nn;
                     sampled += 1;
@@ -261,7 +265,7 @@ impl WindowedTimeseries {
             }
         }
 
-        (minimum, sum / SAMPLES as f64)
+        (minimum, sum / SAMPLES as f64, min_index_pair)
     }
 
     pub fn sliding_dot_product_for_each<F: FnMut(usize, f64)>(

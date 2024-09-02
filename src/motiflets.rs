@@ -364,12 +364,15 @@ impl MotifletsIterator {
             mem_gauge.measure()
         );
 
+        // get some stats about distances
         let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
+        let (min_nn_estimate, avg_nn_estimate, sampled_min_index_pair) =
+            ts.nearest_neighbor_distance_stats(&fft_data, 12435, exclusion_zone);
         info!(
             "Average pairwise distance: {}, maximum pairwise distance: {}, min/average nearest neighbor dist: {:?}",
             average_pairwise_distance,
             ts.maximum_distance(),
-            ts.nearest_neighbor_distance_stats(&fft_data, 12435, exclusion_zone)
+            (min_nn_estimate, avg_nn_estimate)
         );
 
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
@@ -381,19 +384,27 @@ impl MotifletsIterator {
 
         let mut stats = MotifletsIteratorStats::default();
         stats.timeseries_stats = ts.stats();
-        stats.average_distance = ts.average_pairwise_distance(1234, exclusion_zone).into();
+        stats.average_distance = average_pairwise_distance.into();
         stats.next_distance = Distance::infinity();
 
         let mut top = Vec::with_capacity(max_k + 1);
         top.resize_with(max_k + 1, || TopK::new(top_k, exclusion_zone));
         top[0].disable();
         top[1].disable();
+        // we initialize the top queue for the second motiflet
+        // with the sampled closest distance pair
+        top[2].insert(Motiflet::new(
+            vec![sampled_min_index_pair.0, sampled_min_index_pair.1],
+            min_nn_estimate,
+        ));
 
         Self {
             ts,
             fft_data,
             top,
-            next_to_confirm: None,
+            // the minimum sampled nearest neighbor is of course a
+            // natural candidate for the 2-motiflet
+            next_to_confirm: Some(min_nn_estimate.into()),
             graph: AdjacencyGraph::new(n, exclusion_zone),
             max_k,
             to_return: Vec::new(),
