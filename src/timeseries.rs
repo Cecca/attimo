@@ -1,7 +1,9 @@
 use crate::allocator::Bytes;
 use crate::distance::{zdot, zeucl};
+use core::f64;
 use rand_distr::num_traits::Zero;
 use rayon::prelude::*;
+use rustfft::num_traits::Saturating;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -217,6 +219,49 @@ impl WindowedTimeseries {
         }
 
         sum / SAMPLES as f64
+    }
+
+    /// return the minimum and average estimated nearest neighbor distances
+    pub fn nearest_neighbor_distance_stats(
+        &self,
+        fft_data: &FFTData,
+        seed: u64,
+        exclusion_zone: usize,
+    ) -> (f64, f64) {
+        use rand::prelude::*;
+        use rand_distr::Uniform;
+        use rand_xoshiro::Xoshiro256PlusPlus;
+
+        let mut dists = vec![0.0f64; self.num_subsequences()];
+        let mut buf = vec![0.0f64; self.w];
+
+        const SAMPLES: usize = 1000;
+        let uniform = Uniform::new(0, self.num_subsequences());
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let mut sum = 0.0;
+        let mut minimum = f64::INFINITY;
+        let mut sampled = 0;
+        while sampled < SAMPLES {
+            loop {
+                let i = uniform.sample(&mut rng);
+                if !self.is_flat(i) {
+                    self.distance_profile(fft_data, i, &mut dists, &mut buf);
+                    let nn = *dists[..(i.saturating_sub(exclusion_zone))]
+                        .iter()
+                        .chain(&dists[(i + exclusion_zone).min(self.num_subsequences())..])
+                        .min_by(|a, b| a.total_cmp(b))
+                        .unwrap();
+                    if nn < minimum {
+                        minimum = nn;
+                    }
+                    sum += nn;
+                    sampled += 1;
+                    break;
+                }
+            }
+        }
+
+        (minimum, sum / SAMPLES as f64)
     }
 
     pub fn sliding_dot_product_for_each<F: FnMut(usize, f64)>(

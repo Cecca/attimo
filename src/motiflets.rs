@@ -365,10 +365,11 @@ impl MotifletsIterator {
         );
 
         let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
-        debug!(
-            "Average pairwise distance: {}, maximum pairwise distance: {}",
+        info!(
+            "Average pairwise distance: {}, maximum pairwise distance: {}, min/average nearest neighbor dist: {:?}",
             average_pairwise_distance,
             ts.maximum_distance(),
+            ts.nearest_neighbor_distance_stats(&fft_data, 12435, exclusion_zone)
         );
 
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
@@ -634,7 +635,7 @@ impl MotifletsIterator {
                 "graph_memory",
                 graph_stats.used_memory.0
             );
-            info!("[{}@{}] {:#?}", self.rep, self.prefix, self.stats);
+            debug!("[{}@{}] {:#?}", self.rep, self.prefix, self.stats);
             // debug!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             debug!(
                 "[{}@{}] First non confirmed distance {:?}",
@@ -665,7 +666,7 @@ impl MotifletsIterator {
                             warn!("Best prefix would be 0, continuing on this level");
                             (self.prefix, self.index_stats.max_repetitions)
                         } else {
-                            debug!(
+                            info!(
                                 "Best prefix to confirm {} is {} with {} repetitions with cost {}",
                                 first_unconfirmed, best_prefix, required_repetitions, best_cost
                             );

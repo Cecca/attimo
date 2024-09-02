@@ -1,3 +1,4 @@
+use core::f64;
 use log::{info, warn};
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
@@ -14,7 +15,7 @@ use std::{
 
 use crate::{
     allocator::Bytes,
-    distance::zeucl,
+    distance::{zeucl, zeucl_threshold},
     knn::Distance,
     observe::*,
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
@@ -847,15 +848,32 @@ impl IndexStats {
             expected_collisions
         );
 
-        // now we estimate the cost of running a handful of distance computations,
-        // as a proxy for the cost of handling the collisions.
-        // TODO: maybe update this as we collect information during the execution?
-        let samples = 4096.min(ts.num_subsequences());
-        let t_start = Instant::now();
-        for i in 0..samples {
-            std::hint::black_box(zeucl(ts, 0, i));
+        // get the prefix at which we are going to sample to estimate the
+        // cost of running a repetition
+        let (sampling_prefix, _collisions) = expected_collisions
+            .iter()
+            .copied()
+            .enumerate()
+            .rev()
+            .find(|(_, collisions)| *collisions > 1000.0)
+            .unwrap_or((1, f64::INFINITY));
+
+        let max_samples = 10_000; // cap the maximum work we are going to spend on sampling
+        let mut buf = vec![(0, 0, Distance(0.0)); 65536];
+        let mut enumerator = index.collisions(0, sampling_prefix, None);
+        let mut samples = 0;
+        let timer = Instant::now();
+        while let Some(cnt) = enumerator.next(&mut buf, exclusion_zone) {
+            for (a, b, d) in &mut buf[..cnt] {
+                *d =
+                    Distance(zeucl_threshold(ts, *a as usize, *b as usize, f64::INFINITY).unwrap());
+                samples += 1;
+                if samples > max_samples {
+                    break;
+                }
+            }
         }
-        let elapsed = Instant::now() - t_start;
+        let elapsed = timer.elapsed();
         let collision_cost = elapsed.as_secs_f64() / (samples as f64);
         assert!(!collision_cost.is_nan());
         assert!(!repetition_setup_cost.is_nan());
