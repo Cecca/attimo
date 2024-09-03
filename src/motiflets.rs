@@ -447,6 +447,7 @@ impl MotifletsIterator {
 
     /// Update the graph
     fn update_graph(&mut self) {
+        let timer = Instant::now();
         let prefix = self.prefix;
         let rep = self.rep;
         assert!(rep < self.index.get_repetitions());
@@ -463,6 +464,7 @@ impl MotifletsIterator {
             .unwrap_or(Distance::infinity());
 
         let mut time_distance_computation = Duration::default();
+        let mut time_update_graph = Duration::default();
         let mut cnt_candidates = 0;
         let mut cnt_skipped = 0;
         let mut cnt_below_threshold = 0;
@@ -515,11 +517,13 @@ impl MotifletsIterator {
             self.stats.cnt_truncated += truncated;
 
             // Update the neighborhoods
+            let t_graph = Instant::now();
             for (a, b, d) in self.pairs_buffer.iter() {
                 if d.is_finite() && !a.overlaps(b, exclusion_zone) {
                     graph.insert(*d, *a as usize, *b as usize);
                 }
             }
+            time_update_graph += t_graph.elapsed();
         } // while there are collisions
         debug!(
             "collisions at prefix {}: {} of which {} below threshold {}",
@@ -529,17 +533,18 @@ impl MotifletsIterator {
             "time to compute distances in update_graph: {:?}",
             time_distance_computation
         );
-        observe!(
-            rep,
-            prefix,
-            "time_distance_computation_s",
-            time_distance_computation.as_secs_f64()
-        );
+        #[rustfmt::skip]
+        observe!(rep, prefix, "profile_update_graph_distance_computation_s", time_distance_computation.as_secs_f64());
+        #[rustfmt::skip]
+        observe!(self.rep, self.prefix, "profile_update_graph_do_update_s", time_update_graph.as_secs_f64());
+        #[rustfmt::skip]
+        observe!(self.rep, self.prefix, "profile_update_graph_s", timer.elapsed().as_secs_f64());
     }
 
     /// adds to `self.to_return` the motiflets that can
     /// be confirmed in this iteration
     fn emit_confirmed(&mut self) {
+        let timer = Instant::now();
         let prefix = self.prefix;
         let previous_prefix = self.previous_prefix;
         let previous_prefix_repetitions = self.previous_prefix_repetitions;
@@ -618,6 +623,8 @@ impl MotifletsIterator {
             .sum::<usize>();
         self.stats.next_distance = self.next_to_confirm.unwrap_or(Distance::infinity());
 
+        #[rustfmt::skip]
+        observe!(self.rep, self.prefix, "profile_emit_confirmed_s", timer.elapsed().as_secs_f64());
         // self.graph
         //     .remove_larger_than(self.best_motiflet.last().unwrap().0);
     }
@@ -626,6 +633,7 @@ impl MotifletsIterator {
         &mut self,
         mut f: F,
     ) -> Result<Option<Motiflet>, E> {
+        let mut repetition_timer = Instant::now();
         while self.to_return.is_empty() {
             // Give the chance to the caller to interrupt the computation
             // by returning an `Err` in this call
@@ -653,6 +661,10 @@ impl MotifletsIterator {
                 self.rep, self.prefix, self.next_to_confirm
             );
             self.stats.observe(self.rep, self.prefix);
+
+            #[rustfmt::skip]
+            observe!(self.rep, self.prefix, "profile_total_repetition_s", repetition_timer.elapsed().as_secs_f64());
+            repetition_timer = Instant::now();
 
             let next_prefix =
                 if self.rep + 1 < INITIAL_REPETITIONS && self.previous_prefix.is_none() {
@@ -728,6 +740,9 @@ impl MotifletsIterator {
                 self.prefix = next_prefix;
             }
             assert!(self.prefix > 0);
+
+            #[rustfmt::skip]
+            observe!(self.rep, self.prefix, "profile_repetition_setup_s", repetition_timer.elapsed().as_secs_f64());
         }
 
         Ok(self.to_return.pop())
