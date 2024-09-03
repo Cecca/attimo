@@ -314,6 +314,24 @@ pub struct MotifletsIteratorStats {
     index_stats: LSHIndexStats,
 }
 
+impl MotifletsIteratorStats {
+    /// dump observations about the statistics collected
+    #[rustfmt::skip]
+    fn observe(&self, repetition: usize, prefix: usize) {
+        observe!(repetition, prefix, "average_distance", self.average_distance);
+        observe!(repetition, prefix, "cnt_confirmed", self.cnt_confirmed);
+        observe!(repetition, prefix, "next_distance", self.next_distance);
+        observe!(repetition, prefix, "cnt_candidates", self.cnt_candidates);
+        observe!(repetition, prefix, "cnt_skipped", self.cnt_skipped);
+        observe!(repetition, prefix, "cnt_truncated", self.cnt_truncated);
+        if repetition == 0 && prefix == 0 {
+            self.timeseries_stats.observe(repetition, prefix);
+        }
+        self.graph_stats.observe(repetition, prefix);
+        self.index_stats.observe(repetition, prefix);
+    }
+}
+
 pub struct MotifletsIterator {
     pub max_k: usize,
     ts: Arc<WindowedTimeseries>,
@@ -398,6 +416,7 @@ impl MotifletsIterator {
             min_nn_estimate,
         ));
 
+        stats.observe(0, 0);
         Self {
             ts,
             fft_data,
@@ -510,10 +529,6 @@ impl MotifletsIterator {
             "time to compute distances in update_graph: {:?}",
             time_distance_computation
         );
-        observe!(rep, prefix, "cnt_candidates", cnt_candidates);
-        observe!(rep, prefix, "cnt_below_threshold", cnt_below_threshold);
-        observe!(rep, prefix, "cnt_truncated", cnt_truncated);
-        observe!(rep, prefix, "cnt_skipped", cnt_skipped);
         observe!(
             rep,
             prefix,
@@ -601,19 +616,7 @@ impl MotifletsIterator {
             .iter()
             .map(|top| top.emitted.len())
             .sum::<usize>();
-        // self.stats.next_distance = self.next_to_confirm.unwrap_or(Distance::infinity());
-        // observe!(
-        //     rep,
-        //     prefix,
-        //     "iterator_cnt_confirmed",
-        //     self.best_motiflet[2..].iter().filter(|tup| tup.2).count()
-        // );
-        observe!(
-            rep,
-            prefix,
-            "next_distance",
-            self.next_to_confirm.unwrap_or(Distance::infinity())
-        );
+        self.stats.next_distance = self.next_to_confirm.unwrap_or(Distance::infinity());
 
         // self.graph
         //     .remove_larger_than(self.best_motiflet.last().unwrap().0);
@@ -633,25 +636,23 @@ impl MotifletsIterator {
                 return Ok(None);
             }
 
+            let timer = Instant::now();
             self.update_graph();
             self.emit_confirmed();
+            let repetition_elapsed = timer.elapsed();
+            #[rustfmt::skip]
+            observe!(self.rep, self.prefix, "repetition_elapsed_s", repetition_elapsed.as_secs_f64());
+            #[rustfmt::skip]
+            observe!(self.rep, self.prefix, "repetition_estimate_s", self.index_stats.repetition_cost_estimate(self.prefix));
 
-            let graph_stats = self.graph.stats();
-            self.stats.graph_stats = graph_stats;
-            observe!(self.rep, self.prefix, "graph_edges", graph_stats.num_edges);
-            observe!(self.rep, self.prefix, "graph_nodes", graph_stats.num_nodes);
-            observe!(
-                self.rep,
-                self.prefix,
-                "graph_memory",
-                graph_stats.used_memory.0
-            );
+            self.stats.graph_stats = self.graph.stats();
             debug!("[{}@{}] {:#?}", self.rep, self.prefix, self.stats);
             // debug!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             debug!(
                 "[{}@{}] First non confirmed distance {:?}",
                 self.rep, self.prefix, self.next_to_confirm
             );
+            self.stats.observe(self.rep, self.prefix);
 
             let next_prefix =
                 if self.rep + 1 < INITIAL_REPETITIONS && self.previous_prefix.is_none() {
@@ -704,32 +705,19 @@ impl MotifletsIterator {
                 };
             let index_stats = self.index.index_stats();
             self.stats.index_stats = index_stats;
-            observe!(
-                self.rep,
-                self.prefix,
-                "index_repetitions",
-                index_stats.num_repetitions
-            );
-            observe!(
-                self.rep,
-                self.prefix,
-                "index_main_memory",
-                index_stats.main_memory_usage.0
-            );
-            observe!(
-                self.rep,
-                self.prefix,
-                "index_disk_memory",
-                index_stats.disk_memory_usage.0
-            );
 
             if next_prefix >= self.prefix {
                 // Advance on the current prefix
                 self.rep += 1;
                 debug!("Advancing to repetition {}", self.rep);
                 if self.rep >= self.index.get_repetitions() {
-                    self.index
-                        .add_repetitions(&self.ts, &self.fft_data, self.rep + 1);
+                    let elapsed =
+                        self.index
+                            .add_repetitions(&self.ts, &self.fft_data, self.rep + 1);
+                    #[rustfmt::skip]
+                    observe!(self.rep, self.prefix, "repetition_setup_s", elapsed.as_secs_f64());
+                    #[rustfmt::skip]
+                    observe!(self.rep, self.prefix, "repetition_setup_estimate_s", self.index_stats.repetition_setup_estimate());
                 }
             } else {
                 // Go to the suggested prefix, and start from the first repetition there

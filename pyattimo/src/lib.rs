@@ -3,6 +3,7 @@ use attimo::motiflets::brute_force_motiflets;
 use attimo::timeseries::WindowedTimeseries;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -207,7 +208,7 @@ struct MotifsIterator {
 #[pymethods]
 impl MotifsIterator {
     #[new]
-    #[pyo3(signature=(ts, w, top_k=1, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000))]
+    #[pyo3(signature=(ts, w, top_k=1, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000, observability_file= None))]
     fn new(
         ts: Vec<f64>,
         w: usize,
@@ -217,6 +218,7 @@ impl MotifsIterator {
         delta: f64,
         seed: u64,
         brute_force_threshold: usize,
+        observability_file: Option<PathBuf>,
     ) -> Self {
         let inner = MotifletsIterator::new(
             ts,
@@ -228,6 +230,7 @@ impl MotifsIterator {
             delta,
             seed,
             brute_force_threshold,
+            observability_file,
         );
 
         Self { inner }
@@ -256,12 +259,14 @@ enum MotifletsIteratorImpl {
 struct MotifletsIterator {
     // inner: attimo::motiflets::MotifletsIterator,
     inner: MotifletsIteratorImpl,
+    #[pyo3(get)]
+    observability_file: PathBuf,
 }
 
 #[pymethods]
 impl MotifletsIterator {
     #[new]
-    #[pyo3(signature=(ts, w, support=2, top_k=1, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000))]
+    #[pyo3(signature=(ts, w, support=2, top_k=1, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000, observability_file=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         ts: Vec<f64>,
@@ -273,6 +278,7 @@ impl MotifletsIterator {
         delta: f64,
         seed: u64,
         brute_force_threshold: usize,
+        observability_file: Option<PathBuf>,
     ) -> Self {
         let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
         let exclusion_zone = exclusion_zone.unwrap_or(w);
@@ -281,6 +287,19 @@ impl MotifletsIterator {
             "max_k * exclusion_zone should be less than the number of subsequences. We have instead {} * {} > {}",
             support, exclusion_zone, ts.num_subsequences()
         );
+        let observability_file = observability_file.unwrap_or_else(|| {
+            std::env::temp_dir().join(
+                format!(
+                    "attimo-{}.csv",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis()
+                )
+                .as_str(),
+            )
+        });
+        attimo::observe::reset_observer(&observability_file);
         if ts.num_subsequences() > brute_force_threshold {
             let max_memory = if let Some(max_mem_str) = max_memory {
                 Bytes::from_str(&max_mem_str).expect("cannot parse memory string")
@@ -299,7 +318,10 @@ impl MotifletsIterator {
                     seed,
                     false,
                 ));
-            Self { inner }
+            Self {
+                inner,
+                observability_file,
+            }
         } else {
             println!(
                 "Brute forcing the solution, as the instance is smaller than {} subsequences",
@@ -316,6 +338,7 @@ impl MotifletsIterator {
                 .collect();
             Self {
                 inner: MotifletsIteratorImpl::BruteForce(0, motiflets),
+                observability_file,
             }
         }
     }
@@ -326,24 +349,13 @@ impl MotifletsIterator {
 
     fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<KMotiflet>> {
         let py = slf.py();
-        slf.next(py)
-        // match &mut slf.inner {
-        //     MotifletsIteratorImpl::Enumerator(inner) => {
-        //         let res = inner
-        //             .next_interruptible(|| Python::check_signals(py))?
-        //             .map(|m| KMotiflet::new(m.extent(), m.indices(), m.support(), inner.get_ts()));
-        //         Ok(res)
-        //     }
-        //     MotifletsIteratorImpl::BruteForce(pos, motiflets) => {
-        //         if *pos >= motiflets.len() {
-        //             Ok(None)
-        //         } else {
-        //             let m = motiflets[*pos].clone();
-        //             *pos += 1;
-        //             Ok(Some(m))
-        //         }
-        //     }
-        // }
+        let res = slf.next(py);
+        if let Ok(None) = res.as_ref() {
+            // flush the observer if we are done with it
+            attimo::observe::flush_observer();
+        }
+
+        res
     }
 }
 

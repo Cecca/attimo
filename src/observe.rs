@@ -1,4 +1,6 @@
 use std::io::prelude::*;
+use std::ops::DerefMut;
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::Instant;
 use std::{fmt::Display, fs::File, io::BufWriter};
@@ -9,7 +11,7 @@ pub struct Observer {
 }
 
 impl Observer {
-    fn new(path: &str) -> Self {
+    fn new<P: AsRef<Path>>(path: P) -> Self {
         let mut output = BufWriter::new(File::create(path).unwrap());
         writeln!(output, "elapsed_s,repetition,prefix,name,value").unwrap();
         let start = Instant::now();
@@ -42,10 +44,21 @@ impl Drop for Observer {
 
 pub static OBSERVER: Lazy<Mutex<Observer>> = Lazy::new(|| Mutex::new(Observer::new("observe.csv")));
 
+pub fn reset_observer<P: AsRef<Path>>(path: P) {
+    let mut obs = OBSERVER.lock().unwrap();
+    let obs = obs.deref_mut();
+    *obs = Observer::new(path.as_ref());
+}
+
+pub fn flush_observer() {
+    #[cfg(feature = "observe")]
+    OBSERVER.lock().unwrap().flush()
+}
+
 #[cfg(feature = "observe")]
 macro_rules! observe {
     ($rep: expr, $prefix: expr, $name: literal, $value: expr) => {
-        OBSERVER
+        crate::observe::OBSERVER
             .lock()
             .unwrap()
             .append($rep, $prefix, $name, $value);

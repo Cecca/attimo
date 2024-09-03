@@ -1,4 +1,4 @@
-use crate::{allocator::Bytes, knn::Distance, timeseries::Overlaps};
+use crate::{allocator::Bytes, knn::Distance, observe::observe, timeseries::Overlaps};
 use bitvec::prelude::*;
 use rayon::prelude::*;
 
@@ -8,6 +8,16 @@ pub struct GraphStats {
     pub num_nodes: usize,
     pub max_neighborhood_size: usize,
     pub used_memory: Bytes,
+}
+
+impl GraphStats {
+    #[rustfmt::skip]
+    pub fn observe(&self, repetition: usize, prefix: usize) {
+        observe!(repetition, prefix, "num_edges", self.num_edges);
+        observe!(repetition, prefix, "num_nodes", self.num_nodes);
+        observe!(repetition, prefix, "max_neighborhood_size", self.max_neighborhood_size);
+        observe!(repetition, prefix, "used_memory", self.used_memory.0);
+    }
 }
 
 #[derive(Default, Clone, Copy)]

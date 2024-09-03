@@ -1,5 +1,6 @@
 use crate::allocator::Bytes;
 use crate::distance::{zdot, zeucl};
+use crate::observe::observe;
 use core::f64;
 use rand_distr::num_traits::Zero;
 use rayon::prelude::*;
@@ -79,6 +80,15 @@ pub struct TimeseriesStats {
     pub num_subsequences: usize,
     pub num_subsequence_pairs: usize,
     pub used_memory: Bytes,
+}
+
+impl TimeseriesStats {
+    #[rustfmt::skip]
+    pub fn observe(&self, repetition: usize, prefix: usize) {
+        observe!(repetition, prefix, "num_subsequences", self.num_subsequences);
+        observe!(repetition, prefix, "num_subsequence_pairs", self.num_subsequence_pairs);
+        observe!(repetition, prefix, "used_memory", self.used_memory.0);
+    }
 }
 
 /// The threshold on the standard deviation below which a subsequence is considered flat

@@ -364,6 +364,15 @@ pub struct LSHIndexStats {
     pub disk_memory_usage: Bytes,
 }
 
+impl LSHIndexStats {
+    #[rustfmt::skip]
+    pub fn observe(&self, repetition: usize, prefix: usize) {
+        observe!(repetition, prefix, "num_repetitions", self.num_repetitions);
+        observe!(repetition, prefix, "main_memory_usage", self.main_memory_usage.0);
+        observe!(repetition, prefix, "disk_memory_usage", self.disk_memory_usage.0);
+    }
+}
+
 pub struct LSHIndex {
     rng: Xoshiro256PlusPlus,
     quantization_width: f64,
@@ -895,6 +904,13 @@ impl IndexStats {
             .unwrap()
             .0
             .max(1)
+    }
+
+    pub fn repetition_cost_estimate(&self, prefix: usize) -> f64 {
+        self.expected_collisions[prefix] * self.collision_cost
+    }
+    pub fn repetition_setup_estimate(&self) -> f64 {
+        self.repetition_setup_cost
     }
 
     /// For each prefix length, compute the cost to confirm a pair at
