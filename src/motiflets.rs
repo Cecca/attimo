@@ -491,10 +491,11 @@ impl MotifletsIterator {
                     let a = *a as usize;
                     let b = *b as usize;
                     assert!(a < b);
-                    if graph.has_edge(a, b) {
-                        *dist = Distance::infinity();
-                        (0, 0, 1)
-                    } else if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
+                    // if graph.has_edge(a, b) {
+                    //     *dist = Distance::infinity();
+                    //     (0, 0, 1)
+                    // } else
+                    if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
                         let d = Distance(d);
                         // we only schedule the pair to update the respective
                         // neighborhoods if it can result in a better motiflet.
