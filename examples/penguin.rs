@@ -5,31 +5,51 @@ use std::{
     time::Instant,
 };
 
-use attimo::{allocator::Bytes, motiflets::MotifletsIterator, timeseries::WindowedTimeseries};
+use attimo::{
+    allocator::Bytes,
+    motiflets::{brute_force_motiflets, MotifletsIterator},
+    timeseries::WindowedTimeseries,
+};
 
 fn main() {
     env_logger::init();
+    let mode = std::env::args()
+        .nth(1)
+        .unwrap_or("probabilistic".to_owned());
+
+    #[cfg(feature = "pprof")]
+    let _guard = attimo::profiler::Profiler::start();
 
     let w = 125;
     let max_k = 20;
 
-    for n in [10_000] {
-        //[10_000, 50_000, 100_000, 150_000] {
+    // for n in [10_000, 20_000, 30_000, 40_000, 60_000] {
+    // for n in [1000, 2000, 3000, 10000, 20000] {
+    for n in [20000] {
         attimo::observe::reset_observer(format!("/tmp/attimo-n{}.csv", n));
         let ts = load_penguin_ts(w, n);
         let timer = Instant::now();
-        let mut iter = MotifletsIterator::new(
-            Arc::new(ts),
-            max_k,
-            1,
-            // Bytes::system_memory().divide(2),
-            Bytes::gbytes(1),
-            0.05,
-            w / 2,
-            21234,
-            false,
-        );
-        let motiflets: Vec<_> = iter.collect();
+        match mode.as_str() {
+            "exact" => {
+                brute_force_motiflets(&ts, max_k, w / 2);
+            }
+            "probabilistic" => {
+                let mut iter = MotifletsIterator::new(
+                    Arc::new(ts),
+                    max_k,
+                    1,
+                    Bytes::system_memory().divide(2),
+                    0.05,
+                    w / 2,
+                    21234,
+                    false,
+                );
+                let motiflets: Vec<_> = iter.collect();
+            }
+            _ => {
+                panic!("provide either 'exact' or 'probabilistic'")
+            }
+        }
         let elapsed = timer.elapsed();
         println!("{}, {}", n, elapsed.as_secs_f64());
         attimo::observe::flush_observer();

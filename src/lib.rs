@@ -13,6 +13,8 @@ pub mod load;
 pub mod motiflets;
 pub mod motifs;
 pub mod observe;
+#[cfg(feature = "pprof")]
+pub mod profiler;
 pub mod sort;
 mod stats;
 /// Implements an LSH-based index for a time series.
