@@ -275,6 +275,7 @@ fn main() -> Result<()> {
     let fft_data = FFTData::new(&ts);
     let s = (args.skip * (w as f64)) as usize;
     let exclusion_zone = w;
+    let average_distance = ts.average_pairwise_distance(1234, exclusion_zone);
 
     let timer = Instant::now();
     let mut mp = vec![f64::INFINITY; ts.num_subsequences()];
@@ -291,6 +292,7 @@ fn main() -> Result<()> {
             idx_b: std::cmp::max(i, *j),
             distance: *d,
             confirmed: false,
+            relative_contrast: average_distance / *d,
         };
         topk.insert(m);
     }

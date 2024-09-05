@@ -103,6 +103,7 @@ fn projection_motifs(
     repetitions: usize,
     seed: u64,
 ) -> Vec<Motif> {
+    let average_distance = ts.average_pairwise_distance(1234, ts.w);
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
 
     let rngs: Vec<(usize, Xoshiro256PlusPlus)> = (0..repetitions)
@@ -187,6 +188,7 @@ fn projection_motifs(
                     idx_b: *b,
                     distance: d,
                     confirmed: false,
+                    relative_contrast: average_distance / d,
                 };
                 topk.insert(m);
             }
