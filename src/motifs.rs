@@ -1,15 +1,7 @@
-//// # Motifs
-
-//// Finding motifs in time series. Instead of computing the full matrix profile,
-//// leverage [LSH](src/lsh.html) to check only pairs that are probably near.
-//// The data structure used for the task is adaptive to the data, and is configured
-//// to respect the limits of the system in terms of memory.
-
 use crate::knn::Distance;
 use crate::motiflets::Motiflet;
 use crate::timeseries::*;
 use rayon::prelude::*;
-use std::time::Instant;
 
 /// This data structure stores information about a motif:
 ///
@@ -26,6 +18,7 @@ pub struct Motif {
     pub idx_b: usize,
     pub distance: f64,
     pub confirmed: bool,
+    pub relative_contrast: f64,
 }
 
 impl TryFrom<Motiflet> for Motif {
@@ -42,6 +35,7 @@ impl TryFrom<Motiflet> for Motif {
                 idx_b,
                 distance: motiflet.extent(),
                 confirmed: true,
+                relative_contrast: motiflet.relative_contrast(),
             })
         }
     }
@@ -126,6 +120,8 @@ pub fn brute_force_motifs(ts: &WindowedTimeseries, k: usize, exclusion_zone: usi
     let mut buf = Vec::new();
     buf.resize(ts.w, 0.0f64);
 
+    let average_distance = ts.average_pairwise_distance(1234, exclusion_zone);
+
     // compute all k-nearest neighborhoods
     let mut nns: Vec<Motif> = (0..n)
         .into_par_iter()
@@ -136,6 +132,7 @@ pub fn brute_force_motifs(ts: &WindowedTimeseries, k: usize, exclusion_zone: usi
                 idx_b: i.max(j),
                 distance: d.0,
                 confirmed: true,
+                relative_contrast: average_distance / d.0,
             }
         })
         .collect();

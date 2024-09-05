@@ -44,7 +44,14 @@ fn main() {
                     21234,
                     false,
                 );
-                let motiflets: Vec<_> = iter.collect();
+                for motiflet in iter {
+                    eprintln!(
+                        "support: {} extent: {} RC: {}",
+                        motiflet.support(),
+                        motiflet.extent(),
+                        motiflet.relative_contrast()
+                    );
+                }
             }
             _ => {
                 panic!("provide either 'exact' or 'probabilistic'")

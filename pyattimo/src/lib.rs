@@ -1,5 +1,5 @@
 use attimo::allocator::Bytes;
-use attimo::motiflets::brute_force_motiflets;
+use attimo::motiflets::{self, brute_force_motiflets};
 use attimo::timeseries::WindowedTimeseries;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -16,18 +16,9 @@ pub struct Motif {
     b: usize,
     #[pyo3(get)]
     distance: f64,
+    #[pyo3(get)]
+    relative_contrast: f64,
     ts: Arc<WindowedTimeseries>,
-}
-
-impl Motif {
-    fn with_context(m: attimo::motifs::Motif, ts: Arc<WindowedTimeseries>) -> Self {
-        Self {
-            a: m.idx_a,
-            b: m.idx_b,
-            distance: m.distance,
-            ts,
-        }
-    }
 }
 
 impl TryFrom<KMotiflet> for Motif {
@@ -43,6 +34,7 @@ impl TryFrom<KMotiflet> for Motif {
                 b,
                 distance: motiflet.extent,
                 ts: Arc::clone(&motiflet.ts),
+                relative_contrast: motiflet.relative_contrast,
             })
         }
     }
@@ -57,15 +49,27 @@ pub struct KMotiflet {
     indices: Vec<usize>,
     #[pyo3(get)]
     extent: f64,
+    #[pyo3(get)]
+    relative_contrast: f64,
     ts: Arc<WindowedTimeseries>,
 }
 
 impl KMotiflet {
-    fn new(extent: f64, indices: Vec<usize>, support: usize, ts: Arc<WindowedTimeseries>) -> Self {
+    // fn new(extent: f64, indices: Vec<usize>, support: usize, ts: Arc<WindowedTimeseries>) -> Self {
+    //     todo!()
+    //     // Self {
+    //     //     support,
+    //     //     indices,
+    //     //     extent,
+    //     //     ts,
+    //     // }
+    // }
+    fn with_context(motiflet: attimo::motiflets::Motiflet, ts: Arc<WindowedTimeseries>) -> Self {
         Self {
-            support,
-            indices,
-            extent,
+            support: motiflet.support(),
+            indices: motiflet.indices(),
+            extent: motiflet.extent(),
+            relative_contrast: motiflet.relative_contrast(),
             ts,
         }
     }
@@ -327,6 +331,7 @@ impl MotifletsIterator {
                 "Brute forcing the solution, as the instance is smaller than {} subsequences",
                 brute_force_threshold
             );
+            let average_distance = ts.average_pairwise_distance(1234, exclusion_zone);
             let motiflets = brute_force_motiflets(&ts, support, exclusion_zone)
                 .into_iter()
                 .map(|(extent, indices)| KMotiflet {
@@ -334,6 +339,7 @@ impl MotifletsIterator {
                     indices,
                     extent: extent.into(),
                     ts: Arc::clone(&ts),
+                    relative_contrast: average_distance / extent.0,
                 })
                 .collect();
             Self {
@@ -365,7 +371,7 @@ impl MotifletsIterator {
             MotifletsIteratorImpl::Enumerator(inner) => {
                 let res = inner
                     .next_interruptible(|| Python::check_signals(py))?
-                    .map(|m| KMotiflet::new(m.extent(), m.indices(), m.support(), inner.get_ts()));
+                    .map(|m| KMotiflet::with_context(m, inner.get_ts()));
                 Ok(res)
             }
             MotifletsIteratorImpl::BruteForce(pos, motiflets) => {
@@ -397,6 +403,7 @@ pub fn motiflet_brute_force(
         "support * exclusion_zone should be less than the number of subsequences. We have instead {} * {} > {}",
         support, exclusion_zone, ts.num_subsequences()
     );
+    let average_distance = ts.average_pairwise_distance(1234, exclusion_zone);
     let motiflets = brute_force_motiflets(&ts, support, exclusion_zone);
     motiflets
         .into_iter()
@@ -405,6 +412,7 @@ pub fn motiflet_brute_force(
             indices,
             extent: extent.into(),
             ts: Arc::clone(&ts),
+            relative_contrast: average_distance / extent.0,
         })
         .collect()
 }

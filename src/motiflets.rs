@@ -147,6 +147,8 @@ pub fn brute_force_motiflets(
 pub struct Motiflet {
     indices: Vec<usize>,
     extent: f64, // FIXME: make this a `Distance`
+    /// the relative contrast of this motifle
+    relative_contrast: f64,
 }
 impl Eq for Motiflet {}
 impl Ord for Motiflet {
@@ -186,14 +188,21 @@ impl Overlaps<&Self> for Motiflet {
 }
 
 impl Motiflet {
-    pub fn new(indices: Vec<usize>, extent: f64) -> Self {
-        Self { indices, extent }
+    pub fn new(indices: Vec<usize>, extent: f64, avg_dist: Distance) -> Self {
+        Self {
+            indices,
+            extent,
+            relative_contrast: avg_dist.0 / extent,
+        }
     }
     pub fn support(&self) -> usize {
         self.indices.len()
     }
     pub fn extent(&self) -> f64 {
         self.extent
+    }
+    pub fn relative_contrast(&self) -> f64 {
+        self.relative_contrast
     }
     pub fn indices(&self) -> Vec<usize> {
         self.indices.clone()
@@ -414,6 +423,7 @@ impl MotifletsIterator {
         top[2].insert(Motiflet::new(
             vec![sampled_min_index_pair.0, sampled_min_index_pair.1],
             min_nn_estimate,
+            stats.average_distance,
         ));
 
         stats.observe(0, 0);
@@ -573,7 +583,11 @@ impl MotifletsIterator {
                     let k = ids.len();
                     if k <= self.max_k {
                         let top = &mut self.top[k];
-                        top.insert(Motiflet::new(ids.to_owned(), extent.0));
+                        top.insert(Motiflet::new(
+                            ids.to_owned(),
+                            extent.0,
+                            self.stats.average_distance,
+                        ));
                     }
                 }
             } else {

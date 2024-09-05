@@ -1,6 +1,7 @@
 use anyhow::Result;
 use argh::FromArgs;
 use attimo::allocator::{self, Bytes, CountingAllocator, MemoryGauge};
+use attimo::knn::Distance;
 use attimo::load::*;
 use attimo::motiflets::{brute_force_motiflets, Motiflet, MotifletsIterator};
 use attimo::timeseries::*;
@@ -121,10 +122,14 @@ fn main() -> Result<()> {
 
     let support = config.support;
     let motiflets: Vec<Motiflet> = if config.exact {
-        let motiflets = brute_force_motiflets(&ts, support, ts.w / 2);
+        let exclusion_zone = ts.w / 2;
+        let average_distance = ts.average_pairwise_distance(1234, exclusion_zone);
+        let motiflets = brute_force_motiflets(&ts, support, exclusion_zone);
         motiflets
             .into_iter()
-            .map(|(extent, indices)| Motiflet::new(indices, extent.into()))
+            .map(|(extent, indices)| {
+                Motiflet::new(indices, extent.into(), Distance(average_distance))
+            })
             .collect()
     } else {
         let max_memory = if let Some(max_mem_str) = config.max_memory {
