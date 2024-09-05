@@ -209,6 +209,7 @@ impl Motiflet {
     }
 }
 
+#[derive(Debug)]
 struct TopK {
     k: usize,
     exclusion_zone: usize,
@@ -293,15 +294,15 @@ impl TopK {
     fn emit<P: Fn(Distance) -> bool>(&mut self, predicate: P) -> Vec<Motiflet> {
         let mut res: Vec<Motiflet> = Vec::new();
         for motiflet in self.top.iter() {
+            if self.emitted.len() >= self.k {
+                break;
+            }
             if !motiflet.overlaps_iter(&self.emitted, self.exclusion_zone) {
                 if predicate(Distance(motiflet.extent)) {
                     res.push(motiflet.clone());
                     self.emitted.insert(motiflet.clone());
                 } else {
                     self.sned.replace(Distance(motiflet.extent));
-                    break;
-                }
-                if self.emitted.len() >= self.k {
                     break;
                 }
             }
@@ -364,6 +365,8 @@ pub struct MotifletsIterator {
     previous_prefix_repetitions: Option<usize>,
     /// some statistics on the execution
     stats: MotifletsIteratorStats,
+    collisions_threshold: usize,
+    stop_on_collisions_threshold: bool,
 }
 
 impl MotifletsIterator {
@@ -427,6 +430,11 @@ impl MotifletsIterator {
         ));
 
         stats.observe(0, 0);
+
+        // by default, if we do more than 10% of the possible collision comparisons we signal that
+        // we have a problem
+        let collisions_threshold = stats.timeseries_stats.num_subsequence_pairs / 10;
+
         Self {
             ts,
             fft_data,
@@ -448,7 +456,17 @@ impl MotifletsIterator {
             previous_prefix: None,
             previous_prefix_repetitions: None,
             stats,
+            collisions_threshold,
+            stop_on_collisions_threshold: false,
         }
+    }
+
+    pub fn set_collision_threshold(&mut self, threshold: usize) {
+        self.collisions_threshold = threshold;
+    }
+
+    pub fn set_stop_on_collisions_threshold(&mut self, should_stop: bool) {
+        self.stop_on_collisions_threshold = should_stop;
     }
 
     pub fn get_ts(&self) -> Arc<WindowedTimeseries> {
@@ -467,8 +485,6 @@ impl MotifletsIterator {
         let graph = &mut self.graph;
         graph.reset_flags();
 
-        let num_collisions_threshold = ts.num_subsequence_pairs() / 2;
-
         let threshold = self.top[self.max_k]
             .kth_distance()
             .unwrap_or(Distance::infinity());
@@ -483,13 +499,6 @@ impl MotifletsIterator {
         while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone) {
             log::trace!("Evaluating {} collisions", cnt);
             cnt_candidates += cnt;
-            if cnt_candidates > num_collisions_threshold {
-                panic!(
-                    "Too many collisions: {} out of {} possible pairs",
-                    cnt_candidates,
-                    ts.num_subsequence_pairs()
-                );
-            }
             self.stats.cnt_candidates += cnt;
             let t = Instant::now();
             // Fixup the distances
@@ -657,6 +666,23 @@ impl MotifletsIterator {
             if self.top.iter().all(|top| top.is_complete()) {
                 info!("Execution stats: {:#?}", self.stats);
                 return Ok(None);
+            }
+
+            if self.stats.cnt_candidates > self.collisions_threshold {
+                warn!(
+                    "Too many collisions! {} > {}",
+                    self.stats.cnt_candidates, self.collisions_threshold,
+                );
+                if self.stop_on_collisions_threshold {
+                    // emit all the partial candidates
+                    for (supp, queue) in self.top.iter_mut().enumerate() {
+                        self.to_return.extend(queue.emit(|_| true));
+                        queue.disable();
+                    }
+                    // break from the loop, so that
+                    // we can emit the results
+                    break;
+                }
             }
 
             let timer = Instant::now();

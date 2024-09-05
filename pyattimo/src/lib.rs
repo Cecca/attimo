@@ -1,5 +1,5 @@
 use attimo::allocator::Bytes;
-use attimo::motiflets::{self, brute_force_motiflets};
+use attimo::motiflets::brute_force_motiflets;
 use attimo::timeseries::WindowedTimeseries;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -212,7 +212,7 @@ struct MotifsIterator {
 #[pymethods]
 impl MotifsIterator {
     #[new]
-    #[pyo3(signature=(ts, w, top_k=1, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000, observability_file= None))]
+    #[pyo3(signature=(ts, w, top_k=1, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000, observability_file= None, fraction_threshold=0.1, stop_on_threshold=false))]
     fn new(
         ts: Vec<f64>,
         w: usize,
@@ -223,6 +223,8 @@ impl MotifsIterator {
         seed: u64,
         brute_force_threshold: usize,
         observability_file: Option<PathBuf>,
+        fraction_threshold: f64,
+        stop_on_threshold: bool,
     ) -> Self {
         let inner = MotifletsIterator::new(
             ts,
@@ -235,6 +237,8 @@ impl MotifsIterator {
             seed,
             brute_force_threshold,
             observability_file,
+            fraction_threshold,
+            stop_on_threshold,
         );
 
         Self { inner }
@@ -270,7 +274,7 @@ struct MotifletsIterator {
 #[pymethods]
 impl MotifletsIterator {
     #[new]
-    #[pyo3(signature=(ts, w, support=2, top_k=1, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000, observability_file=None))]
+    #[pyo3(signature=(ts, w, support=2, top_k=1, max_memory=None, exclusion_zone=None, delta = 0.05, seed = 1234, brute_force_threshold=1000, observability_file=None, fraction_threshold=0.1, stop_on_threshold=false))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         ts: Vec<f64>,
@@ -283,6 +287,8 @@ impl MotifletsIterator {
         seed: u64,
         brute_force_threshold: usize,
         observability_file: Option<PathBuf>,
+        fraction_threshold: f64,
+        stop_on_threshold: bool,
     ) -> Self {
         let ts = Arc::new(WindowedTimeseries::new(ts, w, false));
         let exclusion_zone = exclusion_zone.unwrap_or(w);
@@ -304,6 +310,7 @@ impl MotifletsIterator {
             )
         });
         attimo::observe::reset_observer(&observability_file);
+        let num_pairs = ts.num_subsequence_pairs();
         if ts.num_subsequences() > brute_force_threshold {
             let max_memory = if let Some(max_mem_str) = max_memory {
                 Bytes::from_str(&max_mem_str).expect("cannot parse memory string")
@@ -311,17 +318,19 @@ impl MotifletsIterator {
                 let sysmem = Bytes::system_memory();
                 sysmem.divide(2)
             };
-            let inner =
-                MotifletsIteratorImpl::Enumerator(attimo::motiflets::MotifletsIterator::new(
-                    ts,
-                    support,
-                    top_k,
-                    max_memory,
-                    delta,
-                    exclusion_zone,
-                    seed,
-                    false,
-                ));
+            let mut iter = attimo::motiflets::MotifletsIterator::new(
+                ts,
+                support,
+                top_k,
+                max_memory,
+                delta,
+                exclusion_zone,
+                seed,
+                false,
+            );
+            iter.set_collision_threshold((num_pairs as f64 * fraction_threshold) as usize);
+            iter.set_stop_on_collisions_threshold(stop_on_threshold);
+            let inner = MotifletsIteratorImpl::Enumerator(iter);
             Self {
                 inner,
                 observability_file,

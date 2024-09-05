@@ -30,13 +30,13 @@ start = time.time()
 m_iter = pyattimo.MotifletsIterator(ts, w=w, support=k, exclusion_zone=w // 2)
 print(m_iter.observability_file)
 
-# for m in m_iter:
-#     print(m, "support", m.support, type(m))
-#     plt.figure()
-#     for i in m.indices:
-#         plt.plot(ts[i : i + w])
-#     plt.savefig(f"motiflets-{m.support}.png")
-#     plt.close()
-#
-# end = time.time()
-# print("Discovered motiflets in", end - start, "seconds")
+for m in m_iter:
+    print(m, "support", m.support, type(m))
+    # plt.figure()
+    # for i in m.indices:
+    #     plt.plot(ts[i : i + w])
+    # plt.savefig(f"motiflets-{m.support}.png")
+    # plt.close()
+
+end = time.time()
+print("Discovered motiflets in", end - start, "seconds")
