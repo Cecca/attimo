@@ -462,7 +462,7 @@ impl LSHIndex {
             if enumerator.estimate_num_collisions(exclusion_zone) > 0 {
                 let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS, K);
                 slf.repetitions_setup_time = avg_dur;
-                observe!(0, 0, "time_setup_s", t.elapsed().as_secs_f64());
+                observe!(0, 0, "profile/index_setup", t.elapsed().as_secs_f64());
                 return slf;
             } else {
                 quantization_width *= 2.0;

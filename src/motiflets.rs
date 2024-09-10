@@ -483,7 +483,10 @@ impl MotifletsIterator {
         let index = &mut self.index;
         let ts = &self.ts;
         let graph = &mut self.graph;
+        let t = Instant::now();
         graph.reset_flags();
+        #[rustfmt::skip]
+        observe!(rep, prefix, "profile/repetition/update_graph/graph_reset_flags", t.elapsed().as_secs_f64());
 
         let threshold = self.top[self.max_k]
             .kth_distance()
@@ -496,7 +499,16 @@ impl MotifletsIterator {
         let mut cnt_below_threshold = 0;
         let mut cnt_truncated = 0;
         let mut enumerator = index.collisions(rep, prefix, self.previous_prefix);
-        while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone) {
+        loop {
+            let t = Instant::now();
+            let maybe_cnt = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone);
+            #[rustfmt::skip]
+            observe!(rep, prefix, "profile/repetition/update_graph/enumerator_next", t.elapsed().as_secs_f64());
+            if maybe_cnt.is_none() {
+                break;
+            }
+            let cnt = maybe_cnt.unwrap();
+            // while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone) {
             log::trace!("Evaluating {} collisions", cnt);
             cnt_candidates += cnt;
             self.stats.cnt_candidates += cnt;
@@ -510,10 +522,6 @@ impl MotifletsIterator {
                     let a = *a as usize;
                     let b = *b as usize;
                     assert!(a < b);
-                    // if graph.has_edge(a, b) {
-                    //     *dist = Distance::infinity();
-                    //     (0, 0, 1)
-                    // } else
                     if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
                         let d = Distance(d);
                         // we only schedule the pair to update the respective

@@ -25,7 +25,7 @@ fn main() {
 
     // for n in [10_000, 20_000, 30_000, 40_000, 60_000] {
     // for n in [1000, 2000, 3000, 10000, 20000] {
-    for n in [10000] {
+    for n in [20_000] {
         attimo::observe::reset_observer(format!("/tmp/attimo-n{}.csv", n));
         let ts = load_penguin_ts(w, n);
         let timer = Instant::now();
@@ -67,6 +67,7 @@ fn main() {
 fn load_penguin_ts(w: usize, n: usize) -> WindowedTimeseries {
     let center = 497699;
     let v = load_penguin_raw();
+    dbg!(v.len());
     let ts = v[center - n..center + n].to_owned();
     WindowedTimeseries::new(ts, w, false)
 }
