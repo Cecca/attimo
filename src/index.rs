@@ -38,10 +38,12 @@ pub const MASKS: [u64; K + 1] = [
 pub struct HashValue(u64);
 impl HashValue {
     fn set_byte(&mut self, k: usize, byte: u8) {
+        // bytes are indexed from the left
+        let byte_pos = 7 - k;
         // Clear byte
-        self.0 &= !(0xFFu64 << ((size_of::<u8>() * k) * 8));
+        self.0 &= !(0xFFu64 << ((size_of::<u8>() * byte_pos) * 8));
         // Set byte
-        self.0 |= (byte as u64) << ((size_of::<u8>() * k) * 8);
+        self.0 |= (byte as u64) << ((size_of::<u8>() * byte_pos) * 8);
     }
 
     fn prefix_eq(&self, other: &Self, prefix: usize) -> bool {
@@ -81,9 +83,9 @@ impl std::fmt::Debug for HashValue {
 fn test_set_byte() {
     let mut h = HashValue(0);
     h.set_byte(0, 0xAA);
-    assert_eq!(h, HashValue(0x0000000000000000AAu64));
+    assert_eq!(h, HashValue(0xaa00000000000000u64));
     h.set_byte(1, 0xBB);
-    assert_eq!(h, HashValue(0x00000000000000BBAAu64));
+    assert_eq!(h, HashValue(0xaabb000000000000u64));
 }
 
 #[test]
@@ -216,9 +218,16 @@ impl Hasher {
     }
 
     /// Hash all the subsequences of the time series to 8 x 8-bit hash values each
-    fn hash(&self, ts: &WindowedTimeseries, fft_data: &FFTData, output: &mut [(HashValue, u32)]) {
+    fn hash(
+        &self,
+        ts: &WindowedTimeseries,
+        fft_data: &FFTData,
+        output: &mut [(HashValue, u32)],
+        max_k: usize,
+    ) {
         assert_eq!(ts.num_subsequences(), output.len());
-        for k in 0..K {
+        output.fill((HashValue::default(), 0));
+        for k in 0..max_k {
             ts.znormalized_sliding_dot_product_write(
                 fft_data,
                 &self.vectors[k],
@@ -447,11 +456,11 @@ impl LSHIndex {
                 max_repetitions_in_memory,
             };
 
-            slf.add_repetitions(ts, fft_data, 1);
+            slf.add_repetitions(ts, fft_data, 1, K);
 
             let enumerator = slf.collisions(0, K, None);
             if enumerator.estimate_num_collisions(exclusion_zone) > 0 {
-                let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS);
+                let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS, K);
                 slf.repetitions_setup_time = avg_dur;
                 observe!(0, 0, "time_setup_s", t.elapsed().as_secs_f64());
                 return slf;
@@ -467,6 +476,7 @@ impl LSHIndex {
         ts: &WindowedTimeseries,
         fft_data: &FFTData,
         total_repetitions: usize,
+        max_k: usize,
     ) -> Duration {
         assert!(
             total_repetitions > self.get_repetitions(),
@@ -490,7 +500,7 @@ impl LSHIndex {
         let new_reps = new_hashers.iter().enumerate().map(|(i, hasher)| {
             let rep_idx = starting_repetitions + i;
             tmp.resize(n, (HashValue::default(), 0u32));
-            hasher.hash(ts, fft_data, &mut tmp);
+            hasher.hash(ts, fft_data, &mut tmp, max_k);
             tmp.par_sort_unstable_by_key(|pair| pair.0);
             if rep_idx > max_repetitions_in_memory {
                 warn!("Creating repetition on disk!");
@@ -977,7 +987,7 @@ fn test_collision_probability() {
     let fft_data = FFTData::new(&ts);
     let mut index = LSHIndex::from_ts(&ts, w / 2, &fft_data, 1234);
     dbg!(index.stats(&ts, Bytes::gbytes(8), w));
-    index.add_repetitions(&ts, &fft_data, 4096);
+    index.add_repetitions(&ts, &fft_data, 4096, K);
 
     for &i in &ids {
         for &j in &ids {

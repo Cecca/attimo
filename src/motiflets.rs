@@ -764,9 +764,12 @@ impl MotifletsIterator {
                 self.rep += 1;
                 debug!("Advancing to repetition {}", self.rep);
                 if self.rep >= self.index.get_repetitions() {
-                    let elapsed =
-                        self.index
-                            .add_repetitions(&self.ts, &self.fft_data, self.rep + 1);
+                    let elapsed = self.index.add_repetitions(
+                        &self.ts,
+                        &self.fft_data,
+                        self.rep + 1,
+                        next_prefix + 1,
+                    );
                     #[rustfmt::skip]
                     observe!(self.rep, self.prefix, "repetition_setup_s", elapsed.as_secs_f64());
                     #[rustfmt::skip]
