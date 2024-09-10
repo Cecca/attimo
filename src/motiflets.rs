@@ -554,11 +554,11 @@ impl MotifletsIterator {
             time_distance_computation
         );
         #[rustfmt::skip]
-        observe!(rep, prefix, "profile_update_graph_distance_computation_s", time_distance_computation.as_secs_f64());
+        observe!(rep, prefix, "profile/repetition/update_graph/distance_computation", time_distance_computation.as_secs_f64());
         #[rustfmt::skip]
-        observe!(self.rep, self.prefix, "profile_update_graph_do_update_s", time_update_graph.as_secs_f64());
+        observe!(self.rep, self.prefix, "profile/repetition/update_graph/update_graph", time_update_graph.as_secs_f64());
         #[rustfmt::skip]
-        observe!(self.rep, self.prefix, "profile_update_graph_s", timer.elapsed().as_secs_f64());
+        observe!(self.rep, self.prefix, "profile/repetition/update_graph", timer.elapsed().as_secs_f64());
     }
 
     /// adds to `self.to_return` the motiflets that can
@@ -648,7 +648,7 @@ impl MotifletsIterator {
         self.stats.next_distance = self.next_to_confirm.unwrap_or(Distance::infinity());
 
         #[rustfmt::skip]
-        observe!(self.rep, self.prefix, "profile_emit_confirmed_s", timer.elapsed().as_secs_f64());
+        observe!(self.rep, self.prefix, "profile/repetition/emit_confirmed", timer.elapsed().as_secs_f64());
         // self.graph
         //     .remove_larger_than(self.best_motiflet.last().unwrap().0);
     }
@@ -704,7 +704,7 @@ impl MotifletsIterator {
             self.stats.observe(self.rep, self.prefix);
 
             #[rustfmt::skip]
-            observe!(self.rep, self.prefix, "profile_total_repetition_s", repetition_timer.elapsed().as_secs_f64());
+            observe!(self.rep, self.prefix, "profile/repetition", repetition_timer.elapsed().as_secs_f64());
             repetition_timer = Instant::now();
 
             let next_prefix =
@@ -783,7 +783,7 @@ impl MotifletsIterator {
             assert!(self.prefix > 0);
 
             #[rustfmt::skip]
-            observe!(self.rep, self.prefix, "profile_repetition_setup_s", repetition_timer.elapsed().as_secs_f64());
+            observe!(self.rep, self.prefix, "profile/repetition/setup", repetition_timer.elapsed().as_secs_f64());
         }
 
         Ok(self.to_return.pop())
