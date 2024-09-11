@@ -12,6 +12,7 @@ use crate::{
 use log::*;
 use rayon::prelude::*;
 use std::collections::BTreeSet;
+use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 use std::{sync::Arc, time::Instant};
 
@@ -494,10 +495,6 @@ impl MotifletsIterator {
 
         let mut time_distance_computation = Duration::default();
         let mut time_update_graph = Duration::default();
-        let mut cnt_candidates = 0;
-        let mut cnt_skipped = 0;
-        let mut cnt_below_threshold = 0;
-        let mut cnt_truncated = 0;
         let mut enumerator = index.collisions(rep, prefix, self.previous_prefix);
         loop {
             let t = Instant::now();
@@ -510,39 +507,33 @@ impl MotifletsIterator {
             let cnt = maybe_cnt.unwrap();
             // while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone) {
             log::trace!("Evaluating {} collisions", cnt);
-            cnt_candidates += cnt;
             self.stats.cnt_candidates += cnt;
             let t = Instant::now();
             // Fixup the distances
-            let (truncated, collisions_below_threshold, skip): (usize, usize, usize) = self
-                .pairs_buffer[0..cnt]
-                .par_iter_mut()
-                .with_min_len(1024)
-                .map(|(a, b, dist)| {
-                    let a = *a as usize;
-                    let b = *b as usize;
-                    assert!(a < b);
-                    if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
-                        let d = Distance(d);
-                        // we only schedule the pair to update the respective
-                        // neighborhoods if it can result in a better motiflet.
-                        *dist = d;
-                        (0, 1, 0)
-                    } else {
-                        *dist = Distance::infinity();
-                        (1, 0, 0)
-                    }
-                })
-                .reduce(
-                    || (0usize, 0usize, 0usize),
-                    |accum, tup| (accum.0 + tup.0, accum.1 + tup.1, accum.2 + tup.2),
-                );
-            cnt_below_threshold += collisions_below_threshold;
-            cnt_skipped += skip;
-            cnt_truncated += truncated;
+            let pairs_buffer = &mut self.pairs_buffer[0..cnt];
+            let num_threads = rayon::current_num_threads();
+            rayon::scope(move |scope| {
+                let chunk_size = cnt.div_ceil(num_threads);
+                for chunk in pairs_buffer.chunks_mut(chunk_size) {
+                    scope.spawn(move |_| {
+                        for (a, b, dist) in chunk.iter_mut() {
+                            let a = *a as usize;
+                            let b = *b as usize;
+                            assert!(a < b);
+                            if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
+                                let d = Distance(d);
+                                // we only schedule the pair to update the respective
+                                // neighborhoods if it can result in a better motiflet.
+                                *dist = d;
+                            } else {
+                                *dist = Distance::infinity();
+                            }
+                        }
+                    });
+                }
+            });
+
             time_distance_computation += t.elapsed();
-            self.stats.cnt_skipped += skip;
-            self.stats.cnt_truncated += truncated;
 
             // Update the neighborhoods
             let t_graph = Instant::now();
@@ -553,14 +544,6 @@ impl MotifletsIterator {
             }
             time_update_graph += t_graph.elapsed();
         } // while there are collisions
-        debug!(
-            "collisions at prefix {}: {} of which {} below threshold {}",
-            prefix, cnt_candidates, cnt_below_threshold, threshold
-        );
-        debug!(
-            "time to compute distances in update_graph: {:?}",
-            time_distance_computation
-        );
         #[rustfmt::skip]
         observe!(rep, prefix, "profile/repetition/update_graph/distance_computation", time_distance_computation.as_secs_f64());
         #[rustfmt::skip]
@@ -638,7 +621,6 @@ impl MotifletsIterator {
                     );
                     fp < self.delta
                 });
-                if !new_motiflets.is_empty() {}
                 self.to_return.extend(new_motiflets);
             }
         }
