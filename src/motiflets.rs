@@ -406,7 +406,7 @@ impl MotifletsIterator {
             (min_nn_estimate, avg_nn_estimate)
         );
 
-        let pairs_buffer = vec![(0, 0, Distance(0.0)); 65536];
+        let pairs_buffer = vec![(0, 0, Distance(0.0)); 1 << 20];
 
         let index_stats = index.stats(&ts, max_memory, exclusion_zone);
         info!("Pools stats: {:?}", index_stats);
