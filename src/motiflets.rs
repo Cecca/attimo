@@ -485,7 +485,7 @@ impl MotifletsIterator {
         let ts = &self.ts;
         let graph = &mut self.graph;
         let t = Instant::now();
-        graph.reset_flags();
+        graph.reset_updated();
         #[rustfmt::skip]
         observe!(rep, prefix, "profile/repetition/update_graph/graph_reset_flags", t.elapsed().as_secs_f64());
 

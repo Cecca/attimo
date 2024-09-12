@@ -113,13 +113,8 @@ impl AdjacencyGraph {
         self.neighborhoods[a].iter().any(|(_, x)| *x == b)
     }
 
-    pub fn reset_flags(&mut self) {
+    pub fn reset_updated(&mut self) {
         self.updated.fill(false);
-        self.neighborhoods.par_iter_mut().for_each(|nn| {
-            for x in nn.iter_mut() {
-                x.0.set_flag(false);
-            }
-        });
     }
 
     fn remove_duplicates(&mut self) {
@@ -143,7 +138,7 @@ impl AdjacencyGraph {
         let exclusion_zone = self.exclusion_zone;
         let updated = &self.updated;
         self.neighborhoods
-            .iter()
+            .iter_mut()
             .enumerate()
             .filter_map(move |(i, nn)| {
                 if !updated[i] {
@@ -157,11 +152,12 @@ impl AdjacencyGraph {
                 let mut j = 0;
                 while indices.len() < k && j < nn.len() {
                     // find the non-overlapping subsequences
-                    let (jd, jj) = nn[j];
+                    let (jd, jj) = &mut nn[j];
                     if !jj.overlaps(indices.as_slice(), exclusion_zone) {
-                        indices.push(jj);
+                        indices.push(*jj);
                         distances.push(jd.distance());
                         emit |= jd.flag(); // collect if there is at least one updated edge
+                        jd.set_flag(false);
                     }
                     j += 1;
                 }
