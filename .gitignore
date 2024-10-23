@@ -47,3 +47,5 @@ observe
 website/_site
 website/index_files/
 website/*.quarto_ipynb
+pyattimo/.data
+pyattimo/.joblib/joblib/__main__--home-matteo-Work-Attimo-rs-pyattimo-bench

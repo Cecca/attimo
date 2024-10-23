@@ -112,6 +112,10 @@ impl KMotiflet {
     fn __str__(&self) -> String {
         format!("motiflet: {:?} extent={}", self.indices, self.extent)
     }
+
+    fn __repr__(&self) -> String {
+        format!("KMotiflet{{ {:?}, extent={} }}", self.indices, self.extent)
+    }
 }
 
 const PLOT_SCRIPT: &str = r#"

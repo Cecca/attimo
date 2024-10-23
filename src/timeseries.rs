@@ -580,8 +580,13 @@ impl WindowedTimeseries {
                     ),
                     zeucl(self, i, from)
                 );
-                out[i] = (2.0 * self.w as f64 - 2.0 * out[i]).sqrt();
-                assert!(!out[i].is_nan());
+                if self.is_flat(i) {
+                    // if the subsequence is flat, its z-normalization is undefined
+                    out[i] = f64::NAN;
+                } else {
+                    out[i] = (2.0 * self.w as f64 - 2.0 * out[i]).sqrt();
+                    assert!(!out[i].is_nan());
+                }
                 debug_assert!(
                     (out[i] - zeucl(self, from, i)).abs() < 0.0001,
                     "dp[i]={} zeucl={} diff={}",
