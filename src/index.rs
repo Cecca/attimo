@@ -524,7 +524,7 @@ impl LSHIndex {
         self.repetitions.len()
     }
 
-    fn collision_probability_at(&self, d: Distance) -> f64 {
+    pub fn collision_probability_at(&self, d: Distance) -> f64 {
         self.functions[0].collision_probability_at(d)
     }
 

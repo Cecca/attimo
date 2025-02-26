@@ -10,7 +10,12 @@ use crate::{
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
 use log::*;
+use rand::prelude::*;
+use rand::SeedableRng;
+use rand_distr::{Bernoulli, Uniform};
+use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
+use rustfft::num_complex::ComplexFloat;
 use std::collections::BTreeSet;
 use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
@@ -262,6 +267,10 @@ impl TopK {
         assert!(self.top.len() <= self.threshold);
     }
 
+    fn len(&self) -> usize {
+        self.top.len()
+    }
+
     fn cleanup(&mut self) {
         let mut clean: BTreeSet<Motiflet> = BTreeSet::new();
         for motiflet in self.top.iter() {
@@ -368,6 +377,7 @@ pub struct MotifletsIterator {
     stats: MotifletsIteratorStats,
     collisions_threshold: usize,
     stop_on_collisions_threshold: bool,
+    rng: Xoshiro256PlusPlus,
 }
 
 impl MotifletsIterator {
@@ -459,6 +469,7 @@ impl MotifletsIterator {
             stats,
             collisions_threshold,
             stop_on_collisions_threshold: false,
+            rng: Xoshiro256PlusPlus::seed_from_u64(seed),
         }
     }
 
@@ -481,7 +492,6 @@ impl MotifletsIterator {
         let rep = self.rep;
         assert!(rep < self.index.get_repetitions());
         let exclusion_zone = self.exclusion_zone;
-        let index = &mut self.index;
         let ts = &self.ts;
         let graph = &mut self.graph;
         let t = Instant::now();
@@ -492,11 +502,23 @@ impl MotifletsIterator {
         let threshold = self.top[self.max_k]
             .kth_distance()
             .unwrap_or(Distance::infinity());
+        let p_threshold = self.index.collision_probability_at(threshold);
+        let p_sample = if p_threshold.is_nan() {
+            // this happens on the first iteration, when the threshold is infinity
+            1.0
+        } else {
+            let p_sample = 8.0 / (p_threshold * self.index.get_repetitions() as f64);
+            p_sample.min(1.0)
+        };
+        let coin = Bernoulli::new(p_sample).unwrap();
+
+        let index = &mut self.index;
 
         let mut time_distance_computation = Duration::default();
         let mut time_update_graph = Duration::default();
         let mut enumerator = index.collisions(rep, prefix, self.previous_prefix);
         loop {
+            let rng = &mut self.rng;
             let t = Instant::now();
             let maybe_cnt = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone);
             #[rustfmt::skip]
@@ -506,22 +528,34 @@ impl MotifletsIterator {
             }
             let cnt = maybe_cnt.unwrap();
             // while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone) {
-            log::trace!("Evaluating {} collisions", cnt);
-            self.stats.cnt_candidates += cnt;
             let t = Instant::now();
             // Fixup the distances
             let pairs_buffer = &mut self.pairs_buffer[0..cnt];
             let num_threads = rayon::current_num_threads();
-            rayon::scope(move |scope| {
+            let cnt_dist_computed = rayon::scope(move |scope| {
+                let atom_cnt_dist = Arc::new(AtomicUsize::new(0));
                 let chunk_size = cnt.div_ceil(num_threads);
                 for chunk in pairs_buffer.chunks_mut(chunk_size) {
+                    let mut trng = rng.clone();
+                    let atom_cnt_dist = Arc::clone(&atom_cnt_dist);
+                    trng.jump();
                     scope.spawn(move |_| {
+                        let mut cnt_skipped = 0;
+                        let mut cnt_dist = 0;
+                        let mut cnt_dist_below_threshold = 0;
                         for (a, b, dist) in chunk.iter_mut() {
+                            if !coin.sample(&mut trng) {
+                                *dist = Distance::infinity();
+                                cnt_skipped += 1;
+                                continue;
+                            }
                             let a = *a as usize;
                             let b = *b as usize;
                             assert!(a < b);
+                            cnt_dist += 1;
                             if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
                                 let d = Distance(d);
+                                cnt_dist_below_threshold += 1;
                                 // we only schedule the pair to update the respective
                                 // neighborhoods if it can result in a better motiflet.
                                 *dist = d;
@@ -529,9 +563,19 @@ impl MotifletsIterator {
                                 *dist = Distance::infinity();
                             }
                         }
+
+                        #[rustfmt::skip]
+                        observe!(rep, prefix, "cnt/sampling_skipped", cnt_skipped);
+                        #[rustfmt::skip]
+                        observe!(rep, prefix, "cnt/distcomp", cnt_dist);
+                        #[rustfmt::skip]
+                        observe!(rep, prefix, "cnt/dist_below_threshold", cnt_dist_below_threshold);
+                        atom_cnt_dist.fetch_add(cnt_dist, std::sync::atomic::Ordering::SeqCst);
                     });
                 }
+                atom_cnt_dist.load(std::sync::atomic::Ordering::SeqCst)
             });
+            self.stats.cnt_candidates += cnt_dist_computed;
 
             time_distance_computation += t.elapsed();
 
