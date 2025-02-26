@@ -660,8 +660,10 @@ impl MotifletsIterator {
 
             if self.stats.cnt_candidates > self.collisions_threshold {
                 warn!(
-                    "Too many collisions! {} > {}",
-                    self.stats.cnt_candidates, self.collisions_threshold,
+                    "Too many collisions! {} > {} (max support smallest non-emitted distance {:?})",
+                    self.stats.cnt_candidates,
+                    self.collisions_threshold,
+                    self.top.last().unwrap().smallest_non_emitted_distance()
                 );
                 if self.stop_on_collisions_threshold {
                     // emit all the partial candidates
