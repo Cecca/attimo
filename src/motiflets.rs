@@ -533,11 +533,12 @@ impl MotifletsIterator {
             let pairs_buffer = &mut self.pairs_buffer[0..cnt];
             let num_threads = rayon::current_num_threads();
             let cnt_dist_computed = rayon::scope(move |scope| {
-                let atom_cnt_dist = Arc::new(AtomicUsize::new(0));
+                let (cnt_dist_send, cnt_dist_recv) = std::sync::mpsc::channel();
+                let cnt_dist_send = Arc::new(cnt_dist_send);
                 let chunk_size = cnt.div_ceil(num_threads);
                 for chunk in pairs_buffer.chunks_mut(chunk_size) {
                     let mut trng = rng.clone();
-                    let atom_cnt_dist = Arc::clone(&atom_cnt_dist);
+                    let cnt_dist_send = Arc::clone(&cnt_dist_send);
                     trng.jump();
                     scope.spawn(move |_| {
                         let mut cnt_skipped = 0;
@@ -554,10 +555,10 @@ impl MotifletsIterator {
                             assert!(a < b);
                             cnt_dist += 1;
                             if let Some(d) = zeucl_threshold(ts, a, b, threshold.0) {
-                                let d = Distance(d);
-                                cnt_dist_below_threshold += 1;
                                 // we only schedule the pair to update the respective
                                 // neighborhoods if it can result in a better motiflet.
+                                let d = Distance(d);
+                                cnt_dist_below_threshold += 1;
                                 *dist = d;
                             } else {
                                 *dist = Distance::infinity();
@@ -570,10 +571,11 @@ impl MotifletsIterator {
                         observe!(rep, prefix, "cnt/distcomp", cnt_dist);
                         #[rustfmt::skip]
                         observe!(rep, prefix, "cnt/dist_below_threshold", cnt_dist_below_threshold);
-                        atom_cnt_dist.fetch_add(cnt_dist, std::sync::atomic::Ordering::SeqCst);
+                        cnt_dist_send.send(cnt_dist).unwrap();
                     });
                 }
-                atom_cnt_dist.load(std::sync::atomic::Ordering::SeqCst)
+                drop(cnt_dist_send);
+                cnt_dist_recv.into_iter().sum::<usize>()
             });
             self.stats.cnt_candidates += cnt_dist_computed;
 
