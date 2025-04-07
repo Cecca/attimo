@@ -2,12 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.4] - 2025-04-07
+
+### ⚙️ Miscellaneous Tasks
+
+- Fix release
+
 ## [0.6.3] - 2025-04-07
 
 ### Optimization
 
 - Sample colliding pairs based on the current distance threshold
-- Better scheduling of the repetitions
 
 ## [0.6.2] - 2024-10-23
 

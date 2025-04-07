@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "pyattimo"
 description = "A fast and scalable algorithm for time series motif mining."
-version = "0.6.3"
+version = "0.6.4"
 readme = "README.rst"
 requires-python = ">=3.6"
 classifiers = [
