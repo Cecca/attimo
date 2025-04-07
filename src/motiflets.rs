@@ -520,14 +520,18 @@ impl MotifletsIterator {
         loop {
             let rng = &mut self.rng;
             let t = Instant::now();
-            let maybe_cnt = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone);
+            let check_prefix = rep < self.previous_prefix_repetitions.unwrap_or(0);
+            let maybe_cnt = enumerator.next(
+                self.pairs_buffer.as_mut_slice(),
+                exclusion_zone,
+                check_prefix,
+            );
             #[rustfmt::skip]
             observe!(rep, prefix, "profile/repetition/update_graph/enumerator_next", t.elapsed().as_secs_f64());
             if maybe_cnt.is_none() {
                 break;
             }
             let cnt = maybe_cnt.unwrap();
-            // while let Some(cnt) = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone) {
             let t = Instant::now();
             // Fixup the distances
             let pairs_buffer = &mut self.pairs_buffer[0..cnt];
@@ -745,55 +749,66 @@ impl MotifletsIterator {
             observe!(self.rep, self.prefix, "profile/repetition", repetition_timer.elapsed().as_secs_f64());
             repetition_timer = Instant::now();
 
-            let next_prefix =
-                if self.rep + 1 < INITIAL_REPETITIONS && self.previous_prefix.is_none() {
-                    // stay at the current prefix for the first few repetitions, to allow discovery
-                    // of at least a few pairs
-                    debug!("Still in the initial repetitions, continuing with the current prefix");
-                    self.prefix
-                } else if let Some(first_unconfirmed) = self.next_to_confirm {
-                    let (best_prefix, _required_repetitions) = if first_unconfirmed.is_finite() {
-                        let costs = self.index_stats.costs_to_confirm(
-                            self.prefix,
-                            first_unconfirmed,
-                            self.delta,
-                            &self.index,
-                        );
-                        debug!("Costs: {:?}", costs);
-                        let (best_prefix, (best_cost, required_repetitions)) = costs
-                            .iter()
-                            .enumerate()
-                            .min_by(|(_, tup1), (_, tup2)| tup1.0.total_cmp(&tup2.0))
-                            .unwrap();
-                        if best_cost.is_infinite() {
-                            warn!("Best prefix would be 0, continuing on this level");
-                            (self.prefix, self.index_stats.max_repetitions)
-                        } else {
-                            debug!(
-                                "Best prefix to confirm {} is {} with {} repetitions with cost {}",
-                                first_unconfirmed, best_prefix, required_repetitions, best_cost
-                            );
-                            (best_prefix, *required_repetitions)
-                        }
-                    } else if self.rep < self.index_stats.max_repetitions {
-                        let required_repetitions = (self.index.get_repetitions() + 32)
-                            .min(self.index_stats.max_repetitions);
-                        warn!(
-                            "No motiflet to confirm, continuing at level {} with new repetitions",
-                            self.prefix
-                        );
-                        (self.prefix, required_repetitions)
+            // We consider two cases:
+            //  - The current best candidate can be confirmed with more repetitions on
+            //    this level: instantiate the repetitions and keep the prefix length as it is
+            //  - We need a shorter prefix. In this case rather than jumping to the
+            //    shorter prefix (which at times is just 1) we shorten the prefix
+            //    just by one, in the hope of discovering better candidates
+            let next_prefix = if (self.rep + 1 < INITIAL_REPETITIONS
+                && self.previous_prefix.is_none())
+                || self.rep + 1
+                    < self
+                        .previous_prefix_repetitions
+                        .unwrap_or(INITIAL_REPETITIONS)
+            {
+                // stay at the current prefix for the first few repetitions, to allow discovery
+                // of at least a few pairs
+                debug!("Still in the initial repetitions, continuing with the current prefix");
+                self.prefix
+            } else if let Some(first_unconfirmed) = self.next_to_confirm {
+                let (best_prefix, _required_repetitions) = if first_unconfirmed.is_finite() {
+                    let costs = self.index_stats.costs_to_confirm(
+                        self.prefix,
+                        first_unconfirmed,
+                        self.delta,
+                        &self.index,
+                    );
+                    debug!("Costs: {:?}", costs);
+                    let (best_prefix, (best_cost, required_repetitions)) = costs
+                        .iter()
+                        .enumerate()
+                        .min_by(|(_, tup1), (_, tup2)| tup1.0.total_cmp(&tup2.0))
+                        .unwrap();
+                    if best_cost.is_infinite() {
+                        warn!("Best prefix would be 0, continuing on this level");
+                        (self.prefix, self.index_stats.max_repetitions)
                     } else {
-                        warn!(
-                            "No motiflet to confirm and built all repetitions, going to level {}",
-                            self.prefix - 1
+                        debug!(
+                            "Best prefix to confirm {} is {} with {} repetitions with cost {}",
+                            first_unconfirmed, best_prefix, required_repetitions, best_cost
                         );
-                        (self.prefix - 1, 1)
-                    };
-                    best_prefix
+                        (best_prefix, *required_repetitions)
+                    }
+                } else if self.rep < self.index_stats.max_repetitions {
+                    let required_repetitions =
+                        (self.index.get_repetitions() + 32).min(self.index_stats.max_repetitions);
+                    warn!(
+                        "No motiflet to confirm, continuing at level {} with new repetitions",
+                        self.prefix
+                    );
+                    (self.prefix, required_repetitions)
                 } else {
-                    self.prefix
+                    warn!(
+                        "No motiflet to confirm and built all repetitions, going to level {}",
+                        self.prefix - 1
+                    );
+                    (self.prefix - 1, 1)
                 };
+                best_prefix
+            } else {
+                self.prefix
+            };
             let index_stats = self.index.index_stats();
             self.stats.index_stats = index_stats;
 
@@ -815,11 +830,11 @@ impl MotifletsIterator {
                 }
             } else {
                 // Go to the suggested prefix, and start from the first repetition there
-                debug!("Going to prefix {}", next_prefix);
                 self.previous_prefix_repetitions.replace(self.rep + 1);
                 self.rep = 0;
                 self.previous_prefix.replace(self.prefix);
-                self.prefix = next_prefix;
+                self.prefix -= 1;
+                debug!("Going to prefix {}", self.prefix);
             }
             assert!(self.prefix > 0);
 

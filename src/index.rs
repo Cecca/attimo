@@ -391,7 +391,7 @@ pub struct LSHIndex {
     max_repetitions_in_memory: usize,
 }
 
-pub const INITIAL_REPETITIONS: usize = 4;
+pub const INITIAL_REPETITIONS: usize = 8;
 
 impl LSHIndex {
     /// How much memory would it be required to store information for these many repetitions?
@@ -736,6 +736,7 @@ impl<'index> CollisionEnumerator<'index> {
         &mut self,
         output: &mut [(u32, u32, Distance)],
         exclusion_zone: usize,
+        check_prefix: bool,
     ) -> Option<usize> {
         let mut idx = 0;
         log::trace!(
@@ -761,10 +762,10 @@ impl<'index> CollisionEnumerator<'index> {
                     debug_assert!(ha.prefix_eq(&hb, self.prefix));
                     if
                     // did the points collide previously?
-                    !self
+                    !(check_prefix && self
                         .prev_prefix
                         .map(|pp| ha.prefix_eq(&hb, pp))
-                        .unwrap_or(false)
+                        .unwrap_or(false))
                         &&
                         // are the corresponding subsequences overlapping?
                         // this check also excludes the flat subsequences, whose ID is replaced
@@ -882,7 +883,7 @@ impl IndexStats {
         let mut enumerator = index.collisions(0, sampling_prefix, None);
         let mut samples = 0;
         let timer = Instant::now();
-        while let Some(cnt) = enumerator.next(&mut buf, exclusion_zone) {
+        while let Some(cnt) = enumerator.next(&mut buf, exclusion_zone, true) {
             for (a, b, d) in &mut buf[..cnt] {
                 *d =
                     Distance(zeucl_threshold(ts, *a as usize, *b as usize, f64::INFINITY).unwrap());
