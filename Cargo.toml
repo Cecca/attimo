@@ -1,6 +1,6 @@
 [package]
 name = "attimo"
-version = "0.6.4"
+version = "0.6.5"
 authors = ["Matteo Ceccarello <matteo.ceccarello@unipd.it>"]
 edition = "2021"
 include = ["/benches", "/examples", "/src", "/*.toml"]
