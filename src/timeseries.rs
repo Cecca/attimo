@@ -583,6 +583,11 @@ impl WindowedTimeseries {
                 if self.is_flat(i) {
                     // if the subsequence is flat, its z-normalization is undefined
                     out[i] = f64::NAN;
+                } else if out[i] > self.w as f64 {
+                    // when out[i] is slightly larger than self.w (which might happen due
+                    // to floating point representation errors) then the sqrt in the next
+                    // branch would return NaN. We just out[i] to 0 in this case.
+                    out[i] = 0.0;
                 } else {
                     out[i] = (2.0 * self.w as f64 - 2.0 * out[i]).sqrt();
                     assert!(!out[i].is_nan());
