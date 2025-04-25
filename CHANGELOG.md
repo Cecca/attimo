@@ -2,11 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.6] - 2025-04-25
+
+### ⚙️ Miscellaneous Tasks
+
+- Remove musl-linux target
+- Fix workflow file
+
+## [0.6.5] - 2025-04-24
+
+### 🐛 Bug Fixes
+
+- Handle cancellation errors in distance_profile
+
 ## [0.6.4] - 2025-04-07
 
 ### ⚙️ Miscellaneous Tasks
 
-- Fix release
+- Fix python.yml
+- Fix python.yml
+- Fix maturin version
+- Less supported platforms
 
 ## [0.6.3] - 2025-04-07
 
