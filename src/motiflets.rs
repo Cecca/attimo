@@ -352,6 +352,43 @@ impl MotifletsIteratorStats {
     }
 }
 
+fn build_rooted_motiflets(
+    ts: &WindowedTimeseries,
+    from: usize,
+    fft_data: &FFTData,
+    k: usize,
+    exclusion_zone: usize,
+    avg_distance: f64,
+) -> Vec<Motiflet> {
+    let mut indices = vec![0usize; ts.num_subsequences()];
+    let mut distances = vec![0.0; ts.num_subsequences()];
+    let mut buf = vec![0.0; ts.w];
+    let (distances, selected_indices) = k_extents_bf(
+        ts,
+        from,
+        fft_data,
+        k,
+        exclusion_zone,
+        &mut indices,
+        &mut distances,
+        &mut buf,
+    );
+
+    let mut res = Vec::new();
+    for i in 1..distances.len() {
+        let mut motiflet_indices = vec![];
+        motiflet_indices.extend_from_slice(&selected_indices[..=i]);
+        let extent = distances[i].0;
+        res.push(Motiflet {
+            indices: motiflet_indices,
+            extent,
+            relative_contrast: avg_distance / extent,
+        });
+    }
+
+    res
+}
+
 pub struct MotifletsIterator {
     pub max_k: usize,
     ts: Arc<WindowedTimeseries>,
@@ -432,13 +469,18 @@ impl MotifletsIterator {
         top.resize_with(max_k + 1, || TopK::new(top_k, exclusion_zone));
         top[0].disable();
         top[1].disable();
-        // we initialize the top queue for the second motiflet
-        // with the sampled closest distance pair
-        top[2].insert(Motiflet::new(
-            vec![sampled_min_index_pair.0, sampled_min_index_pair.1],
-            min_nn_estimate,
-            stats.average_distance,
-        ));
+        // we initialize the top queue with motiflets rooted at the
+        // sampled closest pair
+        for motiflet in dbg!(build_rooted_motiflets(
+            &ts,
+            sampled_min_index_pair.0,
+            &fft_data,
+            max_k,
+            exclusion_zone,
+            average_pairwise_distance
+        )) {
+            top[motiflet.support()].insert(motiflet);
+        }
 
         stats.observe(0, 0);
 

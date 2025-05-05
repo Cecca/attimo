@@ -211,7 +211,7 @@ impl WindowedTimeseries {
         use rand_distr::Uniform;
         use rand_xoshiro::Xoshiro256PlusPlus;
 
-        const SAMPLES: usize = 100000;
+        const SAMPLES: usize = 1000;
         let uniform = Uniform::new(0, self.num_subsequences());
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         let mut sum = 0.0;
@@ -245,13 +245,15 @@ impl WindowedTimeseries {
         let mut dists = vec![0.0f64; self.num_subsequences()];
         let mut buf = vec![0.0f64; self.w];
 
-        const SAMPLES: usize = 1000;
+        const SAMPLES: usize = 100; // FIXME: restore to 1000
         let uniform = Uniform::new(0, self.num_subsequences());
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         let mut sum = 0.0;
         let mut minimum = f64::INFINITY;
         let mut min_index_pair = (0, 0);
         let mut sampled = 0;
+        // OPTIMIZE: run this loop in parallel, sampling SAMPLES indices
+        // of non-flat sequences beforehand
         while sampled < SAMPLES {
             loop {
                 let i = uniform.sample(&mut rng);
