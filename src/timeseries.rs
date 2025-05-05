@@ -241,24 +241,28 @@ impl WindowedTimeseries {
         use rand::prelude::*;
         use rand_distr::Uniform;
         use rand_xoshiro::Xoshiro256PlusPlus;
+        use rayon::prelude::*;
 
-        let mut dists = vec![0.0f64; self.num_subsequences()];
-        let mut buf = vec![0.0f64; self.w];
+        // let mut dists = vec![0.0f64; self.num_subsequences()];
+        // let mut buf = vec![0.0f64; self.w];
 
-        const SAMPLES: usize = 100; // FIXME: restore to 1000
+        const SAMPLES: usize = 1000;
         let uniform = Uniform::new(0, self.num_subsequences());
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        let mut sum = 0.0;
-        let mut minimum = f64::INFINITY;
-        let mut min_index_pair = (0, 0);
-        let mut sampled = 0;
-        // OPTIMIZE: run this loop in parallel, sampling SAMPLES indices
-        // of non-flat sequences beforehand
-        while sampled < SAMPLES {
-            loop {
-                let i = uniform.sample(&mut rng);
-                if !self.is_flat(i) {
-                    self.distance_profile(fft_data, i, &mut dists, &mut buf);
+        // let mut sum = 0.0;
+        // let mut minimum = f64::INFINITY;
+        // let mut min_index_pair = (0, 0);
+        let indices: Vec<usize> = uniform
+            .sample_iter(&mut rng)
+            .filter(|i| !self.is_flat(*i))
+            .take(SAMPLES)
+            .collect();
+        let (minimum, sum, min_index_pair) = indices
+            .into_par_iter()
+            .map_with(
+                (vec![0.0f64; self.num_subsequences()], vec![0.0; self.w]),
+                |(dists, buf), i| {
+                    self.distance_profile(fft_data, i, dists, buf);
                     let (j, nn) = dists
                         .iter()
                         .copied()
@@ -266,16 +270,19 @@ impl WindowedTimeseries {
                         .filter(|(j, _)| !j.overlaps(i, exclusion_zone))
                         .min_by(|a, b| a.1.total_cmp(&b.1))
                         .unwrap();
-                    if nn < minimum {
-                        minimum = nn;
-                        min_index_pair = (i.min(j), i.max(j));
+                    (nn, nn, (i, j))
+                },
+            )
+            .reduce(
+                || (f64::INFINITY, 0.0, (0, 0)),
+                |a, b| {
+                    if a.0 < b.0 {
+                        (a.0, a.1 + b.1, a.2)
+                    } else {
+                        (b.0, a.1 + b.1, b.2)
                     }
-                    sum += nn;
-                    sampled += 1;
-                    break;
-                }
-            }
-        }
+                },
+            );
 
         (minimum, sum / SAMPLES as f64, min_index_pair)
     }
