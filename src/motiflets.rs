@@ -471,14 +471,14 @@ impl MotifletsIterator {
         top[1].disable();
         // we initialize the top queue with motiflets rooted at the
         // sampled closest pair
-        for motiflet in dbg!(build_rooted_motiflets(
+        for motiflet in build_rooted_motiflets(
             &ts,
             sampled_min_index_pair.0,
             &fft_data,
             max_k,
             exclusion_zone,
-            average_pairwise_distance
-        )) {
+            average_pairwise_distance,
+        ) {
             top[motiflet.support()].insert(motiflet);
         }
 
@@ -777,6 +777,7 @@ impl MotifletsIterator {
             observe!(self.rep, self.prefix, "repetition_elapsed_s", repetition_elapsed.as_secs_f64());
             #[rustfmt::skip]
             observe!(self.rep, self.prefix, "repetition_estimate_s", self.index_stats.repetition_cost_estimate(self.prefix));
+            debug!("Memory used after graph update {:?}", Bytes::allocated());
 
             self.stats.graph_stats = self.graph.stats();
             debug!("[{}@{}] {:#?}", self.rep, self.prefix, self.stats);
