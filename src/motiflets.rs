@@ -821,7 +821,8 @@ impl MotifletsIterator {
                         &self.ts,
                         &self.fft_data,
                         self.rep + 1,
-                        next_prefix + 1,
+                        // next_prefix + 1,
+                        self.prefix,
                     );
                     #[rustfmt::skip]
                     observe!(self.rep, self.prefix, "repetition_setup_s", elapsed.as_secs_f64());
