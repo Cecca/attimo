@@ -1,4 +1,4 @@
-use attimo::allocator::Bytes;
+use attimo::allocator::*;
 use attimo::motiflets::brute_force_motiflets;
 use attimo::timeseries::WindowedTimeseries;
 use pyo3::prelude::*;
@@ -6,6 +6,9 @@ use pyo3::types::PyDict;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
+
+#[global_allocator]
+static A: CountingAllocator = CountingAllocator;
 
 #[pyclass]
 #[derive(Clone)]

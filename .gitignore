@@ -44,6 +44,7 @@ pyattimo/astro.csv.gz
 .venv
 observe.json
 observe
+observe.*
 website/_site
 website/index_files/
 website/*.quarto_ipynb

@@ -747,6 +747,7 @@ impl MotifletsIterator {
             // check the stopping condition: everything is confirmed
             if self.top.iter().all(|top| top.is_complete()) {
                 info!("Execution stats: {:#?}", self.stats);
+                info!("Maximum allocated memory: {:?}", Bytes::max_allocated());
                 return Ok(None);
             }
 
@@ -777,7 +778,8 @@ impl MotifletsIterator {
             observe!(self.rep, self.prefix, "repetition_elapsed_s", repetition_elapsed.as_secs_f64());
             #[rustfmt::skip]
             observe!(self.rep, self.prefix, "repetition_estimate_s", self.index_stats.repetition_cost_estimate(self.prefix));
-            debug!("Memory used after graph update {:?}", Bytes::allocated());
+            #[rustfmt::skip]
+            observe!(self.rep, self.prefix, "allocated_bytes", Bytes::allocated().0);
 
             self.stats.graph_stats = self.graph.stats();
             debug!("[{}@{}] {:#?}", self.rep, self.prefix, self.stats);

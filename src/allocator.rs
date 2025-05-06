@@ -42,6 +42,9 @@ impl Bytes {
     pub fn allocated() -> Self {
         Self(allocated())
     }
+    pub fn max_allocated() -> Self {
+        Self(max_allocated())
+    }
     pub fn divide(&self, divisor: usize) -> Self {
         Self(self.0 / divisor)
     }
@@ -156,12 +159,14 @@ impl TryFrom<String> for Bytes {
 pub struct CountingAllocator;
 
 static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
+static MAX_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ret = System.alloc(layout);
         if !ret.is_null() {
-            ALLOCATED.fetch_add(layout.size(), SeqCst);
+            let currently_allocated = ALLOCATED.fetch_add(layout.size(), SeqCst);
+            MAX_ALLOCATED.fetch_max(currently_allocated, SeqCst);
         }
         ret
     }
@@ -174,6 +179,10 @@ unsafe impl GlobalAlloc for CountingAllocator {
 
 pub fn allocated() -> usize {
     ALLOCATED.load(SeqCst)
+}
+
+pub fn max_allocated() -> usize {
+    MAX_ALLOCATED.load(SeqCst)
 }
 
 pub struct MemoryGauge {
