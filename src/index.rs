@@ -254,131 +254,42 @@ impl Hasher {
     }
 }
 
-enum Repetition {
-    InMemory(Vec<HashValue>, Vec<u32>),
-    OnDisk(usize, PathBuf, PathBuf),
-}
-
-impl Drop for Repetition {
-    fn drop(&mut self) {
-        match self {
-            Self::InMemory(_, _) => (),
-            Self::OnDisk(_, p1, p2) => {
-                std::fs::remove_file(p1).unwrap();
-                std::fs::remove_file(p2).unwrap();
-            }
-        }
-    }
+struct Repetition {
+    hashes: Vec<HashValue>,
+    indices: Vec<u32>,
 }
 
 impl Repetition {
     fn from_pairs<I: IntoIterator<Item = (HashValue, u32)>>(pairs: I) -> Self {
         let (hashes, indices): (Vec<HashValue>, Vec<u32>) = pairs.into_iter().unzip();
-        Self::InMemory(hashes, indices)
-    }
-
-    fn is_in_memory(&self) -> bool {
-        matches!(self, Self::InMemory(_, _))
+        Self { hashes, indices }
     }
 
     fn bytes(&self) -> Bytes {
-        match self {
-            Self::InMemory(hashes, _indices) => {
-                let n = hashes.len();
-                Bytes(n * (std::mem::size_of::<HashValue>() + std::mem::size_of::<u32>()))
-            }
-            Self::OnDisk(n, _hashes_path, _indices_path) => {
-                Bytes(n * (std::mem::size_of::<HashValue>() + std::mem::size_of::<u32>()))
-            }
-        }
+        let n = self.hashes.len();
+        Bytes(n * (std::mem::size_of::<HashValue>() + std::mem::size_of::<u32>()))
     }
 
-    fn from_pairs_to_disk<I: IntoIterator<Item = (HashValue, u32)>>(pairs: I) -> Self {
-        let dir = std::env::temp_dir().join(format!("attimo-{}", thread_rng().next_u64()));
-        assert!(!dir.is_dir());
-        std::fs::create_dir(&dir).unwrap();
-        let hashes_path = dir.join("hashes.bin");
-        let indices_path = dir.join("indices.bin");
-
-        let mut file_hashes = BufWriter::new(File::create(&hashes_path).unwrap());
-        let mut file_indices = BufWriter::new(File::create(&indices_path).unwrap());
-
-        let mut n = 0;
-        for (h, i) in pairs.into_iter() {
-            file_hashes.write_all(&h.0.to_be_bytes()).unwrap();
-            file_indices.write_all(&i.to_be_bytes()).unwrap();
-            n += 1;
-        }
-
-        Self::OnDisk(n, hashes_path, indices_path)
-    }
-
-    fn get(&self) -> RepetitionHandle<'_> {
-        match self {
-            Self::InMemory(hashes, indices) => RepetitionHandle::Ref(hashes, indices),
-            Self::OnDisk(n, hashes_path, indices_path) => {
-                let mut hashes = Vec::with_capacity(*n);
-                let mut file_hashes = BufReader::new(File::open(hashes_path).unwrap());
-                let mut buf = [0u8; 8];
-                while let Ok(r) = file_hashes.read(&mut buf) {
-                    if r == 0 {
-                        break;
-                    }
-                    assert!(r == 8);
-                    let h = u64::from_be_bytes(buf);
-                    hashes.push(HashValue(h));
-                }
-
-                let mut indices = Vec::with_capacity(*n);
-                let mut file_indices = BufReader::new(File::open(indices_path).unwrap());
-                let mut buf = [0u8; 4];
-                while let Ok(r) = file_indices.read(&mut buf) {
-                    if r == 0 {
-                        break;
-                    }
-                    assert!(r == 4);
-                    let i = u32::from_be_bytes(buf);
-                    indices.push(i);
-                }
-
-                RepetitionHandle::Owned(hashes, indices)
-            }
-        }
-    }
-}
-
-enum RepetitionHandle<'data> {
-    Ref(&'data [HashValue], &'data [u32]),
-    Owned(Vec<HashValue>, Vec<u32>),
-}
-impl<'data> RepetitionHandle<'data> {
     fn get_hashes(&self) -> &[HashValue] {
-        match self {
-            Self::Ref(hashes, _) => hashes,
-            Self::Owned(hashes, _) => &hashes,
-        }
+        &self.hashes
     }
+
     fn get_indices(&self) -> &[u32] {
-        match self {
-            Self::Ref(_, indices) => indices,
-            Self::Owned(_, indices) => &indices,
-        }
+        &self.indices
     }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LSHIndexStats {
     pub num_repetitions: usize,
-    pub main_memory_usage: Bytes,
-    pub disk_memory_usage: Bytes,
+    pub memory_usage: Bytes,
 }
 
 impl LSHIndexStats {
     #[rustfmt::skip]
     pub fn observe(&self, repetition: usize, prefix: usize) {
         observe!(repetition, prefix, "num_repetitions", self.num_repetitions);
-        observe!(repetition, prefix, "main_memory_usage", self.main_memory_usage.0);
-        observe!(repetition, prefix, "disk_memory_usage", self.disk_memory_usage.0);
+        observe!(repetition, prefix, "main_memory_usage", self.memory_usage.0);
     }
 }
 
@@ -388,7 +299,7 @@ pub struct LSHIndex {
     functions: Vec<Hasher>,
     repetitions: Vec<Repetition>,
     repetitions_setup_time: Duration,
-    max_repetitions_in_memory: usize,
+    max_repetitions: usize,
 }
 
 pub const INITIAL_REPETITIONS: usize = 8;
@@ -403,20 +314,14 @@ impl LSHIndex {
 
     pub fn index_stats(&self) -> LSHIndexStats {
         let mut main_memory_usage = Bytes(0);
-        let mut disk_memory_usage = Bytes(0);
 
         for rep in self.repetitions.iter() {
-            if rep.is_in_memory() {
-                main_memory_usage += rep.bytes();
-            } else {
-                disk_memory_usage += rep.bytes();
-            }
+            main_memory_usage += rep.bytes();
         }
 
         LSHIndexStats {
             num_repetitions: self.repetitions.len(),
-            main_memory_usage,
-            disk_memory_usage,
+            memory_usage: main_memory_usage,
         }
     }
 
@@ -426,6 +331,7 @@ impl LSHIndex {
         ts: &WindowedTimeseries,
         exclusion_zone: usize,
         fft_data: &FFTData,
+        max_memory: Bytes,
         seed: u64,
     ) -> Self {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
@@ -436,13 +342,15 @@ impl LSHIndex {
                     .expect("unable to parse ATTIMO_QUANTIZATION as a float")
             })
             .unwrap_or_else(|_| Hasher::compute_width(ts, fft_data, exclusion_zone, &mut rng));
-        info!("quantization width: {}", quantization_width);
 
-        let main_memory_cap = Bytes::system_memory().divide(2);
-        let mut max_repetitions_in_memory = 0;
-        while Self::required_memory(ts, max_repetitions_in_memory) < main_memory_cap {
-            max_repetitions_in_memory += 1;
+        let mut max_repetitions = 0;
+        while Self::required_memory(ts, max_repetitions) < max_memory {
+            max_repetitions += 1;
         }
+        info!(
+            "quantization width: {}, maximum repetitions: {}",
+            quantization_width, max_repetitions
+        );
 
         // Try to build the index until we get a version that has collisions at the deepest level
         let t = Instant::now();
@@ -453,7 +361,7 @@ impl LSHIndex {
                 functions: Vec::new(),
                 repetitions: Vec::new(),
                 repetitions_setup_time: Duration::from_secs(0),
-                max_repetitions_in_memory,
+                max_repetitions,
             };
 
             slf.add_repetitions(ts, fft_data, 1, K);
@@ -488,7 +396,7 @@ impl LSHIndex {
         let n = ts.num_subsequences();
         let starting_repetitions = self.get_repetitions();
         let new_repetitions = total_repetitions - starting_repetitions;
-        let max_repetitions_in_memory = self.max_repetitions_in_memory;
+        let max_repetitions_in_memory = self.max_repetitions;
         log::trace!("Adding {} new repetitions", new_repetitions);
 
         let new_hashers: Vec<Hasher> = (0..new_repetitions)
@@ -503,8 +411,11 @@ impl LSHIndex {
             hasher.hash(ts, fft_data, &mut tmp, max_k);
             tmp.par_sort_unstable_by_key(|pair| pair.0);
             if rep_idx > max_repetitions_in_memory {
-                warn!("Creating repetition on disk!");
-                Repetition::from_pairs_to_disk(tmp.iter().copied())
+                log::error!(
+                    "Too many repetitions, maximum is {}",
+                    max_repetitions_in_memory
+                );
+                panic!("Too many repetitions");
             } else {
                 Repetition::from_pairs(tmp.iter().copied())
             }
@@ -533,7 +444,7 @@ impl LSHIndex {
         let mut cnt = 0;
         // for (hs, idxs) in self.hashes.iter().zip(&self.indices) {
         for repetition in self.repetitions.iter() {
-            let repetition = repetition.get();
+            // let repetition = repetition.get();
             let hs = repetition.get_hashes();
             let idxs = repetition.get_indices();
             let hi = hs[*idxs.iter().find(|idx| **idx as usize == i).unwrap() as usize];
@@ -565,13 +476,8 @@ impl LSHIndex {
         cur_fail * prev_fail
     }
 
-    pub fn stats(
-        &self,
-        ts: &WindowedTimeseries,
-        max_memory: Bytes,
-        exclusion_zone: usize,
-    ) -> IndexStats {
-        IndexStats::new(self, ts, max_memory, exclusion_zone)
+    pub fn stats(&self, ts: &WindowedTimeseries, exclusion_zone: usize) -> IndexStats {
+        IndexStats::new(self, ts, self.max_repetitions, exclusion_zone)
     }
 
     pub fn collisions(
@@ -581,16 +487,16 @@ impl LSHIndex {
         prev_prefix: Option<usize>,
     ) -> CollisionEnumerator {
         assert!(prefix > 0 && prefix <= K, "illegal prefix {}", prefix);
-        let rep = self.repetitions[repetition].get();
+        let rep = &self.repetitions[repetition];
         CollisionEnumerator::new(rep, prefix, prev_prefix)
     }
 
     /// Estimates, for each level in the given repetition index, the number of
     /// non-trivial collisions
     fn collision_profile_at(&self, repetition: usize, exclusion_zone: usize) -> Vec<f64> {
-        let handle = self.repetitions[repetition].get();
-        let hashes = handle.get_hashes();
-        let indices = handle.get_indices();
+        let repetition = &self.repetitions[repetition];
+        let hashes = repetition.get_hashes();
+        let indices = repetition.get_indices();
 
         // let mut counts = vec![0.0; K + 1];
         // counts[0] = f64::INFINITY;
@@ -672,18 +578,18 @@ impl LSHIndex {
 pub struct CollisionEnumerator<'index> {
     prefix: usize,
     prev_prefix: Option<usize>,
-    handle: RepetitionHandle<'index>,
+    repetition: &'index Repetition,
     current_range: Range<usize>,
     i: usize,
     j: usize,
 }
 impl<'index> CollisionEnumerator<'index> {
-    fn new(handle: RepetitionHandle<'index>, prefix: usize, prev_prefix: Option<usize>) -> Self {
+    fn new(repetition: &'index Repetition, prefix: usize, prev_prefix: Option<usize>) -> Self {
         assert!(prefix > 0 && prefix <= K);
         let mut slf = Self {
             prefix,
             prev_prefix,
-            handle,
+            repetition,
             current_range: 0..0,
             i: 0,
             j: 1,
@@ -695,7 +601,7 @@ impl<'index> CollisionEnumerator<'index> {
     /// efficiently the enumerator to the next range of equal (by prefix)
     /// hash values
     fn next_range(&mut self) {
-        let hashes = self.handle.get_hashes();
+        let hashes = self.repetition.get_hashes();
 
         // exponential search
         let start = self.current_range.end;
@@ -743,13 +649,13 @@ impl<'index> CollisionEnumerator<'index> {
             "Current range: {}-{} ({}% overall, i={}, range length {})",
             self.current_range.start,
             self.current_range.end,
-            self.i as f64 / self.handle.get_hashes().len() as f64 * 100.0,
+            self.i as f64 / self.repetition.get_hashes().len() as f64 * 100.0,
             self.i,
             self.current_range.len()
         );
-        while self.current_range.end < self.handle.get_hashes().len() {
-            let hashes = self.handle.get_hashes();
-            let indices = self.handle.get_indices();
+        while self.current_range.end < self.repetition.get_hashes().len() {
+            let hashes = self.repetition.get_hashes();
+            let indices = self.repetition.get_indices();
             let range = self.current_range.clone();
             while self.i < range.end {
                 while self.j < range.end {
@@ -795,16 +701,15 @@ impl<'index> CollisionEnumerator<'index> {
 
     pub fn estimate_num_collisions(mut self, exclusion_zone: usize) -> usize {
         let mut cnt = 0;
-        while self.current_range.end < self.handle.get_hashes().len() {
-            let hashes = self.handle.get_hashes();
-            let indices = self.handle.get_indices();
+        while self.current_range.end < self.repetition.get_hashes().len() {
+            let hashes = self.repetition.get_hashes();
+            let indices = self.repetition.get_indices();
 
             let range = self.current_range.clone();
             if range.len() as f64 > (hashes.len() as f64).sqrt() {
                 // the bucket is _very_ large (relative to the number of subsequences),
                 // so we just pick the square of its size in order to avoid spending
                 // forever in iterating over pairs checking for overlaps
-                // log::trace!("Large bucket detected: {}", range.len());
                 cnt += range.len() * range.len();
             } else {
                 let mut i = range.start;
@@ -846,18 +751,10 @@ impl IndexStats {
     fn new(
         index: &LSHIndex,
         ts: &WindowedTimeseries,
-        max_memory: Bytes,
+        max_repetitions: usize,
         exclusion_zone: usize,
     ) -> Self {
-        let mut max_repetitions = 4.min(index.get_repetitions());
-        while LSHIndex::required_memory(ts, 1 + max_repetitions) <= max_memory {
-            max_repetitions += 1;
-        }
-        info!(
-            "Maximum repetitions {} which would require {}",
-            max_repetitions,
-            LSHIndex::required_memory(ts, max_repetitions)
-        );
+        assert!(max_repetitions >= 4);
 
         let repetition_setup_cost = index.repetitions_setup_time.as_secs_f64();
         let t = Instant::now();
@@ -986,8 +883,7 @@ fn test_collision_probability() {
     ];
 
     let fft_data = FFTData::new(&ts);
-    let mut index = LSHIndex::from_ts(&ts, w / 2, &fft_data, 1234);
-    dbg!(index.stats(&ts, Bytes::gbytes(8), w));
+    let mut index = LSHIndex::from_ts(&ts, w / 2, &fft_data, Bytes::gbytes(2), 1234);
     index.add_repetitions(&ts, &fft_data, 4096, K);
 
     for &i in &ids {

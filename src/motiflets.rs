@@ -440,7 +440,7 @@ impl MotifletsIterator {
         debug!("Computed fft_data: {}", mem_gauge.measure());
 
         let mem_gauge = MemoryGauge::allocated();
-        let index = LSHIndex::from_ts(&ts, exclusion_zone, &fft_data, seed);
+        let index = LSHIndex::from_ts(&ts, exclusion_zone, &fft_data, max_memory, seed);
         debug!(
             "Computed initial hash values in {:?}, {}",
             start.elapsed(),
@@ -460,7 +460,7 @@ impl MotifletsIterator {
 
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 1 << 20];
 
-        let index_stats = index.stats(&ts, max_memory, exclusion_zone);
+        let index_stats = index.stats(&ts, exclusion_zone);
         info!("Pools stats: {:?}", index_stats);
         let first_meaningful_prefix = index_stats.first_meaningful_prefix();
         assert!(first_meaningful_prefix > 0);
