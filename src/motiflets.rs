@@ -708,7 +708,6 @@ impl MotifletsIterator {
         for k in 0..=self.max_k {
             let top = &mut self.top[k];
             if !top.is_complete() {
-                dbg!(k, &top);
                 let new_motiflets = top.emit(|extent| {
                     let fp = self.index.failure_probability(
                         extent,
