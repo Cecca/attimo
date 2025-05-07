@@ -1,3 +1,7 @@
+check:
+  cd pyattimo && maturin develop --release
+  python pyattimo/scratch.py
+
 test:
   cargo nextest run --release
 
