@@ -233,14 +233,20 @@ impl Hasher {
                 &self.vectors[k],
                 output,
                 move |i, mut h, out| {
+                    if out.1 == u32::MAX {
+                        // the subsequence had an overflown hash value, skip it
+                        return;
+                    }
                     if !h.is_nan() {
                         h = (h + self.shifts[k]) / self.width;
-                        if h.abs() > 128.0 {
-                            h = h.signum() * 127.0;
+                        if h.abs() > 127.0 {
+                            out.0 = HashValue(u64::MAX);
+                            out.1 = u32::MAX;
+                        } else {
+                            let h = ((h as i64 & 0xFFi64) as i8) as u8;
+                            out.0.set_byte(k, h);
+                            out.1 = i as u32;
                         }
-                        let h = ((h as i64 & 0xFFi64) as i8) as u8;
-                        out.0.set_byte(k, h);
-                        out.1 = i as u32;
                     } else {
                         // if the subsequence is flat don't include it
                         // in subsequent computations by giving it a hash that makes it
@@ -261,7 +267,11 @@ struct Repetition {
 
 impl Repetition {
     fn from_pairs<I: IntoIterator<Item = (HashValue, u32)>>(pairs: I) -> Self {
-        let (hashes, indices): (Vec<HashValue>, Vec<u32>) = pairs.into_iter().unzip();
+        let (hashes, indices): (Vec<HashValue>, Vec<u32>) = pairs
+            .into_iter()
+            // remove the overflown subsequences
+            .filter(|(_, idx)| *idx != u32::MAX)
+            .unzip();
         Self { hashes, indices }
     }
 
@@ -335,8 +345,9 @@ impl LSHIndex {
         seed: u64,
     ) -> Self {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let sqrt_n = (ts.num_subsequences() as f64).sqrt().ceil() as usize;
 
-        let mut quantization_width = std::env::var("ATTIMO_QUANTIZATION")
+        let mut qw = std::env::var("ATTIMO_QUANTIZATION")
             .map(|q| {
                 q.parse::<f64>()
                     .expect("unable to parse ATTIMO_QUANTIZATION as a float")
@@ -348,16 +359,21 @@ impl LSHIndex {
             max_repetitions += 1;
         }
         info!(
-            "quantization width: {}, maximum repetitions: {}",
-            quantization_width, max_repetitions
+            "initial quantization width: {}, maximum repetitions: {}",
+            qw, max_repetitions
         );
 
         // Try to build the index until we get a version that has collisions at the deepest level
         let t = Instant::now();
+        let mut qw_lower: Option<f64> = None;
+        let mut qw_upper: Option<f64> = None;
         loop {
+            if let (Some(lower), Some(upper)) = (qw_lower, qw_upper) {
+                qw = (upper + lower) / 2.0;
+            }
             let mut slf = Self {
                 rng: rng.clone(),
-                quantization_width,
+                quantization_width: qw,
                 functions: Vec::new(),
                 repetitions: Vec::new(),
                 repetitions_setup_time: Duration::from_secs(0),
@@ -367,14 +383,27 @@ impl LSHIndex {
             slf.add_repetitions(ts, fft_data, 1, K);
 
             let enumerator = slf.collisions(0, K, None);
-            if enumerator.estimate_num_collisions(exclusion_zone) > 0 {
+            let num_collisions = enumerator.estimate_num_collisions(exclusion_zone);
+            info!(
+                "Num collisions with quantization_width={}: {} (lower {:?}, upper {:?})",
+                qw, num_collisions, qw_lower, qw_upper
+            );
+            if num_collisions == 0 {
+                // the quantization width is too small
+                qw_lower.replace(qw);
+                qw *= 2.0;
+                info!("Doubling the quantization width to {}", qw);
+            } else if num_collisions > sqrt_n {
+                // the quantization width is too large: too many subsequences
+                qw_upper.replace(qw);
+                qw /= 2.0;
+                info!("Halving the quantization width {}", qw);
+            } else {
+                info!("Settling on quantization width {}", qw);
                 let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS, K);
                 slf.repetitions_setup_time = avg_dur;
                 observe!(0, 0, "profile/index_setup", t.elapsed().as_secs_f64());
                 return slf;
-            } else {
-                quantization_width *= 2.0;
-                info!("Doubling the quantization width to {}", quantization_width);
             }
         }
     }
@@ -493,8 +522,8 @@ impl LSHIndex {
 
     /// Estimates, for each level in the given repetition index, the number of
     /// non-trivial collisions
-    fn collision_profile_at(&self, repetition: usize, exclusion_zone: usize) -> Vec<f64> {
-        let repetition = &self.repetitions[repetition];
+    fn collision_profile_at(&self, repetition_idx: usize, exclusion_zone: usize) -> Vec<f64> {
+        let repetition = &self.repetitions[repetition_idx];
         let hashes = repetition.get_hashes();
         let indices = repetition.get_indices();
 
@@ -517,6 +546,8 @@ impl LSHIndex {
                         + hashes[start..].partition_point(|h| h.prefix_eq(&hashes[start], prefix));
                     assert!(start < end);
                     if prefix == K {
+                        let n = end - start;
+                        let estimate_collisions = n * (n - 1) / 2;
                         let mut cnt_collisions = 0;
                         for i in start..end {
                             for j in start..i {
@@ -556,7 +587,14 @@ impl LSHIndex {
         let reps = self.get_repetitions().min(4);
         let mut counts = (0..reps)
             .into_par_iter()
-            .map(|rep| self.collision_profile_at(rep, exclusion_zone))
+            .map(|rep| {
+                let mut out = vec![0.0; K + 1];
+                for prefix in 1..=K {
+                    let enumerator = CollisionEnumerator::new(&self.repetitions[rep], prefix, None);
+                    out[prefix] = enumerator.estimate_num_collisions(exclusion_zone) as f64;
+                }
+                out
+            })
             .reduce(
                 || vec![0.0; K + 1],
                 |mut a, b| {
@@ -602,6 +640,9 @@ impl<'index> CollisionEnumerator<'index> {
     /// hash values
     fn next_range(&mut self) {
         let hashes = self.repetition.get_hashes();
+        if hashes.is_empty() {
+            return;
+        }
 
         // exponential search
         let start = self.current_range.end;
@@ -710,7 +751,7 @@ impl<'index> CollisionEnumerator<'index> {
                 // the bucket is _very_ large (relative to the number of subsequences),
                 // so we just pick the square of its size in order to avoid spending
                 // forever in iterating over pairs checking for overlaps
-                cnt += range.len() * range.len();
+                cnt += range.len() * (range.len() - 1) / 2;
             } else {
                 let mut i = range.start;
                 while i < range.end {

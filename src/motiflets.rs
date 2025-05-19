@@ -447,6 +447,11 @@ impl MotifletsIterator {
             mem_gauge.measure()
         );
 
+        let index_stats = index.stats(&ts, exclusion_zone);
+        info!("Pools stats: {:?}", index_stats);
+        let first_meaningful_prefix = index_stats.first_meaningful_prefix();
+        assert!(first_meaningful_prefix > 0);
+
         // get some stats about distances
         let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
         let (min_nn_estimate, avg_nn_estimate, sampled_min_index_pair) =
@@ -459,11 +464,6 @@ impl MotifletsIterator {
         );
 
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 1 << 20];
-
-        let index_stats = index.stats(&ts, exclusion_zone);
-        info!("Pools stats: {:?}", index_stats);
-        let first_meaningful_prefix = index_stats.first_meaningful_prefix();
-        assert!(first_meaningful_prefix > 0);
 
         let mut stats = MotifletsIteratorStats::default();
         stats.timeseries_stats = ts.stats();
@@ -634,11 +634,22 @@ impl MotifletsIterator {
 
             // Update the neighborhoods
             let t_graph = Instant::now();
+            let mut cnt_edges = 0;
+            let mem_gauge = MemoryGauge::allocated();
             for (a, b, d) in self.pairs_buffer.iter() {
                 if d.is_finite() && !a.overlaps(b, exclusion_zone) {
                     graph.insert(*d, *a as usize, *b as usize);
+                    cnt_edges += 1;
                 }
             }
+            debug!(
+                "(rep: {} prefix: {}) inserted {} edges (added {}, stats {:?})",
+                rep,
+                prefix,
+                cnt_edges,
+                mem_gauge.measure(),
+                graph.stats(),
+            );
             time_update_graph += t_graph.elapsed();
         } // while there are collisions
         #[rustfmt::skip]

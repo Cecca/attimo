@@ -2,6 +2,7 @@ use crate::allocator::Bytes;
 use crate::distance::{zdot, zeucl};
 use crate::observe::observe;
 use core::f64;
+use log::info;
 use rand_distr::num_traits::Zero;
 use rayon::prelude::*;
 use rustfft::num_traits::Saturating;
@@ -210,6 +211,7 @@ impl WindowedTimeseries {
         use rand::prelude::*;
         use rand_distr::Uniform;
         use rand_xoshiro::Xoshiro256PlusPlus;
+        info!("Computing average pairwise distance");
 
         const SAMPLES: usize = 1000;
         let uniform = Uniform::new(0, self.num_subsequences());
@@ -242,11 +244,12 @@ impl WindowedTimeseries {
         use rand_distr::Uniform;
         use rand_xoshiro::Xoshiro256PlusPlus;
         use rayon::prelude::*;
+        info!("Computing nearest neighbor stats");
 
         // let mut dists = vec![0.0f64; self.num_subsequences()];
         // let mut buf = vec![0.0f64; self.w];
 
-        const SAMPLES: usize = 1000;
+        const SAMPLES: usize = 100;
         let uniform = Uniform::new(0, self.num_subsequences());
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         // let mut sum = 0.0;
