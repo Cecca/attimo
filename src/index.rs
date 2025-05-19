@@ -604,6 +604,7 @@ impl LSHIndex {
                     a
                 },
             );
+        counts[0] = f64::INFINITY;
 
         for acc in counts.iter_mut() {
             *acc /= reps as f64;
@@ -877,6 +878,9 @@ impl IndexStats {
             .iter()
             .enumerate()
             .map(|(prefix, collisions)| {
+                if prefix == 0 {
+                    return (f64::INFINITY, 0);
+                }
                 let maxreps = self.max_repetitions;
                 let (nreps, fp) = {
                     let mut nreps = 0;
