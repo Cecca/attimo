@@ -4,7 +4,7 @@
 /// Taken from the [rust documentation](https://doc.rust-lang.org/std/alloc/struct.System.html)
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::fmt::Display;
-use std::ops::{Add, AddAssign, Sub};
+use std::ops::{Add, AddAssign, Mul, Sub};
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
@@ -54,6 +54,13 @@ impl Add<Bytes> for Bytes {
     type Output = Bytes;
     fn add(self, rhs: Bytes) -> Self::Output {
         Self(self.0 + rhs.0)
+    }
+}
+
+impl Mul<f64> for Bytes {
+    type Output = Bytes;
+    fn mul(self, rhs: f64) -> Self::Output {
+        Self((self.0 as f64 * rhs) as usize)
     }
 }
 
@@ -158,6 +165,7 @@ impl TryFrom<String> for Bytes {
 
 pub struct CountingAllocator;
 
+static HARD_ALLOCATION_LIMIT: AtomicUsize = AtomicUsize::new(usize::MAX);
 static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 static MAX_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 
@@ -167,6 +175,12 @@ unsafe impl GlobalAlloc for CountingAllocator {
         if !ret.is_null() {
             let currently_allocated = ALLOCATED.fetch_add(layout.size(), SeqCst);
             MAX_ALLOCATED.fetch_max(currently_allocated, SeqCst);
+            if currently_allocated > HARD_ALLOCATION_LIMIT.load(SeqCst) {
+                panic!(
+                    "maximum memory allocation limit exceeded! {}",
+                    Bytes(currently_allocated)
+                );
+            }
         }
         ret
     }
@@ -175,6 +189,11 @@ unsafe impl GlobalAlloc for CountingAllocator {
         System.dealloc(ptr, layout);
         ALLOCATED.fetch_sub(layout.size(), SeqCst);
     }
+}
+
+pub fn set_maximum_allocation_limit(maximum: Bytes) {
+    log::info!("setting maximum allocation limit to {}", maximum);
+    HARD_ALLOCATION_LIMIT.store(maximum.0, SeqCst);
 }
 
 pub fn allocated() -> usize {

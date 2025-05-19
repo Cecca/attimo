@@ -325,6 +325,7 @@ impl MotifletsIterator {
                 let sysmem = Bytes::system_memory();
                 sysmem.divide(2)
             };
+            attimo::allocator::set_maximum_allocation_limit(max_memory * 1.2);
             let mut iter = attimo::motiflets::MotifletsIterator::new(
                 ts,
                 support,
