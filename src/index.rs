@@ -811,6 +811,7 @@ impl IndexStats {
         // cost of running a repetition
         let (sampling_prefix, _collisions) = expected_collisions
             .iter()
+            .skip(1)
             .copied()
             .enumerate()
             .rev()
