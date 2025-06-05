@@ -393,7 +393,9 @@ impl LSHIndex {
                 qw_lower.replace(qw);
                 qw *= 2.0;
                 info!("Doubling the quantization width to {}", qw);
-            } else if num_collisions > sqrt_n {
+            } else if num_collisions > sqrt_n
+                && qw_upper.unwrap_or(f64::INFINITY) - qw_lower.unwrap_or(0.0) > 1e-7
+            {
                 // the quantization width is too large: too many subsequences
                 qw_upper.replace(qw);
                 qw /= 2.0;
