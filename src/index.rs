@@ -811,14 +811,15 @@ impl IndexStats {
 
         // get the prefix at which we are going to sample to estimate the
         // cost of running a repetition
-        let (sampling_prefix, _collisions) = expected_collisions
+        let (mut sampling_prefix, _collisions) = expected_collisions
             .iter()
-            .skip(1)
             .copied()
             .enumerate()
             .rev()
             .find(|(_, collisions)| *collisions > 1000.0)
             .unwrap_or((1, f64::INFINITY));
+        sampling_prefix = sampling_prefix.max(1);
+        assert!(sampling_prefix > 0);
 
         let max_samples = 10_000; // cap the maximum work we are going to spend on sampling
         let mut buf = vec![(0, 0, Distance(0.0)); 65536];
