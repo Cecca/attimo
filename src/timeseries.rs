@@ -594,7 +594,7 @@ impl WindowedTimeseries {
                 );
                 if self.is_flat(i) {
                     // if the subsequence is flat, its z-normalization is undefined
-                    out[i] = f64::NAN;
+                    out[i] = f64::INFINITY;
                 } else if out[i] > self.w as f64 {
                     // when out[i] is slightly larger than self.w (which might happen due
                     // to floating point representation errors) then the sqrt in the next

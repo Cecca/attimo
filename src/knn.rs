@@ -75,6 +75,8 @@ pub fn compute_extents(ts: &WindowedTimeseries, indices: &[usize]) -> Vec<Distan
         for j in 0..i {
             let ii = indices[i];
             let jj = indices[j];
+            assert!(!ts.is_flat(ii));
+            assert!(!ts.is_flat(jj));
             let d = Distance(zeucl(ts, ii, jj));
             assert!(
                 !d.0.is_nan(),
