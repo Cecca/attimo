@@ -380,20 +380,22 @@ impl LSHIndex {
                 max_repetitions,
             };
 
-            slf.add_repetitions(ts, fft_data, 1, K);
+            let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS, K);
 
-            let enumerator = slf.collisions(0, K, None);
-            let num_collisions = enumerator.estimate_num_collisions(exclusion_zone);
+            // let enumerator = slf.collisions(0, K, None);
+            // let num_collisions = enumerator.estimate_num_collisions(exclusion_zone);
+            let (min_collisions, median_collisions, max_collisions, avg_collisions) =
+                slf.collisions_stats(K, exclusion_zone);
             info!(
                 "Num collisions with quantization_width={}: {} (lower {:?}, upper {:?})",
-                qw, num_collisions, qw_lower, qw_upper
+                qw, avg_collisions, qw_lower, qw_upper
             );
-            if num_collisions == 0 {
+            if median_collisions < 2 {
                 // the quantization width is too small
                 qw_lower.replace(qw);
                 qw *= 2.0;
                 info!("Doubling the quantization width to {}", qw);
-            } else if num_collisions > sqrt_n
+            } else if median_collisions > sqrt_n
                 && qw_upper.unwrap_or(f64::INFINITY) - qw_lower.unwrap_or(0.0) > 1e-7
             {
                 // the quantization width is too large: too many subsequences
@@ -402,7 +404,6 @@ impl LSHIndex {
                 info!("Halving the quantization width {}", qw);
             } else {
                 info!("Settling on quantization width {}", qw);
-                let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS, K);
                 slf.repetitions_setup_time = avg_dur;
                 observe!(0, 0, "profile/index_setup", t.elapsed().as_secs_f64());
                 return slf;
@@ -511,6 +512,49 @@ impl LSHIndex {
         IndexStats::new(self, ts, self.max_repetitions, exclusion_zone)
     }
 
+    /// estimates the average number of collisions at the given prefix,
+    /// using _all_ the available repetitions
+    pub fn average_collisions(&self, prefix: usize, exclusion_zone: usize) -> f64 {
+        let sum: f64 = self
+            .repetitions
+            .par_iter()
+            .map(|rep| {
+                let c = CollisionEnumerator::new(rep, prefix, None)
+                    .estimate_num_collisions(exclusion_zone);
+                dbg!(c);
+                c
+            })
+            .sum::<usize>() as f64;
+        sum / (self.repetitions.len() as f64)
+    }
+
+    /// Gets the minimum, maximum, median, and mean number of collisions at the given
+    /// prefix for in all repetitions
+    pub fn collisions_stats(
+        &self,
+        prefix: usize,
+        exclusion_zone: usize,
+    ) -> (usize, usize, usize, f64) {
+        let mut collisions: Vec<usize> = self
+            .repetitions
+            .par_iter()
+            .map(|rep| {
+                let c = CollisionEnumerator::new(rep, prefix, None)
+                    .estimate_num_collisions(exclusion_zone);
+                dbg!(c);
+                c
+            })
+            .collect();
+        collisions.sort();
+        let mean = collisions.iter().sum::<usize>() as f64 / collisions.len() as f64;
+        dbg!(
+            collisions[0],
+            collisions[collisions.len() / 2],
+            collisions[collisions.len() - 1],
+            mean,
+        )
+    }
+
     pub fn collisions(
         &self,
         repetition: usize,
@@ -586,7 +630,7 @@ impl LSHIndex {
     }
 
     fn collision_profile(&self, exclusion_zone: usize) -> Vec<f64> {
-        let reps = self.get_repetitions().min(4);
+        let reps = self.get_repetitions();
         let mut counts = (0..reps)
             .into_par_iter()
             .map(|rep| {
