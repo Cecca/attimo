@@ -539,15 +539,12 @@ impl LSHIndex {
             .repetitions
             .par_iter()
             .map(|rep| {
-                let c = CollisionEnumerator::new(rep, prefix, None)
-                    .estimate_num_collisions(exclusion_zone);
-                dbg!(c);
-                c
+                CollisionEnumerator::new(rep, prefix, None).estimate_num_collisions(exclusion_zone)
             })
             .collect();
         collisions.sort();
         let mean = collisions.iter().sum::<usize>() as f64 / collisions.len() as f64;
-        dbg!(
+        (
             collisions[0],
             collisions[collisions.len() / 2],
             collisions[collisions.len() - 1],
