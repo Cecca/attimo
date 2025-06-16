@@ -176,6 +176,10 @@ unsafe impl GlobalAlloc for CountingAllocator {
             let currently_allocated = ALLOCATED.fetch_add(layout.size(), SeqCst);
             MAX_ALLOCATED.fetch_max(currently_allocated, SeqCst);
             if currently_allocated > HARD_ALLOCATION_LIMIT.load(SeqCst) {
+                log::error!(
+                    "maximum memory allocation limit exceeded! {}",
+                    Bytes(currently_allocated)
+                );
                 panic!(
                     "maximum memory allocation limit exceeded! {}",
                     Bytes(currently_allocated)

@@ -105,6 +105,7 @@ pub struct WindowedTimeseries {
 impl WindowedTimeseries {
     pub fn new(ts: Vec<f64>, w: usize, precise: bool) -> Self {
         assert!(w <= ts.len());
+        log::debug!("setting up windowed time series");
 
         //// First we compute rolling statistics
         let (rolling_avg, rolling_sd) = if precise {
@@ -114,6 +115,7 @@ impl WindowedTimeseries {
             // println!("Computing fast rolling statistics");
             rolling_stat(&ts, w)
         };
+        log::debug!("done computing rolling statistics");
 
         WindowedTimeseries {
             data: ts,

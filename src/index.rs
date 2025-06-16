@@ -387,8 +387,8 @@ impl LSHIndex {
             let (min_collisions, median_collisions, max_collisions, avg_collisions) =
                 slf.collisions_stats(K, exclusion_zone);
             info!(
-                "Num collisions with quantization_width={}: {} (lower {:?}, upper {:?})",
-                qw, avg_collisions, qw_lower, qw_upper
+                "Num collisions with quantization_width={}: {} median {} average (lower {:?}, upper {:?})",
+                qw, median_collisions, avg_collisions, qw_lower, qw_upper
             );
             if median_collisions < 2 {
                 // the quantization width is too small
