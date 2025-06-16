@@ -1,4 +1,4 @@
-use crate::allocator::Bytes;
+use crate::allocator::{ByteSize, Bytes};
 use crate::distance::{zdot, zeucl};
 use crate::observe::observe;
 use core::f64;
@@ -100,6 +100,28 @@ pub struct WindowedTimeseries {
     pub w: usize,
     rolling_avg: Vec<f64>,
     rolling_sd: Vec<f64>,
+}
+
+impl ByteSize for WindowedTimeseries {
+    fn byte_size(&self) -> Bytes {
+        self.data.byte_size()
+            + self.w.byte_size()
+            + self.rolling_avg.byte_size()
+            + self.rolling_sd.byte_size()
+    }
+
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct(&format!("WindowedTimeseries({})", self.byte_size()))
+            .field_with("w", |f| write!(f, "{}", self.w.byte_size()))
+            .field_with("data", |f| write!(f, "{}", self.data.byte_size()))
+            .field_with("rolling_avg", |f| {
+                write!(f, "{}", self.rolling_avg.byte_size())
+            })
+            .field_with("rolling_sd", |f| {
+                write!(f, "{}", self.rolling_sd.byte_size())
+            })
+            .finish()
+    }
 }
 
 impl WindowedTimeseries {
@@ -233,63 +255,6 @@ impl WindowedTimeseries {
         }
 
         sum / SAMPLES as f64
-    }
-
-    /// return the minimum and average estimated nearest neighbor distances
-    pub fn nearest_neighbor_distance_stats(
-        &self,
-        fft_data: &FFTData,
-        seed: u64,
-        exclusion_zone: usize,
-    ) -> (f64, f64, (usize, usize)) {
-        use rand::prelude::*;
-        use rand_distr::Uniform;
-        use rand_xoshiro::Xoshiro256PlusPlus;
-        use rayon::prelude::*;
-        info!("Computing nearest neighbor stats");
-
-        // let mut dists = vec![0.0f64; self.num_subsequences()];
-        // let mut buf = vec![0.0f64; self.w];
-
-        const SAMPLES: usize = 100;
-        let uniform = Uniform::new(0, self.num_subsequences());
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        // let mut sum = 0.0;
-        // let mut minimum = f64::INFINITY;
-        // let mut min_index_pair = (0, 0);
-        let indices: Vec<usize> = uniform
-            .sample_iter(&mut rng)
-            .filter(|i| !self.is_flat(*i))
-            .take(SAMPLES)
-            .collect();
-        let (minimum, sum, min_index_pair) = indices
-            .into_par_iter()
-            .map_with(
-                (vec![0.0f64; self.num_subsequences()], vec![0.0; self.w]),
-                |(dists, buf), i| {
-                    self.distance_profile(fft_data, i, dists, buf);
-                    let (j, nn) = dists
-                        .iter()
-                        .copied()
-                        .enumerate()
-                        .filter(|(j, _)| !j.overlaps(i, exclusion_zone))
-                        .min_by(|a, b| a.1.total_cmp(&b.1))
-                        .unwrap();
-                    (nn, nn, (i, j))
-                },
-            )
-            .reduce(
-                || (f64::INFINITY, 0.0, (0, 0)),
-                |a, b| {
-                    if a.0 < b.0 {
-                        (a.0, a.1 + b.1, a.2)
-                    } else {
-                        (b.0, a.1 + b.1, b.2)
-                    }
-                },
-            );
-
-        (minimum, sum / SAMPLES as f64, min_index_pair)
     }
 
     pub fn sliding_dot_product_for_each<F: FnMut(usize, f64)>(
@@ -770,6 +735,38 @@ pub struct FFTData {
     buf_vfft: ThreadLocal<RefCell<Vec<Complex<f64>>>>,
     buf_ivfft: ThreadLocal<RefCell<Vec<Complex<f64>>>>,
     scratch: ThreadLocal<RefCell<Vec<Complex<f64>>>>,
+}
+
+impl ByteSize for Complex<f64> {
+    fn byte_size(&self) -> Bytes {
+        Bytes(std::mem::size_of_val(&self.re) + std::mem::size_of_val(&self.im))
+    }
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
+}
+impl<T: ByteSize + Send> ByteSize for ThreadLocal<RefCell<T>> {
+    fn byte_size(&self) -> Bytes {
+        self.get()
+            .map(|e| e.borrow().byte_size())
+            .unwrap_or(Bytes(0))
+    }
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
+}
+impl ByteSize for FFTData {
+    fn byte_size(&self) -> Bytes {
+        self.chunk_size.byte_size()
+            + self.fft_length.byte_size()
+            + self.fft_chunks.byte_size()
+            + self.buf_vfft.byte_size()
+            + self.buf_ivfft.byte_size()
+            + self.scratch.byte_size()
+    }
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
 }
 
 impl FFTData {

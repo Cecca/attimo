@@ -1,4 +1,11 @@
-use crate::{allocator::Bytes, knn::Distance, observe::observe, timeseries::Overlaps};
+use std::io::Read;
+
+use crate::{
+    allocator::{ByteSize, Bytes},
+    knn::Distance,
+    observe::observe,
+    timeseries::Overlaps,
+};
 use bitvec::prelude::*;
 use rayon::prelude::*;
 
@@ -64,6 +71,41 @@ pub struct AdjacencyGraph {
     exclusion_zone: usize,
     neighborhoods: Vec<Vec<(DistanceWithFlag, usize)>>,
     updated: BitVec,
+}
+
+impl ByteSize for DistanceWithFlag {
+    fn byte_size(&self) -> Bytes {
+        Bytes(std::mem::size_of_val(self))
+    }
+
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
+}
+
+impl ByteSize for BitVec {
+    fn byte_size(&self) -> Bytes {
+        Bytes(self.len() / 8)
+    }
+
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
+}
+
+impl ByteSize for AdjacencyGraph {
+    fn byte_size(&self) -> Bytes {
+        self.neighborhoods.byte_size() + self.updated.byte_size()
+    }
+
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct(&format!("AdjacencyGraph({})", self.byte_size()))
+            .field_with("neighborhoods", |f| {
+                write!(f, "{}", self.neighborhoods.byte_size())
+            })
+            .field_with("updated", |f| write!(f, "{}", self.updated.byte_size()))
+            .finish()
+    }
 }
 
 impl AdjacencyGraph {

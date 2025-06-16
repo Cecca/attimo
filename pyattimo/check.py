@@ -3,13 +3,12 @@ import pyattimo
 import time
 import logging
 import numpy as np
-from matplotlib import pyplot as plt
 import scipy
 import math
 
 logging.basicConfig(level=logging.DEBUG)
 
-dataset = "recorddata"
+dataset = "lorenzAttractorsLONG"
 path = f"data/{dataset}.mat"
 
 print("load_data")

@@ -14,7 +14,7 @@ use std::{
 };
 
 use crate::{
-    allocator::Bytes,
+    allocator::{ByteSize, Bytes},
     distance::{zeucl, zeucl_threshold},
     knn::Distance,
     observe::*,
@@ -102,6 +102,18 @@ struct Hasher {
     vectors: [Vec<f64>; K],
     shifts: [f64; K],
     width: f64,
+}
+
+impl ByteSize for Hasher {
+    fn byte_size(&self) -> Bytes {
+        self.vectors.iter().map(|v| v.byte_size()).sum::<Bytes>()
+            + self.shifts.iter().map(|v| v.byte_size()).sum()
+            + self.width.byte_size()
+    }
+
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
 }
 
 impl Hasher {
@@ -265,6 +277,17 @@ struct Repetition {
     indices: Vec<u32>,
 }
 
+impl ByteSize for Repetition {
+    fn byte_size(&self) -> Bytes {
+        self.hashes.iter().map(|v| v.byte_size()).sum::<Bytes>()
+            + self.indices.iter().map(|v| v.byte_size()).sum()
+    }
+
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
+}
+
 impl Repetition {
     fn from_pairs<I: IntoIterator<Item = (HashValue, u32)>>(pairs: I) -> Self {
         let (hashes, indices): (Vec<HashValue>, Vec<u32>) = pairs
@@ -312,6 +335,21 @@ pub struct LSHIndex {
     max_repetitions: usize,
 }
 
+impl ByteSize for LSHIndex {
+    fn byte_size(&self) -> Bytes {
+        self.functions.byte_size() + self.repetitions.byte_size()
+    }
+
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct(&format!("LSHIndex({})", self.byte_size()))
+            .field_with("functions", |f| write!(f, "{}", self.functions.byte_size()))
+            .field_with("repetitions", |f| {
+                write!(f, "{}", self.repetitions.byte_size())
+            })
+            .finish()
+    }
+}
+
 pub const INITIAL_REPETITIONS: usize = 8;
 
 impl LSHIndex {
@@ -344,6 +382,7 @@ impl LSHIndex {
         max_memory: Bytes,
         seed: u64,
     ) -> Self {
+        dbg!(Bytes::max_allocated());
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         let sqrt_n = (ts.num_subsequences() as f64).sqrt().ceil() as usize;
 
@@ -353,14 +392,17 @@ impl LSHIndex {
                     .expect("unable to parse ATTIMO_QUANTIZATION as a float")
             })
             .unwrap_or_else(|_| Hasher::compute_width(ts, fft_data, exclusion_zone, &mut rng));
+        dbg!(Bytes::max_allocated());
 
         let mut max_repetitions = 0;
         while Self::required_memory(ts, max_repetitions) < max_memory {
             max_repetitions += 1;
         }
         info!(
-            "initial quantization width: {}, maximum repetitions: {}",
-            qw, max_repetitions
+            "initial quantization width: {}, maximum repetitions: {} ({})",
+            qw,
+            max_repetitions,
+            Self::required_memory(ts, max_repetitions)
         );
 
         // Try to build the index until we get a version that has collisions at the deepest level
@@ -368,6 +410,7 @@ impl LSHIndex {
         let mut qw_lower: Option<f64> = None;
         let mut qw_upper: Option<f64> = None;
         loop {
+            dbg!(Bytes::max_allocated());
             if let (Some(lower), Some(upper)) = (qw_lower, qw_upper) {
                 qw = (upper + lower) / 2.0;
             }

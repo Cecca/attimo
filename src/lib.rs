@@ -1,5 +1,6 @@
 #![feature(allocator_api)]
-#![feature(is_sorted)]
+#![feature(debug_closure_helpers)]
+#![feature(formatting_options)]
 #![feature(string_remove_matches)]
 #![feature(portable_simd)]
 #![feature(int_roundings)]

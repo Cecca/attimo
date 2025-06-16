@@ -27,6 +27,7 @@
             [
               rust-bin.nightly.latest.default
               python
+              heaptrack
             ]
             ++ (with python.pkgs; [
               venvShellHook

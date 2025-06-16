@@ -15,9 +15,7 @@ use rand::SeedableRng;
 use rand_distr::{Bernoulli, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
-use rustfft::num_complex::ComplexFloat;
 use std::collections::BTreeSet;
-use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
 use std::{sync::Arc, time::Instant};
 
@@ -158,6 +156,15 @@ impl PartialOrd for Motiflet {
         self.extent.partial_cmp(&other.extent)
     }
 }
+impl ByteSize for Motiflet {
+    fn byte_size(&self) -> Bytes {
+        self.indices.byte_size() + self.extent.byte_size() + self.relative_contrast.byte_size()
+    }
+
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
+}
 
 impl Overlaps<Self> for Motiflet {
     fn overlaps(&self, other: Self, exclusion_zone: usize) -> bool {
@@ -215,6 +222,29 @@ struct TopK {
     /// Smallest Not Emitted Distance
     sned: Option<Distance>,
     disabled: bool,
+}
+impl ByteSize for TopK {
+    fn byte_size(&self) -> Bytes {
+        self.k.byte_size()
+            + self.exclusion_zone.byte_size()
+            + self.threshold.byte_size()
+            + self.top.byte_size()
+            + self.emitted.byte_size()
+            + self.sned.byte_size()
+    }
+
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct(&format!("TopK({})", self.byte_size()))
+            .field_with("k", |f| write!(f, "{}", self.k.byte_size()))
+            .field_with("exclusion_zone", |f| {
+                write!(f, "{}", self.exclusion_zone.byte_size())
+            })
+            .field_with("threshold", |f| write!(f, "{}", self.threshold.byte_size()))
+            .field_with("top", |f| write!(f, "{}", self.top.byte_size()))
+            .field_with("emitted", |f| write!(f, "{}", self.emitted.byte_size()))
+            .field_with("sned", |f| write!(f, "{}", self.sned.byte_size()))
+            .finish()
+    }
 }
 
 impl TopK {
@@ -412,6 +442,32 @@ pub struct MotifletsIterator {
     rng: Xoshiro256PlusPlus,
 }
 
+impl ByteSize for MotifletsIterator {
+    fn byte_size(&self) -> Bytes {
+        self.ts.byte_size()
+            + self.fft_data.byte_size()
+            + self.top.byte_size()
+            + self.to_return.byte_size()
+            + self.index.byte_size()
+            + self.graph.byte_size()
+            + self.pairs_buffer.byte_size()
+    }
+
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct(&format!("MotifletsIterator({})", self.byte_size()))
+            .field_with("ts", |f| write!(f, "{}", self.ts.byte_size()))
+            .field_with("fft_data", |f| write!(f, "{}", self.fft_data.byte_size()))
+            .field_with("top", |f| write!(f, "{}", self.top.byte_size()))
+            .field_with("to_return", |f| write!(f, "{}", self.to_return.byte_size()))
+            .field_with("index", |f| self.index.mem_tree_fmt(f))
+            .field_with("graph", |f| self.graph.mem_tree_fmt(f))
+            .field_with("pairs_buffer", |f| {
+                write!(f, "{}", self.pairs_buffer.byte_size())
+            })
+            .finish()
+    }
+}
+
 impl MotifletsIterator {
     pub fn new(
         ts: Arc<WindowedTimeseries>,
@@ -423,14 +479,16 @@ impl MotifletsIterator {
         seed: u64,
         _show_progress: bool,
     ) -> Self {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        dbg!(Bytes::max_allocated());
         let start = Instant::now();
         let n = ts.num_subsequences();
-        let mem_gauge = MemoryGauge::allocated();
         let fft_data = FFTData::new(&ts);
-        debug!("Computed fft_data: {}", mem_gauge.measure());
+        dbg!(Bytes::max_allocated());
 
         let mem_gauge = MemoryGauge::allocated();
         let index = LSHIndex::from_ts(&ts, exclusion_zone, &fft_data, max_memory, seed);
+        dbg!(Bytes::max_allocated());
         debug!(
             "Computed initial hash values in {:?}, {}",
             start.elapsed(),
@@ -444,14 +502,7 @@ impl MotifletsIterator {
 
         // get some stats about distances
         let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
-        let (min_nn_estimate, avg_nn_estimate, sampled_min_index_pair) =
-            ts.nearest_neighbor_distance_stats(&fft_data, 12435, exclusion_zone);
-        info!(
-            "Average pairwise distance: {}, maximum pairwise distance: {}, min/average nearest neighbor dist: {:?}",
-            average_pairwise_distance,
-            ts.maximum_distance(),
-            (min_nn_estimate, avg_nn_estimate)
-        );
+        dbg!(Bytes::max_allocated());
 
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 1 << 20];
 
@@ -464,11 +515,12 @@ impl MotifletsIterator {
         top.resize_with(max_k + 1, || TopK::new(top_k, exclusion_zone));
         top[0].disable();
         top[1].disable();
-        // we initialize the top queue with motiflets rooted at the
-        // sampled closest pair
+        // we initialize the top queue with motiflets rooted at
+        // a random index
+        let random_root = rng.sample(Uniform::new(0, ts.num_subsequences()));
         for motiflet in build_rooted_motiflets(
             &ts,
-            sampled_min_index_pair.0,
+            random_root,
             &fft_data,
             max_k,
             exclusion_zone,
@@ -476,6 +528,7 @@ impl MotifletsIterator {
         ) {
             top[motiflet.support()].insert(motiflet);
         }
+        dbg!(Bytes::max_allocated());
 
         stats.observe(0, 0);
 
@@ -483,13 +536,14 @@ impl MotifletsIterator {
         // we have a problem
         let collisions_threshold = stats.timeseries_stats.num_subsequence_pairs / 10;
 
+        let next_to_confirm = top[2].smallest_non_emitted_distance();
         Self {
             ts,
             fft_data,
             top,
             // the minimum sampled nearest neighbor is of course a
             // natural candidate for the 2-motiflet
-            next_to_confirm: Some(min_nn_estimate.into()),
+            next_to_confirm,
             graph: AdjacencyGraph::new(n, exclusion_zone),
             max_k,
             to_return: Vec::new(),
@@ -506,7 +560,7 @@ impl MotifletsIterator {
             stats,
             collisions_threshold,
             stop_on_collisions_threshold: false,
-            rng: Xoshiro256PlusPlus::seed_from_u64(seed),
+            rng,
         }
     }
 
@@ -642,6 +696,7 @@ impl MotifletsIterator {
             );
             time_update_graph += t_graph.elapsed();
         } // while there are collisions
+        log::info!("{}", self.mem_tree());
         #[rustfmt::skip]
         observe!(rep, prefix, "profile/repetition/update_graph/distance_computation", time_distance_computation.as_secs_f64());
         #[rustfmt::skip]

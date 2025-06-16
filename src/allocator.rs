@@ -3,7 +3,9 @@
 ///
 /// Taken from the [rust documentation](https://doc.rust-lang.org/std/alloc/struct.System.html)
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::fmt::Display;
+use std::collections::BTreeSet;
+use std::fmt::{Display, FormattingOptions};
+use std::iter::Sum;
 use std::ops::{Add, AddAssign, Mul, Sub};
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
@@ -11,6 +13,9 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
+
+use crate::index::HashValue;
+use crate::knn::Distance;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ParseBytesError;
@@ -54,6 +59,16 @@ impl Add<Bytes> for Bytes {
     type Output = Bytes;
     fn add(self, rhs: Bytes) -> Self::Output {
         Self(self.0 + rhs.0)
+    }
+}
+
+impl Sum<Bytes> for Bytes {
+    fn sum<I: Iterator<Item = Bytes>>(iter: I) -> Self {
+        let mut bb = Bytes(0);
+        for b in iter {
+            bb += b;
+        }
+        bb
     }
 }
 
@@ -236,4 +251,145 @@ pub fn monitor(period: Duration, flag: Arc<AtomicBool>) -> JoinHandle<()> {
             std::thread::sleep(period);
         }
     })
+}
+
+pub trait ByteSize {
+    /// get the size, in bytes, of `Self`
+    fn byte_size(&self) -> Bytes;
+    /// allows to format, recursively, the size of each element
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result;
+
+    fn mem_tree(&self) -> String {
+        let mut s = String::new();
+        let mut fmt = FormattingOptions::new()
+            .alternate(true)
+            .create_formatter(&mut s);
+        self.mem_tree_fmt(&mut fmt).unwrap();
+        s
+    }
+}
+
+impl ByteSize for usize {
+    fn byte_size(&self) -> Bytes {
+        Bytes(std::mem::size_of_val(self))
+    }
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
+}
+impl ByteSize for u32 {
+    fn byte_size(&self) -> Bytes {
+        Bytes(std::mem::size_of_val(self))
+    }
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
+}
+impl ByteSize for f64 {
+    fn byte_size(&self) -> Bytes {
+        Bytes(std::mem::size_of_val(self))
+    }
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
+}
+impl ByteSize for HashValue {
+    fn byte_size(&self) -> Bytes {
+        Bytes(std::mem::size_of_val(self))
+    }
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
+}
+impl ByteSize for Distance {
+    fn byte_size(&self) -> Bytes {
+        Bytes(std::mem::size_of_val(self))
+    }
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
+}
+impl<A, B> ByteSize for (A, B)
+where
+    A: ByteSize,
+    B: ByteSize,
+{
+    fn byte_size(&self) -> Bytes {
+        self.0.byte_size() + self.1.byte_size()
+    }
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let a = self.0.mem_tree_fmt(f);
+        let b = self.0.mem_tree_fmt(f);
+        f.debug_tuple("").field(&a).field(&b).finish()
+    }
+}
+impl<A, B, C> ByteSize for (A, B, C)
+where
+    A: ByteSize,
+    B: ByteSize,
+    C: ByteSize,
+{
+    fn byte_size(&self) -> Bytes {
+        self.0.byte_size() + self.1.byte_size() + self.2.byte_size()
+    }
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let a = self.0.mem_tree_fmt(f);
+        let b = self.1.mem_tree_fmt(f);
+        let c = self.2.mem_tree_fmt(f);
+        f.debug_tuple("").field(&a).field(&b).field(&c).finish()
+    }
+}
+impl<A> ByteSize for Option<A>
+where
+    A: ByteSize,
+{
+    fn byte_size(&self) -> Bytes {
+        if let Some(s) = self {
+            s.byte_size()
+        } else {
+            Bytes(std::mem::size_of_val::<Option<A>>(&None))
+        }
+    }
+
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.byte_size())
+    }
+}
+
+impl<A> ByteSize for Vec<A>
+where
+    A: ByteSize,
+{
+    fn byte_size(&self) -> Bytes {
+        let slf = Bytes(std::mem::size_of_val(self));
+        let data = self.iter().map(|elem| elem.byte_size()).sum::<Bytes>();
+        slf + data
+    }
+
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let mut d = f.debug_list();
+        for elem in self.iter() {
+            d.entry_with(|f| elem.mem_tree_fmt(f));
+        }
+        d.finish()
+    }
+}
+impl<A> ByteSize for BTreeSet<A>
+where
+    A: ByteSize,
+{
+    fn byte_size(&self) -> Bytes {
+        // this is a bit of an approximation, but we don't have access to the internal structure
+        // of the implementation of the b-tree
+        let data = self.iter().map(|elem| elem.byte_size()).sum::<Bytes>();
+        data
+    }
+
+    fn mem_tree_fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let mut d = f.debug_set();
+        for elem in self.iter() {
+            d.entry_with(|f| elem.mem_tree_fmt(f));
+        }
+        d.finish()
+    }
 }
