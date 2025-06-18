@@ -1,5 +1,5 @@
 use core::f64;
-use log::{info, warn};
+use log::{info, kv::Key, warn};
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -289,8 +289,25 @@ impl ByteSize for Repetition {
 }
 
 impl Repetition {
+    fn sample<R: Rng>(
+        ts: &WindowedTimeseries,
+        quantization_width: f64,
+        max_k: usize,
+        fft_data: &FFTData,
+        rng: &mut R,
+        tmp: &mut Vec<(HashValue, u32)>,
+    ) -> (Hasher, Self) {
+        let hasher = Hasher::new(ts.w, quantization_width, rng);
+        tmp.resize(ts.num_subsequences(), (HashValue::default(), 0u32));
+        hasher.hash(ts, fft_data, tmp, max_k);
+        tmp.par_sort_unstable_by_key(|pair| pair.0);
+        (
+            hasher,
+            Self::from_pairs(ts.num_subsequences(), tmp.iter().copied()),
+        )
+    }
+
     fn from_pairs<I: IntoIterator<Item = (HashValue, u32)>>(n: usize, pairs: I) -> Self {
-        dbg!(Bytes::max_allocated());
         let mut hashes = Vec::with_capacity(n);
         let mut indices = Vec::with_capacity(n);
         for (h, idx) in pairs {
@@ -302,10 +319,6 @@ impl Repetition {
         }
         hashes.shrink_to_fit();
         indices.shrink_to_fit();
-        dbg!(
-            Bytes::max_allocated(),
-            hashes.byte_size() + indices.byte_size()
-        );
         Self { hashes, indices }
     }
 
@@ -320,6 +333,10 @@ impl Repetition {
 
     fn get_indices(&self) -> &[u32] {
         &self.indices
+    }
+
+    fn collisions(&self, prefix: usize, prev_prefix: Option<usize>) -> CollisionEnumerator {
+        CollisionEnumerator::new(&self, prefix, prev_prefix)
     }
 }
 
@@ -393,7 +410,6 @@ impl LSHIndex {
         max_memory: Bytes,
         seed: u64,
     ) -> Self {
-        dbg!(Bytes::max_allocated());
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         let sqrt_n = (ts.num_subsequences() as f64).sqrt().ceil() as usize;
 
@@ -403,7 +419,6 @@ impl LSHIndex {
                     .expect("unable to parse ATTIMO_QUANTIZATION as a float")
             })
             .unwrap_or_else(|_| Hasher::compute_width(ts, fft_data, exclusion_zone, &mut rng));
-        dbg!(Bytes::max_allocated());
 
         let mut max_repetitions = 0;
         while Self::required_memory(ts, max_repetitions) < max_memory {
@@ -421,26 +436,26 @@ impl LSHIndex {
         let t = Instant::now();
         let mut qw_lower: Option<f64> = None;
         let mut qw_upper: Option<f64> = None;
+        let mut tmp = Vec::new();
         loop {
-            dbg!(Bytes::max_allocated());
             if let (Some(lower), Some(upper)) = (qw_lower, qw_upper) {
                 qw = (upper + lower) / 2.0;
             }
-            let mut slf = Self {
-                rng: rng.clone(),
-                quantization_width: qw,
-                functions: Vec::new(),
-                repetitions: Vec::new(),
-                repetitions_setup_time: Duration::from_secs(0),
-                max_repetitions,
-            };
 
-            let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS, K);
+            // estimate collisions without allocating all the memory at once
+            let mut collision_estimates = (0..8)
+                .map(|_| {
+                    Repetition::sample(ts, qw, K, fft_data, &mut rng, &mut tmp)
+                        .1
+                        .collisions(K, None)
+                        .estimate_num_collisions(exclusion_zone)
+                })
+                .collect::<Vec<usize>>();
+            collision_estimates.sort();
+            let median_collisions = collision_estimates[collision_estimates.len() / 2];
+            let avg_collisions =
+                collision_estimates.iter().sum::<usize>() as f64 / collision_estimates.len() as f64;
 
-            // let enumerator = slf.collisions(0, K, None);
-            // let num_collisions = enumerator.estimate_num_collisions(exclusion_zone);
-            let (min_collisions, median_collisions, max_collisions, avg_collisions) =
-                slf.collisions_stats(K, exclusion_zone);
             info!(
                 "Num collisions with quantization_width={}: {} median {} average (lower {:?}, upper {:?})",
                 qw, median_collisions, avg_collisions, qw_lower, qw_upper
@@ -459,6 +474,17 @@ impl LSHIndex {
                 info!("Halving the quantization width {}", qw);
             } else {
                 info!("Settling on quantization width {}", qw);
+
+                let mut slf = Self {
+                    rng: rng.clone(),
+                    quantization_width: qw,
+                    functions: Vec::new(),
+                    repetitions: Vec::new(),
+                    repetitions_setup_time: Duration::from_secs(0),
+                    max_repetitions,
+                };
+                let avg_dur = slf.add_repetitions(ts, fft_data, INITIAL_REPETITIONS, K);
+
                 slf.repetitions_setup_time = avg_dur;
                 observe!(0, 0, "profile/index_setup", t.elapsed().as_secs_f64());
                 return slf;
@@ -479,45 +505,30 @@ impl LSHIndex {
             total_repetitions,
             self.get_repetitions()
         );
-        let dimension = ts.w;
-        let n = ts.num_subsequences();
         let starting_repetitions = self.get_repetitions();
         let new_repetitions = total_repetitions - starting_repetitions;
-        let max_repetitions_in_memory = self.max_repetitions;
         log::debug!("Adding {} new repetitions", new_repetitions);
-        dbg!(Bytes::max_allocated());
-
-        let new_hashers: Vec<Hasher> = (0..new_repetitions)
-            .map(|_| Hasher::new(dimension, self.quantization_width, &mut self.rng))
-            .collect();
 
         let timer = Instant::now();
         let mut tmp = Vec::new();
-        let new_reps = new_hashers.iter().enumerate().map(|(i, hasher)| {
-            let rep_idx = starting_repetitions + i;
-            tmp.resize(n, (HashValue::default(), 0u32));
-            dbg!(Bytes::max_allocated());
-            hasher.hash(ts, fft_data, &mut tmp, max_k);
-            dbg!(Bytes::max_allocated());
-            tmp.par_sort_unstable_by_key(|pair| pair.0);
-            if rep_idx > max_repetitions_in_memory {
-                log::error!(
-                    "Too many repetitions, maximum is {}",
-                    max_repetitions_in_memory
-                );
-                panic!("Too many repetitions");
-            } else {
-                Repetition::from_pairs(tmp.len(), tmp.iter().copied())
-            }
-        });
-        self.repetitions.extend(new_reps);
+        for _ in 0..new_repetitions {
+            let (hasher, repetition) = Repetition::sample(
+                ts,
+                self.quantization_width,
+                max_k,
+                fft_data,
+                &mut self.rng,
+                &mut tmp,
+            );
+            self.functions.push(hasher);
+            self.repetitions.push(repetition);
+        }
+
         let elapsed = timer.elapsed();
         log::debug!("Added {} new repetitions in {:?}", new_repetitions, elapsed);
-        dbg!(Bytes::max_allocated());
-        dbg!(self.repetitions.byte_size());
         let average_time = elapsed / new_repetitions as u32;
 
-        self.functions.extend(new_hashers);
+        // self.functions.extend(new_hashers);
 
         average_time
     }
@@ -581,7 +592,6 @@ impl LSHIndex {
             .map(|rep| {
                 let c = CollisionEnumerator::new(rep, prefix, None)
                     .estimate_num_collisions(exclusion_zone);
-                dbg!(c);
                 c
             })
             .sum::<usize>() as f64;
@@ -620,7 +630,7 @@ impl LSHIndex {
     ) -> CollisionEnumerator {
         assert!(prefix > 0 && prefix <= K, "illegal prefix {}", prefix);
         let rep = &self.repetitions[repetition];
-        CollisionEnumerator::new(rep, prefix, prev_prefix)
+        rep.collisions(prefix, prev_prefix)
     }
 
     /// Estimates, for each level in the given repetition index, the number of
