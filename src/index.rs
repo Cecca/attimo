@@ -289,12 +289,23 @@ impl ByteSize for Repetition {
 }
 
 impl Repetition {
-    fn from_pairs<I: IntoIterator<Item = (HashValue, u32)>>(pairs: I) -> Self {
-        let (hashes, indices): (Vec<HashValue>, Vec<u32>) = pairs
-            .into_iter()
-            // remove the overflown subsequences
-            .filter(|(_, idx)| *idx != u32::MAX)
-            .unzip();
+    fn from_pairs<I: IntoIterator<Item = (HashValue, u32)>>(n: usize, pairs: I) -> Self {
+        dbg!(Bytes::max_allocated());
+        let mut hashes = Vec::with_capacity(n);
+        let mut indices = Vec::with_capacity(n);
+        for (h, idx) in pairs {
+            if idx != u32::MAX {
+                // remove subsequences with overflown hash
+                hashes.push(h);
+                indices.push(idx);
+            }
+        }
+        hashes.shrink_to_fit();
+        indices.shrink_to_fit();
+        dbg!(
+            Bytes::max_allocated(),
+            hashes.byte_size() + indices.byte_size()
+        );
         Self { hashes, indices }
     }
 
@@ -399,10 +410,11 @@ impl LSHIndex {
             max_repetitions += 1;
         }
         info!(
-            "initial quantization width: {}, maximum repetitions: {} ({})",
+            "initial quantization width: {}, maximum repetitions: {} ({}, {} for 8 reps)",
             qw,
             max_repetitions,
-            Self::required_memory(ts, max_repetitions)
+            Self::required_memory(ts, max_repetitions),
+            Self::required_memory(ts, 8),
         );
 
         // Try to build the index until we get a version that has collisions at the deepest level
@@ -472,7 +484,8 @@ impl LSHIndex {
         let starting_repetitions = self.get_repetitions();
         let new_repetitions = total_repetitions - starting_repetitions;
         let max_repetitions_in_memory = self.max_repetitions;
-        log::trace!("Adding {} new repetitions", new_repetitions);
+        log::debug!("Adding {} new repetitions", new_repetitions);
+        dbg!(Bytes::max_allocated());
 
         let new_hashers: Vec<Hasher> = (0..new_repetitions)
             .map(|_| Hasher::new(dimension, self.quantization_width, &mut self.rng))
@@ -483,7 +496,9 @@ impl LSHIndex {
         let new_reps = new_hashers.iter().enumerate().map(|(i, hasher)| {
             let rep_idx = starting_repetitions + i;
             tmp.resize(n, (HashValue::default(), 0u32));
+            dbg!(Bytes::max_allocated());
             hasher.hash(ts, fft_data, &mut tmp, max_k);
+            dbg!(Bytes::max_allocated());
             tmp.par_sort_unstable_by_key(|pair| pair.0);
             if rep_idx > max_repetitions_in_memory {
                 log::error!(
@@ -492,12 +507,14 @@ impl LSHIndex {
                 );
                 panic!("Too many repetitions");
             } else {
-                Repetition::from_pairs(tmp.iter().copied())
+                Repetition::from_pairs(tmp.len(), tmp.iter().copied())
             }
         });
         self.repetitions.extend(new_reps);
         let elapsed = timer.elapsed();
         log::debug!("Added {} new repetitions in {:?}", new_repetitions, elapsed);
+        dbg!(Bytes::max_allocated());
+        dbg!(self.repetitions.byte_size());
         let average_time = elapsed / new_repetitions as u32;
 
         self.functions.extend(new_hashers);
