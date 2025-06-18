@@ -7,7 +7,6 @@ use attimo::timeseries::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::cell::RefCell;
-use std::time::Instant;
 use thread_local::ThreadLocal;
 
 fn seq_by(min: usize, max: usize, by: usize) -> Vec<usize> {
@@ -277,7 +276,6 @@ fn main() -> Result<()> {
     let exclusion_zone = w;
     let average_distance = ts.average_pairwise_distance(1234, exclusion_zone);
 
-    let timer = Instant::now();
     let mut mp = vec![f64::INFINITY; ts.num_subsequences()];
     let mut indices = vec![0; ts.num_subsequences()];
 

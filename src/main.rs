@@ -51,7 +51,7 @@ struct Config {
     /// seed for the psudorandom number generator
     pub seed: u64,
 
-    #[cfg(pprof)]
+    #[cfg(feature = "pprof")]
     #[argh(switch)]
     /// profile the code while running, and save a `profile.pb` file to open with pprof
     pub profile: bool,
@@ -111,7 +111,7 @@ fn main() -> Result<()> {
         ts.count_flat(),
     );
 
-    #[cfg(pprof)]
+    #[cfg(feature = "pprof")]
     let _profiler = if config.profile {
         use pprof::ProfilerGuard;
         // The profile will be saved on drop
@@ -177,12 +177,12 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-#[cfg(pprof)]
+#[cfg(feature = "pprof")]
 struct Profiler<'a> {
     profiler: ProfilerGuard<'a>,
 }
 
-#[cfg(pprof)]
+#[cfg(feature = "pprof")]
 impl<'a> Profiler<'a> {
     fn start() -> Self {
         log::info!("Start profiler");
@@ -195,7 +195,7 @@ impl<'a> Profiler<'a> {
     }
 }
 
-#[cfg(pprof)]
+#[cfg(feature = "pprof")]
 impl<'a> Drop for Profiler<'a> {
     fn drop(&mut self) {
         use pprof::protos::Message;

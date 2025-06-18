@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{prelude::*, BufRead, BufReader},
+    io::{BufRead, BufReader},
     sync::Arc,
     time::Instant,
 };
@@ -74,7 +74,7 @@ fn load_penguin_ts(w: usize, n: usize) -> WindowedTimeseries {
 
 fn load_penguin_raw() -> Vec<f64> {
     let path = "data/penguin.txt";
-    let mut file = BufReader::new(File::open(path).unwrap());
+    let file = BufReader::new(File::open(path).unwrap());
     let mut res = Vec::new();
     for line in file.lines() {
         let line = line.unwrap();

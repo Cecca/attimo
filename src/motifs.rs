@@ -297,7 +297,7 @@ mod test {
     fn run_motif_test(
         ts: Arc<WindowedTimeseries>,
         k: usize,
-        repetitions: usize,
+        _repetitions: usize,
         seed: u64,
         ground_truth: Option<Vec<(usize, usize, f64)>>,
     ) {

@@ -1,21 +1,18 @@
 use core::f64;
-use log::{info, kv::Key, warn};
+use log::info;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use std::{
-    fs::File,
-    io::{prelude::*, BufReader, BufWriter},
     mem::size_of,
     ops::Range,
-    path::PathBuf,
     time::{Duration, Instant},
 };
 
 use crate::{
     allocator::{ByteSize, Bytes},
-    distance::{zeucl, zeucl_threshold},
+    distance::zeucl_threshold,
     knn::Distance,
     observe::*,
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
@@ -335,7 +332,7 @@ impl Repetition {
         &self.indices
     }
 
-    fn collisions(&self, prefix: usize, prev_prefix: Option<usize>) -> CollisionEnumerator {
+    fn collisions(&self, prefix: usize, prev_prefix: Option<usize>) -> CollisionEnumerator<'_> {
         CollisionEnumerator::new(&self, prefix, prev_prefix)
     }
 }
@@ -627,73 +624,10 @@ impl LSHIndex {
         repetition: usize,
         prefix: usize,
         prev_prefix: Option<usize>,
-    ) -> CollisionEnumerator {
+    ) -> CollisionEnumerator<'_> {
         assert!(prefix > 0 && prefix <= K, "illegal prefix {}", prefix);
         let rep = &self.repetitions[repetition];
         rep.collisions(prefix, prev_prefix)
-    }
-
-    /// Estimates, for each level in the given repetition index, the number of
-    /// non-trivial collisions
-    fn collision_profile_at(&self, repetition_idx: usize, exclusion_zone: usize) -> Vec<f64> {
-        let repetition = &self.repetitions[repetition_idx];
-        let hashes = repetition.get_hashes();
-        let indices = repetition.get_indices();
-
-        // let mut counts = vec![0.0; K + 1];
-        // counts[0] = f64::INFINITY;
-
-        // First we count, checking for overlaps, the collisions at the longest prefix, under the
-        // assumption that most trivial collisions happen at the longest prefix
-        let counts = (0..=K)
-            .into_par_iter()
-            .map(|prefix| {
-                if prefix == 0 {
-                    return (f64::INFINITY, 0);
-                }
-                let mut cnt = 0;
-                let mut trivial = 0;
-                let mut start = 0;
-                while start < hashes.len() {
-                    let end = start
-                        + hashes[start..].partition_point(|h| h.prefix_eq(&hashes[start], prefix));
-                    assert!(start < end);
-                    if prefix == K {
-                        let n = end - start;
-                        let estimate_collisions = n * (n - 1) / 2;
-                        let mut cnt_collisions = 0;
-                        for i in start..end {
-                            for j in start..i {
-                                if !indices[i].overlaps(indices[j], exclusion_zone) {
-                                    cnt_collisions += 1;
-                                } else {
-                                    trivial += 1;
-                                }
-                            }
-                        }
-                        cnt += cnt_collisions;
-                    } else {
-                        let n = end - start;
-                        let estimate_collisions = n * (n - 1) / 2;
-                        cnt += estimate_collisions;
-                    }
-                    start = end;
-                }
-                (cnt as f64, trivial)
-            })
-            .collect::<Vec<(f64, usize)>>();
-
-        let trivial = counts.last().unwrap().1;
-        let (mut counts, _): (Vec<f64>, Vec<usize>) = counts.into_iter().unzip();
-
-        // Adjust the estimates by removing trivial collisions, except for the last one where
-        // collisions have been counted exactly
-        for c in counts[1..K].iter_mut() {
-            *c -= trivial as f64;
-            assert!(*c >= 0.0);
-        }
-
-        counts
     }
 
     fn collision_profile(&self, exclusion_zone: usize) -> Vec<f64> {
@@ -1050,7 +984,7 @@ fn test_collision_probability() {
         for &j in &ids {
             if i < j {
                 dbg!(i, j);
-                let d = Distance(zeucl(&ts, i, j));
+                let d = Distance(crate::distance::zeucl(&ts, i, j));
                 let p = index.collision_probability_at(d);
 
                 dbg!(d);

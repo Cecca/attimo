@@ -291,10 +291,6 @@ impl TopK {
         assert!(self.top.len() <= self.threshold);
     }
 
-    fn len(&self) -> usize {
-        self.top.len()
-    }
-
     fn cleanup(&mut self) {
         let mut clean: BTreeSet<Motiflet> = BTreeSet::new();
         for motiflet in self.top.iter() {
@@ -911,7 +907,7 @@ impl MotifletsIterator {
                 );
                 if self.stop_on_collisions_threshold {
                     // emit all the partial candidates
-                    for (supp, queue) in self.top.iter_mut().enumerate() {
+                    for (_, queue) in self.top.iter_mut().enumerate() {
                         self.to_return.extend(queue.emit(|_| true));
                         queue.disable();
                     }

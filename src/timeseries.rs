@@ -5,7 +5,6 @@ use core::f64;
 use log::info;
 use rand_distr::num_traits::Zero;
 use rayon::prelude::*;
-use rustfft::num_traits::Saturating;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::cell::RefCell;
 use std::sync::Arc;
