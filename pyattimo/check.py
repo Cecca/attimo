@@ -8,7 +8,7 @@ import math
 
 logging.basicConfig(level=logging.DEBUG)
 
-dataset = "lorenzAttractorsLONG"
+dataset = "stator_winding"
 path = f"data/{dataset}.mat"
 
 print("load_data")
@@ -23,11 +23,11 @@ start = time.time()
 m_iter = pyattimo.MotifletsIterator(
     ts,
     w,
-    delta=0.5, 
+    delta=0.1, 
     support=9, 
     max_memory="20GB", 
     exclusion_zone=w//2, 
-    stop_on_threshold=True, 
+    stop_on_threshold=False, 
     fraction_threshold=math.log(n)/n,
     observability_file="obs.csv",
 )
