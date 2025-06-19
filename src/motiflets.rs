@@ -1,7 +1,7 @@
 use crate::allocator::*;
 use crate::distance::zeucl_threshold;
 use crate::graph::{AdjacencyGraph, GraphStats};
-use crate::index::{LSHIndexStats, INITIAL_REPETITIONS};
+use crate::index::LSHIndexStats;
 use crate::observe::*;
 use crate::timeseries::{overlap_count_iter, TimeseriesStats};
 use crate::{
@@ -70,9 +70,9 @@ fn k_extents_bf(
     (compute_extents(ts, &ret), ret)
 }
 
-// Find the (approximate) motiflets by brute force: for each subsequence find its
-// k-nearest neighbors, compute their extents, and pick the neighborhood with the
-// smallest extent.
+/// Find the (approximate) motiflets by brute force: for each subsequence find its
+/// k-nearest neighbors, compute their extents, and pick the neighborhood with the
+/// smallest extent.
 pub fn brute_force_motiflets(
     ts: &WindowedTimeseries,
     k: usize,
@@ -429,8 +429,6 @@ pub struct MotifletsIterator {
     prefix: usize,
     /// the previous prefix
     previous_prefix: Option<usize>,
-    /// the repetitions done at the previous prefix
-    previous_prefix_repetitions: Option<usize>,
     /// some statistics on the execution
     stats: MotifletsIteratorStats,
     collisions_threshold: usize,
@@ -552,7 +550,6 @@ impl MotifletsIterator {
             // this way we avoid meaningless repetitions that have no collisions
             prefix: first_meaningful_prefix,
             previous_prefix: None,
-            previous_prefix_repetitions: None,
             stats,
             collisions_threshold,
             stop_on_collisions_threshold: false,
@@ -607,12 +604,7 @@ impl MotifletsIterator {
         loop {
             let rng = &mut self.rng;
             let t = Instant::now();
-            let check_prefix = rep < self.previous_prefix_repetitions.unwrap_or(0);
-            let maybe_cnt = enumerator.next(
-                self.pairs_buffer.as_mut_slice(),
-                exclusion_zone,
-                check_prefix,
-            );
+            let maybe_cnt = enumerator.next(self.pairs_buffer.as_mut_slice(), exclusion_zone);
             #[rustfmt::skip]
             observe!(rep, prefix, "profile/repetition/update_graph/enumerator_next", t.elapsed().as_secs_f64());
             if maybe_cnt.is_none() {
@@ -707,7 +699,6 @@ impl MotifletsIterator {
         let timer = Instant::now();
         let prefix = self.prefix;
         let previous_prefix = self.previous_prefix;
-        let previous_prefix_repetitions = self.previous_prefix_repetitions;
         let rep = self.rep;
 
         let mut time_extents = Duration::from_secs(0);
@@ -766,7 +757,6 @@ impl MotifletsIterator {
                         rep + 1, // the number of repetitions we did is the repetition index + 1
                         prefix,
                         previous_prefix,
-                        previous_prefix_repetitions,
                     );
                     fp < self.delta
                 });
@@ -791,95 +781,97 @@ impl MotifletsIterator {
         observe!(self.rep, self.prefix, "profile/repetition/emit_confirmed", timer.elapsed().as_secs_f64());
     }
 
-    pub fn pick_next_repetition(&mut self) {
-        // We consider two cases:
-        //  - The current best candidate can be confirmed with more repetitions on
-        //    this level: instantiate the repetitions and keep the prefix length as it is
-        //  - We need a shorter prefix. In this case rather than jumping to the
-        //    shorter prefix (which at times is just 1) we shorten the prefix
-        //    just by one, in the hope of discovering better candidates
-        let next_prefix = if (self.rep + 1 < INITIAL_REPETITIONS && self.previous_prefix.is_none())
-            || self.rep + 1
-                < self
-                    .previous_prefix_repetitions
-                    .unwrap_or(INITIAL_REPETITIONS)
-        {
-            // stay at the current prefix for the first few repetitions, to allow discovery
-            // of at least a few pairs
-            debug!("Still in the initial repetitions, continuing with the current prefix");
-            self.prefix
-        } else if let Some(first_unconfirmed) = self.next_to_confirm {
-            let (best_prefix, _required_repetitions) = if first_unconfirmed.is_finite() {
-                let costs = self.index_stats.costs_to_confirm(
-                    self.prefix,
-                    first_unconfirmed,
-                    self.delta,
-                    &self.index,
-                );
-                debug!("Costs: {:?}", costs);
-                let (best_prefix, (best_cost, required_repetitions)) = costs
-                    .iter()
-                    .enumerate()
-                    .min_by(|(_, tup1), (_, tup2)| tup1.0.total_cmp(&tup2.0))
-                    .unwrap();
-                if best_cost.is_infinite() {
-                    warn!("Best prefix would be 0, continuing on this level");
-                    (self.prefix, self.index_stats.max_repetitions)
-                } else {
-                    debug!(
-                        "Best prefix to confirm {} is {} with {} repetitions with cost {}",
-                        first_unconfirmed, best_prefix, required_repetitions, best_cost
-                    );
-                    (best_prefix, *required_repetitions)
-                }
-            } else if self.rep < self.index_stats.max_repetitions {
-                let required_repetitions =
-                    (self.index.get_repetitions() + 32).min(self.index_stats.max_repetitions);
-                warn!(
-                    "No motiflet to confirm, continuing at level {} with new repetitions",
-                    self.prefix
-                );
-                (self.prefix, required_repetitions)
-            } else {
-                warn!(
-                    "No motiflet to confirm and built all repetitions, going to level {}",
-                    self.prefix - 1
-                );
-                (self.prefix - 1, 1)
-            };
-            best_prefix
-        } else {
-            self.prefix
-        };
-        let index_stats = self.index.index_stats();
-        self.stats.index_stats = index_stats;
+    fn repetitions_to_confirm(
+        &self,
+        d: Distance,
+        prefix: usize,
+        prev_prefix: Option<usize>,
+    ) -> (usize, f64) {
+        let mut nreps = 0;
+        let mut fp = 1.0;
+        while fp > self.delta && nreps < self.index.max_repetitions() {
+            fp = self
+                .index
+                .failure_probability(d, nreps, prefix, prev_prefix);
+            nreps += 1;
+        }
+        (nreps, fp)
+    }
 
-        if next_prefix >= self.prefix {
-            // Advance on the current prefix
+    pub fn pick_next_repetition(&mut self) {
+        if self.rep + 1 < self.index.max_repetitions() {
+            // in this case we can potentially add an additional repetition
+
+            let collisions_so_far = self.stats.cnt_candidates;
+            let expected_collisions = self.index_stats.expected_collisions();
             self.rep += 1;
-            debug!("Advancing to repetition {}", self.rep);
-            if self.rep >= self.index.get_repetitions() {
-                let elapsed = self.index.add_repetitions(
-                    &self.ts,
-                    &self.fft_data,
-                    self.rep + 1,
-                    // next_prefix + 1,
-                    self.prefix,
-                );
+
+            // We peek if, using shorter prefixes, we could confirm the next
+            // distance using fewer collisions compared to staying at
+            // the current prefix.
+            let next_prefix = self.next_to_confirm.map(|d| {
+                // How many further collisions are we going to do on this prefix
+                // until we confirm the distance at d?
+                let expected_reps_at_level = self
+                    .repetitions_to_confirm(d, self.prefix, self.previous_prefix)
+                    .0;
+                let further_collisions_at_level =
+                    expected_reps_at_level as f64 * expected_collisions[self.prefix];
+
+                if let Some((_collisions, next_prefix)) = (1..self.prefix)
+                    .filter_map(|prefix| {
+                        // Here we consider the repetitions that are needed to confirm
+                        // `d` at a shorter prefix `prefix`. If this number of repetitions
+                        // is smaller than the current one and the number of collisions
+                        // is also smaller than the expected one we would see if we
+                        // stayed at the current level, then we propose this prefix
+                        // as a candidate
+                        let est_reps = self.repetitions_to_confirm(d, prefix, Some(self.prefix)).0;
+                        // the overall number of expected collisions.
+                        // We remove the number of collisions seen so far, since those are skipped.
+                        let collisions_at_prefix = est_reps as f64 * expected_collisions[prefix]
+                            - collisions_so_far as f64;
+                        if est_reps <= self.rep
+                            && collisions_at_prefix < further_collisions_at_level
+                        {
+                            Some((collisions_at_prefix, prefix))
+                        } else {
+                            None
+                        }
+                    })
+                    // Then we pick the minimum
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+                {
+                    // If there is a better prefix then we use it
+                    next_prefix
+                } else {
+                    // Otherwise we stay at the current one
+                    self.prefix
+                }
+            });
+            if let Some(next_prefix) = next_prefix {
+                // Adjust things if we shorten the prefix
+                if next_prefix < self.prefix {
+                    self.previous_prefix.replace(self.prefix);
+                    self.rep = 0;
+                    self.prefix = next_prefix;
+                }
+            }
+            if self.rep + 1 > self.index.get_repetitions() {
+                let elapsed =
+                    self.index
+                        .add_repetitions(&self.ts, &self.fft_data, self.rep + 1, self.prefix);
                 #[rustfmt::skip]
-                    observe!(self.rep, self.prefix, "repetition_setup_s", elapsed.as_secs_f64());
-                #[rustfmt::skip]
-                    observe!(self.rep, self.prefix, "repetition_setup_estimate_s", self.index_stats.repetition_setup_estimate());
+                observe!(self.rep, self.prefix, "repetition_setup_s", elapsed.as_secs_f64());
             }
         } else {
-            // Go to the suggested prefix, and start from the first repetition there
-            self.previous_prefix_repetitions.replace(self.rep + 1);
             self.rep = 0;
             self.previous_prefix.replace(self.prefix);
             self.prefix -= 1;
-            debug!("Going to prefix {}", self.prefix);
+            assert!(self.prefix > 0);
         }
-        assert!(self.prefix > 0);
+        info!("Going to prefix {} repetition {}", self.prefix, self.rep);
+        self.stats.index_stats = self.index.index_stats();
     }
 
     pub fn next_interruptible<E, F: FnMut() -> Result<(), E>>(
@@ -932,8 +924,16 @@ impl MotifletsIterator {
             debug!("[{}@{}] {:#?}", self.rep, self.prefix, self.stats);
             // debug!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             debug!(
-                "[{}@{}] First non confirmed distance {:?}",
-                self.rep, self.prefix, self.next_to_confirm
+                "[{}@{}] First non confirmed distance {:?} (fp={:?})",
+                self.rep,
+                self.prefix,
+                self.next_to_confirm,
+                self.next_to_confirm.map(|d| self.index.failure_probability(
+                    d,
+                    self.rep,
+                    self.prefix,
+                    self.previous_prefix
+                ))
             );
             self.stats.observe(self.rep, self.prefix);
 
@@ -975,7 +975,7 @@ mod test {
             Arc::clone(&ts),
             k,
             1,
-            Bytes::gbytes(4),
+            Bytes::gbytes(1),
             failure_probability,
             exclusion_zone,
             seed,
@@ -1062,7 +1062,7 @@ mod test {
             Arc::clone(&ts),
             grounds.last().unwrap().len(),
             1,
-            Bytes::gbytes(8),
+            Bytes::gbytes(1),
             0.01,
             exclusion_zone,
             1234,

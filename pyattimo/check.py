@@ -8,14 +8,14 @@ import math
 
 logging.basicConfig(level=logging.DEBUG)
 
-dataset = "stator_winding"
+dataset = "FingerFlexionECoG"
 path = f"data/{dataset}.mat"
 
 print("load_data")
 ts = scipy.io.loadmat(path)[dataset].flatten()
 print(ts.shape)
 n = ts.shape[0]
-w = 8192
+w = 4096
 k = 9
 
 
@@ -23,7 +23,7 @@ start = time.time()
 m_iter = pyattimo.MotifletsIterator(
     ts,
     w,
-    delta=0.1, 
+    delta=0.5, 
     support=9, 
     max_memory="20GB", 
     exclusion_zone=w//2, 
