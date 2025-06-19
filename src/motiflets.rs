@@ -474,15 +474,12 @@ impl MotifletsIterator {
         _show_progress: bool,
     ) -> Self {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        dbg!(Bytes::max_allocated());
         let start = Instant::now();
         let n = ts.num_subsequences();
         let fft_data = FFTData::new(&ts);
-        dbg!(Bytes::max_allocated());
 
         let mem_gauge = MemoryGauge::allocated();
         let index = LSHIndex::from_ts(&ts, exclusion_zone, &fft_data, max_memory, seed);
-        dbg!(Bytes::max_allocated());
         debug!(
             "Computed initial hash values in {:?}, {}",
             start.elapsed(),
@@ -496,7 +493,6 @@ impl MotifletsIterator {
 
         // get some stats about distances
         let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
-        dbg!(Bytes::max_allocated());
 
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 1 << 20];
 
@@ -522,7 +518,6 @@ impl MotifletsIterator {
         ) {
             top[motiflet.support()].insert(motiflet);
         }
-        dbg!(Bytes::max_allocated());
 
         stats.observe(0, 0);
 
@@ -674,7 +669,7 @@ impl MotifletsIterator {
                     cnt_edges += 1;
                 }
             }
-            debug!(
+            trace!(
                 "(rep: {} prefix: {}) inserted {} edges (added {}, stats {:?})",
                 rep,
                 prefix,
