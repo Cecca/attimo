@@ -5,6 +5,9 @@ authors = ["Matteo Ceccarello <matteo.ceccarello@unipd.it>"]
 edition = "2021"
 include = ["/benches", "/examples", "/src", "/*.toml"]
 
+[workspace]
+members = ["pyattimo"]
+
 [dependencies]
 anyhow = "1.0"
 rand = "0.8"
