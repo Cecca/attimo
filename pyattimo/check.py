@@ -20,15 +20,16 @@ def get_datasets():
     ).json()
     for f in resp["tree"]:
         path = f["path"]
-        url = f["url"]
         if "momp" in path and path.endswith(".mat"):
             name = pathlib.Path(path).name.strip(".mat")
+            url = f"https://github.com/patrickzib/motiflets/raw/refs/heads/pyattimo_refactor/datasets/momp/{name}.mat"
             fname = pathlib.Path("data") / (name + ".mat")
             if not fname.is_file():
                 print("downloading", name)
-                remote_file = requests.get(url)
+                remote_file = requests.get(url, stream=True)
                 with open(fname, "wb") as fp:
-                    fp.write(remote_file.content)
+                    for chunk in remote_file.iter_content(chunk_size=1024):
+                        fp.write(chunk)
             datasets.append(name)
     return datasets
 
