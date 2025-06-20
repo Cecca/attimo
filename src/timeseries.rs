@@ -234,7 +234,7 @@ impl WindowedTimeseries {
         use rand::prelude::*;
         use rand_distr::Uniform;
         use rand_xoshiro::Xoshiro256PlusPlus;
-        info!("Computing average pairwise distance");
+        log::debug!("Computing average pairwise distance");
 
         const SAMPLES: usize = 1000;
         let uniform = Uniform::new(0, self.num_subsequences());

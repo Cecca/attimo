@@ -5,7 +5,7 @@ use crate::index::LSHIndexStats;
 use crate::observe::*;
 use crate::timeseries::{overlap_count_iter, TimeseriesStats};
 use crate::{
-    index::{IndexStats, LSHIndex},
+    index::LSHIndex,
     knn::*,
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
 };
@@ -421,7 +421,7 @@ pub struct MotifletsIterator {
     delta: f64,
     exclusion_zone: usize,
     index: LSHIndex,
-    index_stats: IndexStats,
+    // index_stats: IndexStats,
     pairs_buffer: Vec<(u32, u32, Distance)>,
     /// the current repetition
     rep: usize,
@@ -486,11 +486,6 @@ impl MotifletsIterator {
             mem_gauge.measure()
         );
 
-        let index_stats = index.stats(&ts, exclusion_zone);
-        info!("Pools stats: {:?}", index_stats);
-        let first_meaningful_prefix = index_stats.first_meaningful_prefix();
-        assert!(first_meaningful_prefix > 0);
-
         // get some stats about distances
         let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
 
@@ -539,11 +534,10 @@ impl MotifletsIterator {
             delta,
             exclusion_zone,
             index,
-            index_stats,
             pairs_buffer,
             rep: 0,
             // this way we avoid meaningless repetitions that have no collisions
-            prefix: first_meaningful_prefix,
+            prefix: crate::index::K,
             previous_prefix: None,
             stats,
             collisions_threshold,
@@ -679,7 +673,7 @@ impl MotifletsIterator {
             );
             time_update_graph += t_graph.elapsed();
         } // while there are collisions
-        log::info!("{}", self.mem_tree());
+        log::debug!("{}", self.mem_tree());
         #[rustfmt::skip]
         observe!(rep, prefix, "profile/repetition/update_graph/distance_computation", time_distance_computation.as_secs_f64());
         #[rustfmt::skip]
@@ -798,7 +792,7 @@ impl MotifletsIterator {
             // in this case we can potentially add an additional repetition
 
             let collisions_so_far = self.stats.cnt_candidates;
-            let expected_collisions = self.index_stats.expected_collisions();
+            let expected_collisions = self.index.collision_profile();
             self.rep += 1;
 
             // We peek if, using shorter prefixes, we could confirm the next
@@ -865,7 +859,7 @@ impl MotifletsIterator {
             self.prefix -= 1;
             assert!(self.prefix > 0);
         }
-        info!("Going to prefix {} repetition {}", self.prefix, self.rep);
+        debug!("Going to prefix {} repetition {}", self.prefix, self.rep);
         self.stats.index_stats = self.index.index_stats();
     }
 
@@ -910,8 +904,6 @@ impl MotifletsIterator {
             let repetition_elapsed = timer.elapsed();
             #[rustfmt::skip]
             observe!(self.rep, self.prefix, "repetition_elapsed_s", repetition_elapsed.as_secs_f64());
-            #[rustfmt::skip]
-            observe!(self.rep, self.prefix, "repetition_estimate_s", self.index_stats.repetition_cost_estimate(self.prefix));
             #[rustfmt::skip]
             observe!(self.rep, self.prefix, "allocated_bytes", Bytes::allocated().0);
 

@@ -1,5 +1,5 @@
 use core::f64;
-use log::info;
+use log::debug;
 use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -12,7 +12,6 @@ use std::{
 
 use crate::{
     allocator::{ByteSize, Bytes},
-    distance::zeucl_threshold,
     knn::Distance,
     observe::*,
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
@@ -185,7 +184,7 @@ impl Hasher {
         let n = ts.num_subsequences();
         let subsequence_norm = (ts.w as f64).sqrt();
         let expected_max_dotp = subsequence_norm * (2.0 * (n as f64).ln()).sqrt();
-        info!("Expected max dot product {}", expected_max_dotp);
+        debug!("Expected max dot product {}", expected_max_dotp);
         let mut dotps = vec![(0.0, 0); n];
         // let min_width = expected_max_dotp / 128.0;
         // Compute a few dot products
@@ -209,7 +208,7 @@ impl Hasher {
 
         let (perc1, perc99) = (dotps[dotps.len() / 100].0, dotps[99 * dotps.len() / 100].0);
         let min_sample_width = perc1.abs().max(perc99.abs()) / 128.0;
-        info!(
+        debug!(
             "dot product 1perc {} 99perc {} (min sample width: {}) max/min {}/{}",
             dotps[dotps.len() / 100].0,
             dotps[99 * dotps.len() / 100].0,
@@ -217,7 +216,7 @@ impl Hasher {
             dotps.iter().min_by(|a, b| a.0.total_cmp(&b.0)).unwrap().0,
             dotps.iter().max_by(|a, b| a.0.total_cmp(&b.0)).unwrap().0,
         );
-        info!(
+        debug!(
             "width: {} computed in {:?}",
             min_sample_width,
             timer.elapsed()
@@ -335,6 +334,15 @@ impl Repetition {
     fn collisions(&self, prefix: usize, prev_prefix: Option<usize>) -> CollisionEnumerator<'_> {
         CollisionEnumerator::new(&self, prefix, prev_prefix)
     }
+
+    /// the number of collisions for each prefix, _including_ trivial collisions
+    pub fn collision_profile(&self) -> Vec<f64> {
+        let mut out = vec![f64::INFINITY; K + 1];
+        for prefix in 1..=K {
+            out[prefix] = CollisionEnumerator::new(self, prefix, None).count_collisions() as f64;
+        }
+        out
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -358,6 +366,7 @@ pub struct LSHIndex {
     repetitions: Vec<Repetition>,
     repetitions_setup_time: Duration,
     max_repetitions: usize,
+    collision_profile: Vec<f64>,
 }
 
 impl ByteSize for LSHIndex {
@@ -419,7 +428,7 @@ impl LSHIndex {
         while Self::required_memory(ts, max_repetitions) < max_memory {
             max_repetitions += 1;
         }
-        info!(
+        debug!(
             "initial quantization width: {}, maximum repetitions: {} ({}, {} for 8 reps)",
             qw,
             max_repetitions,
@@ -437,38 +446,45 @@ impl LSHIndex {
                 qw = (upper + lower) / 2.0;
             }
 
-            // estimate collisions without allocating all the memory at once
-            let mut collision_estimates = (0..8)
-                .map(|_| {
-                    Repetition::sample(ts, qw, K, fft_data, &mut rng, &mut tmp)
-                        .1
-                        .collisions(K, None)
-                        .estimate_num_collisions(exclusion_zone)
-                })
-                .collect::<Vec<usize>>();
-            collision_estimates.sort();
-            let median_collisions = collision_estimates[collision_estimates.len() / 2];
-            let avg_collisions =
-                collision_estimates.iter().sum::<usize>() as f64 / collision_estimates.len() as f64;
+            let mut longest_prefix_collisions = Vec::<usize>::new();
+            const SAMPLES: usize = 8;
+            let mut collision_profile = vec![0.0f64; K + 1];
+            for _ in 0..SAMPLES {
+                let cp = Repetition::sample(ts, qw, K, fft_data, &mut rng, &mut tmp)
+                    .1
+                    .collision_profile();
+                longest_prefix_collisions.push(*cp.last().unwrap() as usize);
+                for (acc, c) in collision_profile.iter_mut().zip(cp) {
+                    *acc += c;
+                }
+            }
+            for c in collision_profile.iter_mut() {
+                *c /= SAMPLES as f64;
+            }
 
-            info!(
+            longest_prefix_collisions.sort();
+            let median_collisions = longest_prefix_collisions[longest_prefix_collisions.len() / 2];
+            let avg_collisions = collision_profile.last().unwrap();
+
+            debug!(
                 "Num collisions with quantization_width={}: {} median {} average (lower {:?}, upper {:?})",
                 qw, median_collisions, avg_collisions, qw_lower, qw_upper
             );
+            debug!("Collision profile: {:?}", collision_profile);
             if median_collisions < sqrt_n / 2 {
                 // the quantization width is too small
                 qw_lower.replace(qw);
                 qw *= 2.0;
-                info!("Doubling the quantization width to {}", qw);
+                debug!("Doubling the quantization width to {}", qw);
             } else if median_collisions > 10 * sqrt_n
                 && qw_upper.unwrap_or(f64::INFINITY) - qw_lower.unwrap_or(0.0) > 1e-7
             {
                 // the quantization width is too large: too many subsequences
                 qw_upper.replace(qw);
                 qw /= 2.0;
-                info!("Halving the quantization width {}", qw);
+                debug!("Halving the quantization width {}", qw);
             } else {
-                info!("Settling on quantization width {}", qw);
+                debug!("Settling on quantization width {}", qw);
 
                 let mut slf = Self {
                     rng: rng.clone(),
@@ -477,6 +493,7 @@ impl LSHIndex {
                     repetitions: Vec::new(),
                     repetitions_setup_time: Duration::from_secs(0),
                     max_repetitions,
+                    collision_profile,
                 };
                 let avg_dur = slf.add_repetitions(ts, fft_data, 1, K);
 
@@ -577,9 +594,9 @@ impl LSHIndex {
         cur_fail * prev_fail
     }
 
-    pub fn stats(&self, ts: &WindowedTimeseries, exclusion_zone: usize) -> IndexStats {
-        IndexStats::new(self, ts, self.max_repetitions, exclusion_zone)
-    }
+    // pub fn stats(&self, ts: &WindowedTimeseries, exclusion_zone: usize) -> IndexStats {
+    //     IndexStats::new(self, ts, self.max_repetitions, exclusion_zone)
+    // }
 
     /// estimates the average number of collisions at the given prefix,
     /// using _all_ the available repetitions
@@ -631,34 +648,8 @@ impl LSHIndex {
         rep.collisions(prefix, prev_prefix)
     }
 
-    fn collision_profile(&self, exclusion_zone: usize) -> Vec<f64> {
-        let reps = self.get_repetitions();
-        let mut counts = (0..reps)
-            .into_par_iter()
-            .map(|rep| {
-                let mut out = vec![0.0; K + 1];
-                for prefix in 1..=K {
-                    let enumerator = CollisionEnumerator::new(&self.repetitions[rep], prefix, None);
-                    out[prefix] = enumerator.estimate_num_collisions(exclusion_zone) as f64;
-                }
-                out
-            })
-            .reduce(
-                || vec![0.0; K + 1],
-                |mut a, b| {
-                    for (aa, bb) in a.iter_mut().zip(b) {
-                        *aa += bb;
-                    }
-                    a
-                },
-            );
-        counts[0] = f64::INFINITY;
-
-        for acc in counts.iter_mut() {
-            *acc /= reps as f64;
-        }
-
-        counts
+    pub fn collision_profile(&self) -> &[f64] {
+        &self.collision_profile
     }
 }
 
@@ -788,6 +779,17 @@ impl<'index> CollisionEnumerator<'index> {
         }
     }
 
+    /// how many collisions, including trivial ones, occur in this enumerator
+    pub fn count_collisions(mut self) -> usize {
+        let mut cnt = 0;
+        while self.current_range.end < self.repetition.get_hashes().len() {
+            let range = self.current_range.clone();
+            cnt += range.len() * (range.len() - 1) / 2;
+            self.next_range();
+        }
+        cnt
+    }
+
     pub fn estimate_num_collisions(mut self, exclusion_zone: usize) -> usize {
         let mut cnt = 0;
         while self.current_range.end < self.repetition.get_hashes().len() {
@@ -825,150 +827,152 @@ impl<'index> CollisionEnumerator<'index> {
 
 /// A few statistics on the LSH index so to be able to estimate the cost of
 /// running repetitions at a given prefix length.
-#[derive(Debug, Clone)]
-// TODO: Maybe these stats are no longer needed
-pub struct IndexStats {
-    /// the expected number of collisions for each prefix length
-    expected_collisions: Vec<f64>,
-    /// the cost of setting up a repetition
-    repetition_setup_cost: f64,
-    /// the cost of evaluating a collision
-    collision_cost: f64,
-    /// the maximum number of repetitions, fitting in the memory limit
-    pub max_repetitions: usize,
-}
-impl IndexStats {
-    fn new(
-        index: &LSHIndex,
-        ts: &WindowedTimeseries,
-        max_repetitions: usize,
-        exclusion_zone: usize,
-    ) -> Self {
-        assert!(max_repetitions >= 4);
+// #[derive(Debug, Clone)]
+// // TODO: Maybe these stats are no longer needed
+// #[deprecated]
+// pub struct IndexStats {
+//     /// the expected number of collisions for each prefix length
+//     expected_collisions: Vec<f64>,
+//     /// the cost of setting up a repetition
+//     repetition_setup_cost: f64,
+//     /// the cost of evaluating a collision
+//     collision_cost: f64,
+//     /// the maximum number of repetitions, fitting in the memory limit
+//     pub max_repetitions: usize,
+// }
+// impl IndexStats {
+//     fn new(
+//         index: &LSHIndex,
+//         ts: &WindowedTimeseries,
+//         max_repetitions: usize,
+//         exclusion_zone: usize,
+//     ) -> Self {
+//         assert!(max_repetitions >= 4);
 
-        let repetition_setup_cost = index.repetitions_setup_time.as_secs_f64();
-        let t = Instant::now();
-        let expected_collisions = index.collision_profile(exclusion_zone);
-        info!(
-            "Collisions profile ({:?}): {:?}",
-            t.elapsed(),
-            expected_collisions
-        );
+//         let repetition_setup_cost = index.repetitions_setup_time.as_secs_f64();
+//         let t = Instant::now();
+//         let expected_collisions = index.collision_profile();
+//         info!(
+//             "Collisions profile ({:?}): {:?}",
+//             t.elapsed(),
+//             expected_collisions
+//         );
 
-        // get the prefix at which we are going to sample to estimate the
-        // cost of running a repetition
-        let (mut sampling_prefix, _collisions) = expected_collisions
-            .iter()
-            .copied()
-            .enumerate()
-            .rev()
-            .find(|(_, collisions)| *collisions > 1000.0)
-            .unwrap_or((1, f64::INFINITY));
-        sampling_prefix = sampling_prefix.max(1);
-        assert!(sampling_prefix > 0);
+//         // get the prefix at which we are going to sample to estimate the
+//         // cost of running a repetition
+//         let (mut sampling_prefix, _collisions) = expected_collisions
+//             .iter()
+//             .copied()
+//             .enumerate()
+//             .rev()
+//             .find(|(_, collisions)| *collisions > 1000.0)
+//             .unwrap_or((1, f64::INFINITY));
+//         sampling_prefix = sampling_prefix.max(1);
+//         assert!(sampling_prefix > 0);
 
-        let max_samples = 10_000; // cap the maximum work we are going to spend on sampling
-        let mut buf = vec![(0, 0, Distance(0.0)); 65536];
-        let mut enumerator = index.collisions(0, sampling_prefix, None);
-        let mut samples = 0;
-        let timer = Instant::now();
-        while let Some(cnt) = enumerator.next(&mut buf, exclusion_zone) {
-            for (a, b, d) in &mut buf[..cnt] {
-                *d =
-                    Distance(zeucl_threshold(ts, *a as usize, *b as usize, f64::INFINITY).unwrap());
-                samples += 1;
-                if samples > max_samples {
-                    break;
-                }
-            }
-        }
-        let elapsed = timer.elapsed();
-        let collision_cost = elapsed.as_secs_f64() / (samples as f64);
-        assert!(!collision_cost.is_nan());
-        assert!(!repetition_setup_cost.is_nan());
+//         let max_samples = 10_000; // cap the maximum work we are going to spend on sampling
+//         let mut buf = vec![(0, 0, Distance(0.0)); 65536];
+//         let mut enumerator = index.collisions(0, sampling_prefix, None);
+//         let mut samples = 0;
+//         let timer = Instant::now();
+//         while let Some(cnt) = enumerator.next(&mut buf, exclusion_zone) {
+//             for (a, b, d) in &mut buf[..cnt] {
+//                 *d =
+//                     Distance(zeucl_threshold(ts, *a as usize, *b as usize, f64::INFINITY).unwrap());
+//                 samples += 1;
+//                 if samples > max_samples {
+//                     break;
+//                 }
+//             }
+//         }
+//         let elapsed = timer.elapsed();
+//         let collision_cost = elapsed.as_secs_f64() / (samples as f64);
+//         assert!(!collision_cost.is_nan());
+//         assert!(!repetition_setup_cost.is_nan());
 
-        Self {
-            expected_collisions,
-            repetition_setup_cost,
-            collision_cost,
-            max_repetitions,
-        }
-    }
+//         Self {
+//             expected_collisions,
+//             repetition_setup_cost,
+//             collision_cost,
+//             max_repetitions,
+//         }
+//     }
 
-    pub fn expected_collisions(&self) -> &[f64] {
-        &self.expected_collisions
-    }
+//     pub fn expected_collisions(&self) -> &[f64] {
+//         &self.expected_collisions
+//     }
 
-    pub fn first_meaningful_prefix(&self) -> usize {
-        self.expected_collisions
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_prefix, collisions)| **collisions >= 1.0)
-            .unwrap()
-            .0
-            .max(1)
-    }
+//     pub fn first_meaningful_prefix(&self) -> usize {
+//         self.expected_collisions
+//             .iter()
+//             .enumerate()
+//             .rev()
+//             .find(|(_prefix, collisions)| **collisions >= 1.0)
+//             .unwrap()
+//             .0
+//             .max(1)
+//     }
 
-    pub fn repetition_cost_estimate(&self, prefix: usize) -> f64 {
-        self.expected_collisions[prefix] * self.collision_cost
-    }
-    pub fn repetition_setup_estimate(&self) -> f64 {
-        self.repetition_setup_cost
-    }
+//     pub fn repetition_cost_estimate(&self, prefix: usize) -> f64 {
+//         self.expected_collisions[prefix] * self.collision_cost
+//     }
+//     pub fn repetition_setup_estimate(&self) -> f64 {
+//         self.repetition_setup_cost
+//     }
 
-    /// For each prefix length, compute the cost to confirm a pair at
-    /// the given distance.
-    pub fn costs_to_confirm(
-        &self,
-        max_prefix: usize,
-        d: Distance,
-        delta: f64,
-        index: &LSHIndex,
-    ) -> Vec<(f64, usize)> {
-        let index_repetitions = index.get_repetitions();
-        // let p = hasher.collision_probability_at(d.0);
-        self.expected_collisions[..=max_prefix]
-            .iter()
-            .enumerate()
-            .map(|(prefix, collisions)| {
-                if prefix == 0 {
-                    return (f64::INFINITY, 0);
-                }
-                let maxreps = self.max_repetitions;
-                let (nreps, fp) = {
-                    let mut nreps = 0;
-                    let mut fp = 1.0;
-                    while fp > delta && nreps < maxreps {
-                        fp = index.failure_probability(d, nreps, prefix, None);
-                        nreps += 1;
-                    }
-                    (nreps, fp)
-                };
-                if nreps >= maxreps {
-                    log::debug!(
-                        "distance {}, at prefix {} failure probability {} with all repetitions",
-                        d,
-                        prefix,
-                        fp
-                    );
-                    return (f64::INFINITY, maxreps);
-                }
-                let new_repetitions = if nreps <= index_repetitions {
-                    0
-                } else {
-                    nreps - index_repetitions
-                } as f64;
-                (
-                    nreps as f64
-                        * (self.collision_cost * collisions
-                            + self.repetition_setup_cost * new_repetitions),
-                    nreps,
-                )
-            })
-            .collect()
-    }
-}
+//     /// For each prefix length, compute the cost to confirm a pair at
+//     /// the given distance.
+//     #[deprecated]
+//     fn costs_to_confirm(
+//         &self,
+//         max_prefix: usize,
+//         d: Distance,
+//         delta: f64,
+//         index: &LSHIndex,
+//     ) -> Vec<(f64, usize)> {
+//         let index_repetitions = index.get_repetitions();
+//         // let p = hasher.collision_probability_at(d.0);
+//         self.expected_collisions[..=max_prefix]
+//             .iter()
+//             .enumerate()
+//             .map(|(prefix, collisions)| {
+//                 if prefix == 0 {
+//                     return (f64::INFINITY, 0);
+//                 }
+//                 let maxreps = self.max_repetitions;
+//                 let (nreps, fp) = {
+//                     let mut nreps = 0;
+//                     let mut fp = 1.0;
+//                     while fp > delta && nreps < maxreps {
+//                         fp = index.failure_probability(d, nreps, prefix, None);
+//                         nreps += 1;
+//                     }
+//                     (nreps, fp)
+//                 };
+//                 if nreps >= maxreps {
+//                     log::debug!(
+//                         "distance {}, at prefix {} failure probability {} with all repetitions",
+//                         d,
+//                         prefix,
+//                         fp
+//                     );
+//                     return (f64::INFINITY, maxreps);
+//                 }
+//                 let new_repetitions = if nreps <= index_repetitions {
+//                     0
+//                 } else {
+//                     nreps - index_repetitions
+//                 } as f64;
+//                 (
+//                     nreps as f64
+//                         * (self.collision_cost * collisions
+//                             + self.repetition_setup_cost * new_repetitions),
+//                     nreps,
+//                 )
+//             })
+//             .collect()
+//     }
+// }
 
 #[test]
 fn test_collision_probability() {

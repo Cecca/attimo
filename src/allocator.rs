@@ -211,7 +211,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
 }
 
 pub fn set_maximum_allocation_limit(maximum: Bytes) {
-    log::info!("setting maximum allocation limit to {}", maximum);
+    log::debug!("setting maximum allocation limit to {}", maximum);
     HARD_ALLOCATION_LIMIT.store(maximum.0, SeqCst);
 }
 
