@@ -56,7 +56,7 @@
         containerPython = python.withPackages (ppkgs: [
           ppkgs.numpy
           ppkgs.scipy
-          ppkgs.icecream
+          ppkgs.requests
           pyattimo
         ]);
 
@@ -82,6 +82,7 @@
               numpy
               maturin
               scipy
+              requests
             ]);
         };
       }
