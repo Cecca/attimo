@@ -143,6 +143,7 @@ pub struct Motiflet {
     extent: f64, // FIXME: make this a `Distance`
     /// the relative contrast of this motifle
     relative_contrast: f64,
+    confidence: f64,
 }
 impl Eq for Motiflet {}
 impl Ord for Motiflet {
@@ -191,11 +192,12 @@ impl Overlaps<&Self> for Motiflet {
 }
 
 impl Motiflet {
-    pub fn new(indices: Vec<usize>, extent: f64, avg_dist: Distance) -> Self {
+    pub fn new(indices: Vec<usize>, extent: f64, avg_dist: Distance, confidence: f64) -> Self {
         Self {
             indices,
             extent,
             relative_contrast: avg_dist.0 / extent,
+            confidence,
         }
     }
     pub fn support(&self) -> usize {
@@ -203,6 +205,9 @@ impl Motiflet {
     }
     pub fn extent(&self) -> f64 {
         self.extent
+    }
+    pub fn confidence(&self) -> f64 {
+        self.confidence
     }
     pub fn relative_contrast(&self) -> f64 {
         self.relative_contrast
@@ -404,6 +409,7 @@ fn build_rooted_motiflets(
             indices: motiflet_indices,
             extent,
             relative_contrast: avg_distance / extent,
+            confidence: 1.0,
         });
     }
 
@@ -521,12 +527,10 @@ impl MotifletsIterator {
         let collisions_threshold = stats.timeseries_stats.num_subsequence_pairs / 10;
 
         let next_to_confirm = top[2].smallest_non_emitted_distance();
-        Self {
+        let mut slf = Self {
             ts,
             fft_data,
             top,
-            // the minimum sampled nearest neighbor is of course a
-            // natural candidate for the 2-motiflet
             next_to_confirm,
             graph: AdjacencyGraph::new(n, exclusion_zone),
             max_k,
@@ -536,14 +540,15 @@ impl MotifletsIterator {
             index,
             pairs_buffer,
             rep: 0,
-            // this way we avoid meaningless repetitions that have no collisions
             prefix: crate::index::K,
             previous_prefix: None,
             stats,
             collisions_threshold,
             stop_on_collisions_threshold: false,
             rng,
-        }
+        };
+
+        slf
     }
 
     pub fn set_collision_threshold(&mut self, threshold: usize) {
@@ -716,6 +721,12 @@ impl MotifletsIterator {
                             ids.to_owned(),
                             extent.0,
                             self.stats.average_distance,
+                            1.0 - self.index.failure_probability(
+                                extent,
+                                self.rep,
+                                prefix,
+                                self.previous_prefix,
+                            ),
                         ));
                     }
                 }

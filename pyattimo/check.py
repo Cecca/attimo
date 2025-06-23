@@ -10,7 +10,7 @@ import sys
 import pathlib
 import itertools
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 
 def get_datasets():
@@ -35,13 +35,14 @@ def get_datasets():
 
 
 datasets = get_datasets()
+datasets = ["Bird12-Week3_2018_1_10"]
 
 # dataset = "FingerFlexionECoG"
 
 
 k = 9
 windows = [512, 1024, 2048, 4096, 8192]
-windows = [512]
+windows = [1024]
 
 for dataset, w in itertools.product(datasets, windows):
     print("============== dataset", dataset, "w", w)
@@ -62,13 +63,13 @@ for dataset, w in itertools.product(datasets, windows):
             support=9,
             max_memory="20GB",
             exclusion_zone=w // 2,
-            stop_on_threshold=False,
+            stop_on_threshold=True,
             fraction_threshold=math.log(n) / n,
             observability_file="obs.csv",
         )
 
         for m in m_iter:
-            print(m, "support", m.support)
+            print(m, "support", m.support, "confidence", m.confidence)
 
         end = time.time()
         print("Discovered motiflets in", end - start, "seconds")
