@@ -548,6 +548,17 @@ impl MotifletsIterator {
             rng,
         };
 
+        // // we initialize the top queue and the graph by inspecting the midway prefix of the
+        // // first repetition of the index, and then
+        // debug!("Greedy initialization of the top-k queue");
+        // // TODO: do with a budget of computations
+        // slf.prefix = 5;
+        // slf.update_graph();
+        // slf.emit_confirmed();
+        // slf.prefix = crate::index::K;
+        // assert_eq!(slf.rep, 0);
+        // debug!("Next to confirm: {:?}", slf.next_to_confirm);
+        // dbg!(&slf.top.last());
         slf
     }
 
@@ -932,6 +943,18 @@ impl MotifletsIterator {
                     self.prefix,
                     self.previous_prefix
                 ))
+            );
+            debug!(
+                "[{}@{}] Smallest confirmed {:?}",
+                self.rep,
+                self.prefix,
+                self.index.largest_confirmed_distance(
+                    self.stats.average_distance,
+                    self.rep,
+                    self.prefix,
+                    self.previous_prefix,
+                    self.delta
+                )
             );
             self.stats.observe(self.rep, self.prefix);
 

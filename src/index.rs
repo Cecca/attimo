@@ -594,6 +594,32 @@ impl LSHIndex {
         cur_fail * prev_fail
     }
 
+    /// get the largest distance (smaller than the given upper bound) that
+    /// is confirmed using the given number of repetitions and prefix
+    pub fn largest_confirmed_distance(
+        &self,
+        upper_bound: Distance,
+        reps: usize,
+        prefix: usize,
+        prev_prefix: Option<usize>,
+        target_failure_probability: f64,
+    ) -> Distance {
+        let eps = 0.01;
+        let mut upper = upper_bound.0;
+        let mut lower = 0.0;
+        let mut d = (upper + lower) / 2.0;
+        while upper - lower > eps {
+            d = (upper + lower) / 2.0;
+            let fp = self.failure_probability(Distance(d), reps, prefix, prev_prefix);
+            if fp < target_failure_probability {
+                lower = d;
+            } else {
+                upper = d;
+            }
+        }
+        Distance(d)
+    }
+
     // pub fn stats(&self, ts: &WindowedTimeseries, exclusion_zone: usize) -> IndexStats {
     //     IndexStats::new(self, ts, self.max_repetitions, exclusion_zone)
     // }
