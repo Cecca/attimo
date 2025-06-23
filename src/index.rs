@@ -417,43 +417,19 @@ impl LSHIndex {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         let sqrt_n = (ts.num_subsequences() as f64).sqrt().ceil() as usize;
 
-        let mut qw = std::env::var("ATTIMO_QUANTIZATION")
-            .map(|q| {
-                q.parse::<f64>()
-                    .expect("unable to parse ATTIMO_QUANTIZATION as a float")
-            })
-            .unwrap_or_else(|_| Hasher::compute_width(ts, fft_data, exclusion_zone, &mut rng));
-
-        let mut max_repetitions = 0;
-        while Self::required_memory(ts, max_repetitions) < max_memory {
-            max_repetitions += 1;
-        }
-        debug!(
-            "initial quantization width: {}, maximum repetitions: {} ({}, {} for 8 reps)",
-            qw,
-            max_repetitions,
-            Self::required_memory(ts, max_repetitions),
-            Self::required_memory(ts, 8),
-        );
-
-        // Try to build the index until we get a version that has collisions at the deepest level
         let t = Instant::now();
-        let mut qw_lower: Option<f64> = None;
-        let mut qw_upper: Option<f64> = None;
-        let mut tmp = Vec::new();
-        loop {
-            if let (Some(lower), Some(upper)) = (qw_lower, qw_upper) {
-                qw = (upper + lower) / 2.0;
-            }
+        let (qw, collision_profile) = if let Ok(qw) = std::env::var("ATTIMO_QUANTIZATION") {
+            let qw = qw
+                .parse::<f64>()
+                .expect("Unable to parse ATTIMO_QUANTIZATION as a float");
 
-            let mut longest_prefix_collisions = Vec::<usize>::new();
-            const SAMPLES: usize = 8;
+            let mut tmp = Vec::new();
             let mut collision_profile = vec![0.0f64; K + 1];
+            const SAMPLES: usize = 8;
             for _ in 0..SAMPLES {
                 let cp = Repetition::sample(ts, qw, K, fft_data, &mut rng, &mut tmp)
                     .1
                     .collision_profile();
-                longest_prefix_collisions.push(*cp.last().unwrap() as usize);
                 for (acc, c) in collision_profile.iter_mut().zip(cp) {
                     *acc += c;
                 }
@@ -461,47 +437,91 @@ impl LSHIndex {
             for c in collision_profile.iter_mut() {
                 *c /= SAMPLES as f64;
             }
+            (qw, collision_profile)
+        } else {
+            let mut qw_lower: Option<f64> = None;
+            let mut qw_upper: Option<f64> = None;
+            let mut tmp = Vec::new();
+            let mut qw = Hasher::compute_width(ts, fft_data, exclusion_zone, &mut rng);
+            let mut collision_profile = vec![0.0f64; K + 1];
 
-            longest_prefix_collisions.sort();
-            let median_collisions = longest_prefix_collisions[longest_prefix_collisions.len() / 2];
-            let avg_collisions = collision_profile.last().unwrap();
+            loop {
+                if let (Some(lower), Some(upper)) = (qw_lower, qw_upper) {
+                    qw = (upper + lower) / 2.0;
+                }
 
-            debug!(
+                collision_profile.fill(0.0);
+                let mut longest_prefix_collisions = Vec::<usize>::new();
+                const SAMPLES: usize = 8;
+                for _ in 0..SAMPLES {
+                    let cp = Repetition::sample(ts, qw, K, fft_data, &mut rng, &mut tmp)
+                        .1
+                        .collision_profile();
+                    longest_prefix_collisions.push(*cp.last().unwrap() as usize);
+                    for (acc, c) in collision_profile.iter_mut().zip(cp) {
+                        *acc += c;
+                    }
+                }
+                for c in collision_profile.iter_mut() {
+                    *c /= SAMPLES as f64;
+                }
+
+                longest_prefix_collisions.sort();
+                let median_collisions =
+                    longest_prefix_collisions[longest_prefix_collisions.len() / 2];
+                let avg_collisions = collision_profile.last().unwrap();
+
+                debug!(
                 "Num collisions with quantization_width={}: {} median {} average (lower {:?}, upper {:?})",
                 qw, median_collisions, avg_collisions, qw_lower, qw_upper
             );
-            debug!("Collision profile: {:?}", collision_profile);
-            if median_collisions < sqrt_n / 2 {
-                // the quantization width is too small
-                qw_lower.replace(qw);
-                qw *= 2.0;
-                debug!("Doubling the quantization width to {}", qw);
-            } else if median_collisions > 10 * sqrt_n
-                && qw_upper.unwrap_or(f64::INFINITY) - qw_lower.unwrap_or(0.0) > 1e-7
-            {
-                // the quantization width is too large: too many subsequences
-                qw_upper.replace(qw);
-                qw /= 2.0;
-                debug!("Halving the quantization width {}", qw);
-            } else {
-                debug!("Settling on quantization width {}", qw);
-
-                let mut slf = Self {
-                    rng: rng.clone(),
-                    quantization_width: qw,
-                    functions: Vec::new(),
-                    repetitions: Vec::new(),
-                    repetitions_setup_time: Duration::from_secs(0),
-                    max_repetitions,
-                    collision_profile,
-                };
-                let avg_dur = slf.add_repetitions(ts, fft_data, 1, K);
-
-                slf.repetitions_setup_time = avg_dur;
-                observe!(0, 0, "profile/index_setup", t.elapsed().as_secs_f64());
-                return slf;
+                debug!("Collision profile: {:?}", collision_profile);
+                if median_collisions < sqrt_n / 2 {
+                    // the quantization width is too small
+                    qw_lower.replace(qw);
+                    qw *= 2.0;
+                    debug!("Doubling the quantization width to {}", qw);
+                } else if median_collisions > 10 * sqrt_n
+                    && qw_upper.unwrap_or(f64::INFINITY) - qw_lower.unwrap_or(0.0) > 1e-7
+                {
+                    // the quantization width is too large: too many subsequences
+                    qw_upper.replace(qw);
+                    qw /= 2.0;
+                    debug!("Halving the quantization width {}", qw);
+                } else {
+                    debug!("Settling on quantization width {}", qw);
+                    break;
+                }
             }
+            (qw, collision_profile)
+        };
+
+        let mut max_repetitions = 0;
+        while Self::required_memory(ts, max_repetitions) < max_memory {
+            max_repetitions += 1;
         }
+        debug!(
+            "quantization width: {}, maximum repetitions: {} ({}, {} for 8 reps)",
+            qw,
+            max_repetitions,
+            Self::required_memory(ts, max_repetitions),
+            Self::required_memory(ts, 8),
+        );
+
+        let mut slf = Self {
+            rng: rng.clone(),
+            quantization_width: qw,
+            functions: Vec::new(),
+            repetitions: Vec::new(),
+            repetitions_setup_time: Duration::from_secs(0),
+            max_repetitions,
+            collision_profile,
+        };
+        let avg_dur = slf.add_repetitions(ts, fft_data, 1, K);
+
+        slf.repetitions_setup_time = avg_dur;
+        observe!(0, 0, "profile/index_setup", t.elapsed().as_secs_f64());
+        return slf;
     }
 
     pub fn add_repetitions(

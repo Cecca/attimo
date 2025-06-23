@@ -376,6 +376,16 @@ impl MotifletsIteratorStats {
         self.graph_stats.observe(repetition, prefix);
         self.index_stats.observe(repetition, prefix);
     }
+
+    /// how much effort has been invested in the computation so far?
+    fn effort_so_far(&self) -> usize {
+        let hashing_cost = crate::index::K
+            * self.index_stats.num_repetitions
+            * self.timeseries_stats.num_subsequences
+            / self.timeseries_stats.window;
+        dbg!(hashing_cost);
+        self.cnt_candidates + hashing_cost
+    }
 }
 
 fn build_rooted_motiflets(
@@ -901,10 +911,11 @@ impl MotifletsIterator {
                 return Ok(None);
             }
 
-            if self.stats.cnt_candidates > self.collisions_threshold {
+            dbg!(self.stats.effort_so_far());
+            if self.stats.effort_so_far() > self.collisions_threshold {
                 warn!(
-                    "Too many collisions! {} > {} (max support smallest non-emitted distance {:?})",
-                    self.stats.cnt_candidates,
+                    "Too much effort! {} > {} (max support smallest non-emitted distance {:?})",
+                    self.stats.effort_so_far(),
                     self.collisions_threshold,
                     self.top.last().unwrap().smallest_non_emitted_distance()
                 );
@@ -945,7 +956,7 @@ impl MotifletsIterator {
                 ))
             );
             debug!(
-                "[{}@{}] Smallest confirmed {:?}",
+                "[{}@{}] Largest confirmed {:?}",
                 self.rep,
                 self.prefix,
                 self.index.largest_confirmed_distance(
