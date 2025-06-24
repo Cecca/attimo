@@ -343,6 +343,10 @@ impl Repetition {
         }
         out
     }
+
+    pub fn count_non_trivial(&self, prefix: usize, exclusion_zone: usize) -> usize {
+        CollisionEnumerator::new(self, prefix, None).count_non_trivial_collisions(exclusion_zone)
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -518,6 +522,7 @@ impl LSHIndex {
             collision_profile,
         };
         let avg_dur = slf.add_repetitions(ts, fft_data, 1, K);
+        dbg!(slf.repetitions[0].count_non_trivial(K, exclusion_zone));
 
         slf.repetitions_setup_time = avg_dur;
         observe!(0, 0, "profile/index_setup", t.elapsed().as_secs_f64());
@@ -831,6 +836,26 @@ impl<'index> CollisionEnumerator<'index> {
         while self.current_range.end < self.repetition.get_hashes().len() {
             let range = self.current_range.clone();
             cnt += range.len() * (range.len() - 1) / 2;
+            self.next_range();
+        }
+        cnt
+    }
+
+    /// how many collisions, excluding trivial ones, occur in this enumerator?
+    /// **Warning**: takes a long time on short prefixes
+    pub fn count_non_trivial_collisions(mut self, exclusion_zone: usize) -> usize {
+        let mut cnt = 0;
+        while self.current_range.end < self.repetition.get_hashes().len() {
+            let range = self.current_range.clone();
+            for i in range.clone() {
+                for j in i..range.end {
+                    if !self.repetition.indices[i]
+                        .overlaps(self.repetition.indices[j], exclusion_zone)
+                    {
+                        cnt += 1;
+                    }
+                }
+            }
             self.next_range();
         }
         cnt
