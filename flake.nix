@@ -76,6 +76,9 @@
               rust
               python
               heaptrack
+              valgrind
+              rr
+              gdb
             ]
             ++ (with python.pkgs; [
               venvShellHook

@@ -52,6 +52,7 @@ for dataset, w in itertools.product(datasets, windows):
         if not hasattr(data[name], "shape"):
             continue
         ts = data[name].flatten()
+        np.savetxt(f"data/{dataset}.csv", ts, fmt="%.8f")
         n = ts.shape[0]
         if n < 10:
             continue

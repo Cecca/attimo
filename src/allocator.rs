@@ -191,7 +191,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
             let currently_allocated = ALLOCATED.fetch_add(layout.size(), SeqCst);
             MAX_ALLOCATED.fetch_max(currently_allocated, SeqCst);
             if currently_allocated > HARD_ALLOCATION_LIMIT.load(SeqCst) {
-                log::error!(
+                eprintln!(
                     "maximum memory allocation limit exceeded! {}",
                     Bytes(currently_allocated)
                 );
@@ -213,6 +213,9 @@ unsafe impl GlobalAlloc for CountingAllocator {
 pub fn set_maximum_allocation_limit(maximum: Bytes) {
     log::debug!("setting maximum allocation limit to {}", maximum);
     HARD_ALLOCATION_LIMIT.store(maximum.0, SeqCst);
+}
+pub fn get_maximum_allocation_limit() -> Bytes {
+    Bytes(HARD_ALLOCATION_LIMIT.load(SeqCst))
 }
 
 pub fn allocated() -> usize {

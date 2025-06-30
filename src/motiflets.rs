@@ -557,17 +557,19 @@ impl MotifletsIterator {
             rng,
         };
 
-        // // we initialize the top queue and the graph by inspecting the midway prefix of the
-        // // first repetition of the index, and then
-        // debug!("Greedy initialization of the top-k queue");
-        // // TODO: do with a budget of computations
-        // slf.prefix = 5;
-        // slf.update_graph();
-        // slf.emit_confirmed();
-        // slf.prefix = crate::index::K;
-        // assert_eq!(slf.rep, 0);
-        // debug!("Next to confirm: {:?}", slf.next_to_confirm);
-        // dbg!(&slf.top.last());
+        if slf.byte_size() > get_maximum_allocation_limit().divide(5) {
+            let bytes_per_subsequence =
+                get_maximum_allocation_limit().divide(slf.ts.num_subsequences());
+            let recommended = Bytes(512);
+            log::warn!(
+                "The maximum memory setting might be too low (only {} per subsequence).
+                The code might crash. It is recommended to provide at least {} per subsequence ({} for this dataset)",
+                bytes_per_subsequence,
+                recommended,
+                recommended * slf.ts.num_subsequences() as f64
+            );
+        }
+
         slf
     }
 

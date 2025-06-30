@@ -128,7 +128,12 @@ fn main() -> Result<()> {
         motiflets
             .into_iter()
             .map(|(extent, indices)| {
-                Motiflet::new(indices, extent.into(), Distance(average_distance))
+                Motiflet::new(
+                    indices,
+                    extent.into(),
+                    Distance(average_distance),
+                    extent.into(),
+                )
             })
             .collect()
     } else {
@@ -140,6 +145,7 @@ fn main() -> Result<()> {
             log::info!("System has {} memory, using {} at most", sysmem, mem);
             mem
         };
+        allocator::set_maximum_allocation_limit(max_memory * 1.2);
         let start = Instant::now();
         let exclusion_zone = ts.w / 2;
         MotifletsIterator::new(
