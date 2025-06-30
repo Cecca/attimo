@@ -12,7 +12,7 @@ use crate::{
 use log::*;
 use rand::prelude::*;
 use rand::SeedableRng;
-use rand_distr::{Bernoulli, Uniform};
+use rand_distr::Uniform;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use std::collections::BTreeSet;
@@ -141,9 +141,9 @@ pub fn brute_force_motiflets(
 pub struct Motiflet {
     indices: Vec<usize>,
     extent: f64, // FIXME: make this a `Distance`
-    /// the relative contrast of this motifle
+    /// the relative contrast of this motiflet
     relative_contrast: f64,
-    confidence: f64,
+    lower_bound: f64,
 }
 impl Eq for Motiflet {}
 impl Ord for Motiflet {
@@ -192,12 +192,12 @@ impl Overlaps<&Self> for Motiflet {
 }
 
 impl Motiflet {
-    pub fn new(indices: Vec<usize>, extent: f64, avg_dist: Distance, confidence: f64) -> Self {
+    pub fn new(indices: Vec<usize>, extent: f64, avg_dist: Distance, lower_bound: f64) -> Self {
         Self {
             indices,
             extent,
             relative_contrast: avg_dist.0 / extent,
-            confidence,
+            lower_bound,
         }
     }
     pub fn support(&self) -> usize {
@@ -206,8 +206,8 @@ impl Motiflet {
     pub fn extent(&self) -> f64 {
         self.extent
     }
-    pub fn confidence(&self) -> f64 {
-        self.confidence
+    pub fn lower_bound(&self) -> f64 {
+        self.lower_bound
     }
     pub fn relative_contrast(&self) -> f64 {
         self.relative_contrast
@@ -383,7 +383,6 @@ impl MotifletsIteratorStats {
             * self.index_stats.num_repetitions
             * self.timeseries_stats.num_subsequences
             / self.timeseries_stats.window;
-        dbg!(hashing_cost);
         self.cnt_candidates + hashing_cost
     }
 }
@@ -419,7 +418,7 @@ fn build_rooted_motiflets(
             indices: motiflet_indices,
             extent,
             relative_contrast: avg_distance / extent,
-            confidence: 1.0,
+            lower_bound: extent,
         });
     }
 
@@ -537,7 +536,7 @@ impl MotifletsIterator {
         let collisions_threshold = stats.timeseries_stats.num_subsequence_pairs / 10;
 
         let next_to_confirm = top[2].smallest_non_emitted_distance();
-        let mut slf = Self {
+        let slf = Self {
             ts,
             fft_data,
             top,
@@ -602,14 +601,6 @@ impl MotifletsIterator {
             .kth_distance()
             .unwrap_or(Distance::infinity());
         let p_threshold = self.index.collision_probability_at(threshold);
-        let p_sample = if p_threshold.is_nan() {
-            // this happens on the first iteration, when the threshold is infinity
-            1.0
-        } else {
-            let p_sample = 8.0 / (p_threshold * self.index.get_repetitions() as f64);
-            p_sample.min(1.0)
-        };
-        let coin = Bernoulli::new(p_sample).unwrap();
 
         let index = &mut self.index;
 
@@ -639,15 +630,9 @@ impl MotifletsIterator {
                     let cnt_dist_send = Arc::clone(&cnt_dist_send);
                     trng.jump();
                     scope.spawn(move |_| {
-                        let mut cnt_skipped = 0;
                         let mut cnt_dist = 0;
                         let mut cnt_dist_below_threshold = 0;
                         for (a, b, dist) in chunk.iter_mut() {
-                            if !coin.sample(&mut trng) {
-                                *dist = Distance::infinity();
-                                cnt_skipped += 1;
-                                continue;
-                            }
                             let a = *a as usize;
                             let b = *b as usize;
                             assert!(a < b);
@@ -663,8 +648,6 @@ impl MotifletsIterator {
                             }
                         }
 
-                        #[rustfmt::skip]
-                        observe!(rep, prefix, "cnt/sampling_skipped", cnt_skipped);
                         #[rustfmt::skip]
                         observe!(rep, prefix, "cnt/distcomp", cnt_dist);
                         #[rustfmt::skip]
@@ -715,6 +698,13 @@ impl MotifletsIterator {
         let prefix = self.prefix;
         let previous_prefix = self.previous_prefix;
         let rep = self.rep;
+        let largest_confirmed = self.index.largest_confirmed_distance(
+            self.stats.average_distance,
+            self.rep,
+            self.prefix,
+            self.previous_prefix,
+            self.delta,
+        );
 
         let mut time_extents = Duration::from_secs(0);
         let mut cnt_extents = 0;
@@ -742,12 +732,11 @@ impl MotifletsIterator {
                             ids.to_owned(),
                             extent.0,
                             self.stats.average_distance,
-                            1.0 - self.index.failure_probability(
-                                extent,
-                                self.rep,
-                                prefix,
-                                self.previous_prefix,
-                            ),
+                            if largest_confirmed < extent {
+                                largest_confirmed.0
+                            } else {
+                                extent.0
+                            },
                         ));
                     }
                 }
@@ -911,7 +900,6 @@ impl MotifletsIterator {
                 return Ok(None);
             }
 
-            dbg!(self.stats.effort_so_far());
             if self.stats.effort_so_far() > self.collisions_threshold {
                 warn!(
                     "Too much effort! {} > {} (max support smallest non-emitted distance {:?})",
@@ -920,9 +908,21 @@ impl MotifletsIterator {
                     self.top.last().unwrap().smallest_non_emitted_distance()
                 );
                 if self.stop_on_collisions_threshold {
+                    let largest_confirmed = self.index.largest_confirmed_distance(
+                        self.stats.average_distance,
+                        self.rep,
+                        self.prefix,
+                        self.previous_prefix,
+                        self.delta,
+                    );
+
                     // emit all the partial candidates
                     for (_, queue) in self.top.iter_mut().enumerate() {
-                        self.to_return.extend(queue.emit(|_| true));
+                        self.to_return
+                            .extend(queue.emit(|_| true).into_iter().map(|mut m| {
+                                m.lower_bound = largest_confirmed.0;
+                                m
+                            }));
                         queue.disable();
                     }
                     // break from the loop, so that
@@ -954,18 +954,6 @@ impl MotifletsIterator {
                     self.prefix,
                     self.previous_prefix
                 ))
-            );
-            debug!(
-                "[{}@{}] Largest confirmed {:?}",
-                self.rep,
-                self.prefix,
-                self.index.largest_confirmed_distance(
-                    self.stats.average_distance,
-                    self.rep,
-                    self.prefix,
-                    self.previous_prefix,
-                    self.delta
-                )
             );
             self.stats.observe(self.rep, self.prefix);
 

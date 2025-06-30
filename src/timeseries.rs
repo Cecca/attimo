@@ -2,7 +2,6 @@ use crate::allocator::{ByteSize, Bytes};
 use crate::distance::{zdot, zeucl};
 use crate::observe::observe;
 use core::f64;
-use log::info;
 use rand_distr::num_traits::Zero;
 use rayon::prelude::*;
 use rustfft::{num_complex::Complex, Fft, FftPlanner};

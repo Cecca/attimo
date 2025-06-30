@@ -10,7 +10,7 @@ import sys
 import pathlib
 import itertools
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 
 def get_datasets():
@@ -69,7 +69,7 @@ for dataset, w in itertools.product(datasets, windows):
         )
 
         for m in m_iter:
-            print(m, "support", m.support, "confidence", m.confidence)
+            print(m, "support", m.support, "lower bound: ", m.lower_bound)
 
         end = time.time()
         print("Discovered motiflets in", end - start, "seconds")

@@ -55,7 +55,7 @@ pub struct KMotiflet {
     #[pyo3(get)]
     relative_contrast: f64,
     #[pyo3(get)]
-    confidence: f64,
+    lower_bound: f64,
     ts: Arc<WindowedTimeseries>,
 }
 
@@ -75,7 +75,7 @@ impl KMotiflet {
             indices: motiflet.indices(),
             extent: motiflet.extent(),
             relative_contrast: motiflet.relative_contrast(),
-            confidence: motiflet.confidence(),
+            lower_bound: motiflet.lower_bound(),
             ts,
         }
     }
@@ -359,7 +359,7 @@ impl MotifletsIterator {
                     indices,
                     extent: extent.into(),
                     ts: Arc::clone(&ts),
-                    confidence: 1.0,
+                    lower_bound: extent.into(),
                     relative_contrast: average_distance / extent.0,
                 })
                 .collect();
@@ -433,7 +433,7 @@ pub fn motiflet_brute_force(
             indices,
             extent: extent.into(),
             ts: Arc::clone(&ts),
-            confidence: 1.0,
+            lower_bound: extent.into(),
             relative_contrast: average_distance / extent.0,
         })
         .collect()

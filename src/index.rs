@@ -479,8 +479,7 @@ impl LSHIndex {
                 "Num collisions with quantization_width={}: {} median {} average (lower {:?}, upper {:?})",
                 qw, median_collisions, avg_collisions, qw_lower, qw_upper
             );
-                debug!("Collision profile: {:?}", collision_profile);
-                if median_collisions < sqrt_n / 2 {
+                if median_collisions < sqrt_n {
                     // the quantization width is too small
                     qw_lower.replace(qw);
                     qw *= 2.0;
@@ -499,6 +498,8 @@ impl LSHIndex {
             }
             (qw, collision_profile)
         };
+        debug!("Collision profile: {:?}", collision_profile);
+        debug!("sqrt(n) = {}", sqrt_n);
 
         let mut max_repetitions = 0;
         while Self::required_memory(ts, max_repetitions) < max_memory {
