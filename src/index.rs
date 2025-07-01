@@ -523,7 +523,6 @@ impl LSHIndex {
             collision_profile,
         };
         let avg_dur = slf.add_repetitions(ts, fft_data, 1, K);
-        dbg!(slf.repetitions[0].count_non_trivial(K, exclusion_zone));
 
         slf.repetitions_setup_time = avg_dur;
         observe!(0, 0, "profile/index_setup", t.elapsed().as_secs_f64());
@@ -618,6 +617,15 @@ impl LSHIndex {
             })
             .unwrap_or(1.0);
         cur_fail * prev_fail
+    }
+
+    /// the propobability that a pair at the given distance collides at least once
+    /// in the given number of repetitions with the given prefix
+    pub fn at_least_one_collision_prob(&self, d: Distance, reps: usize, prefix: usize) -> f64 {
+        let p = self.collision_probability_at(d);
+        let never_collide = (1.0 - p.powi(prefix as i32)).powi(reps as i32);
+        let at_least_one = 1.0 - never_collide;
+        at_least_one
     }
 
     /// get the largest distance (smaller than the given upper bound) that

@@ -10,7 +10,7 @@ import sys
 import pathlib
 import itertools
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 
 def get_datasets():
@@ -62,7 +62,7 @@ for dataset, w in itertools.product(datasets, windows):
             w,
             delta=0.5,
             support=9,
-            max_memory="20GB",
+            max_memory="10GB",
             exclusion_zone=w // 2,
             stop_on_threshold=True,
             fraction_threshold=math.log(n) / n,

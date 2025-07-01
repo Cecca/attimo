@@ -602,7 +602,6 @@ impl MotifletsIterator {
         let threshold = self.top[self.max_k]
             .kth_distance()
             .unwrap_or(Distance::infinity());
-        let p_threshold = self.index.collision_probability_at(threshold);
 
         let index = &mut self.index;
 
@@ -798,7 +797,7 @@ impl MotifletsIterator {
         d: Distance,
         prefix: usize,
         prev_prefix: Option<usize>,
-    ) -> (usize, f64) {
+    ) -> Option<usize> {
         let mut nreps = 0;
         let mut fp = 1.0;
         while fp > self.delta && nreps < self.index.max_repetitions() {
@@ -807,10 +806,29 @@ impl MotifletsIterator {
                 .failure_probability(d, nreps, prefix, prev_prefix);
             nreps += 1;
         }
-        (nreps, fp)
+        if fp <= self.delta {
+            Some(nreps)
+        } else {
+            None
+        }
     }
 
     pub fn pick_next_repetition(&mut self) {
+        // Picking the right prefix and repetition is a crucial part of the practical efficiency
+        // of the algorithm. We continue on the current prefix in two cases:
+        //  - if the probability of finding anything good is high enough.
+        //    In this case we are making a bet: considering
+        //    the largest distance confirmed so far, how likely it is to finding something at the
+        //    same distance at least once in the next repetitions? Anything farther away is going
+        //    to be less likely. If the probability of finding such good candidate is larger than
+        //    0.5 then we continue on the current prefix, otherwise we move to the shorter prefix
+        //  - if the next distance to confirm is going to be confirmed at the current prefix
+        //    within the maximum number of repetitions, and the estimated cost of doing so is smaller
+        //    than on shorter prefixes
+        //
+        // If neither of the two cases above holds, then we move to a shorter prefix (possibly the
+        // one minimizing the number of collisions) and restart from the first repetition
+
         if self.rep + 1 < self.index.max_repetitions() {
             // in this case we can potentially add an additional repetition
 
@@ -818,19 +836,40 @@ impl MotifletsIterator {
             let expected_collisions = self.index.collision_profile();
             self.rep += 1;
 
-            // We peek if, using shorter prefixes, we could confirm the next
-            // distance using fewer collisions compared to staying at
-            // the current prefix.
-            let next_prefix = self.next_to_confirm.map(|d| {
-                // How many further collisions are we going to do on this prefix
-                // until we confirm the distance at d?
-                let expected_reps_at_level = self
-                    .repetitions_to_confirm(d, self.prefix, self.previous_prefix)
-                    .0;
-                let further_collisions_at_level =
-                    expected_reps_at_level as f64 * expected_collisions[self.prefix];
+            let largest_confirmed = self.index.largest_confirmed_distance(
+                self.stats.average_distance,
+                self.rep,
+                self.prefix,
+                self.previous_prefix,
+                self.delta,
+            );
+            // when the `hope` of finding a very good next candidate drops
+            // below half, we switch to a shorter prefix.
+            // Maybe if this is too extreme we might consider
+            // to take the distance halfway from the lartest confirmed and the
+            // next to confirm
+            let hope = self.index.at_least_one_collision_prob(
+                largest_confirmed,
+                self.index.max_repetitions() - self.rep,
+                self.prefix,
+            );
 
-                if let Some((_collisions, next_prefix)) = (1..self.prefix)
+            // will be None if the next distance to confirm is either None or cannot
+            // be confirmed at the current prefix
+            let additional_collisions_at_prefix = self.next_to_confirm.and_then(|d| {
+                self.repetitions_to_confirm(d, self.prefix, self.previous_prefix)
+                    .map(|expected_reps_at_level| {
+                        // compute the additional collisions at the current prefix
+                        (expected_reps_at_level - self.rep) as f64
+                            * expected_collisions[self.prefix]
+                    })
+            });
+
+            // will be None if either there is no next distance to confirm or if
+            // the current next distance to confirm cannot be confirmed at any
+            // shorter prefix
+            let collisions_at_shorter = self.next_to_confirm.and_then(|d| {
+                (1..self.prefix)
                     .filter_map(|prefix| {
                         // Here we consider the repetitions that are needed to confirm
                         // `d` at a shorter prefix `prefix`. If this number of repetitions
@@ -838,37 +877,45 @@ impl MotifletsIterator {
                         // is also smaller than the expected one we would see if we
                         // stayed at the current level, then we propose this prefix
                         // as a candidate
-                        let est_reps = self.repetitions_to_confirm(d, prefix, Some(self.prefix)).0;
-                        // the overall number of expected collisions.
-                        // We remove the number of collisions seen so far, since those are skipped.
-                        let collisions_at_prefix = est_reps as f64 * expected_collisions[prefix]
-                            - collisions_so_far as f64;
-                        if est_reps <= self.rep
-                            && collisions_at_prefix < further_collisions_at_level
-                        {
-                            Some((collisions_at_prefix, prefix))
-                        } else {
-                            None
-                        }
+                        self.repetitions_to_confirm(d, prefix, Some(self.prefix))
+                            .map(|est_reps| {
+                                // the overall number of expected collisions.
+                                // We remove the number of collisions seen so far, since those are skipped.
+                                let collisions_at_prefix = est_reps as f64
+                                    * expected_collisions[prefix]
+                                    - collisions_so_far as f64;
+                                (collisions_at_prefix, prefix)
+                            })
                     })
-                    // Then we pick the minimum
+                    // Then we pick the minimum, by number of collisions
                     .min_by(|a, b| a.0.total_cmp(&b.0))
-                {
-                    // If there is a better prefix then we use it
-                    next_prefix
-                } else {
-                    // Otherwise we stay at the current one
-                    self.prefix
-                }
             });
-            if let Some(next_prefix) = next_prefix {
-                // Adjust things if we shorten the prefix
-                if next_prefix < self.prefix {
-                    self.previous_prefix.replace(self.prefix);
-                    self.rep = 0;
-                    self.prefix = next_prefix;
+
+            let next_prefix = if hope >= 0.5 {
+                self.prefix
+            } else {
+                match (additional_collisions_at_prefix, collisions_at_shorter) {
+                    (Some(current), Some((shorter, prefix))) => {
+                        if current < shorter {
+                            self.prefix
+                        } else {
+                            prefix
+                        }
+                    }
+                    (None, Some((_, prefix))) => prefix,
+                    (None, None) => self.prefix - 1,
+                    (Some(_), None) => unreachable!(),
                 }
+            };
+
+            // Adjust things if we shorten the prefix
+            if next_prefix < self.prefix {
+                self.previous_prefix.replace(self.prefix);
+                self.rep = 0;
+                self.prefix = next_prefix;
             }
+
+            // possibly add the repetition, if we didn't materialize it previously
             if self.rep + 1 > self.index.get_repetitions() {
                 let elapsed =
                     self.index
@@ -877,6 +924,7 @@ impl MotifletsIterator {
                 observe!(self.rep, self.prefix, "repetition_setup_s", elapsed.as_secs_f64());
             }
         } else {
+            // we take this branch if we exhausted all possible repetitions
             self.rep = 0;
             self.previous_prefix.replace(self.prefix);
             self.prefix -= 1;
