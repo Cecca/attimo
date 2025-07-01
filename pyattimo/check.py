@@ -1,12 +1,13 @@
 # A scratch Python file to try out the API
 import pyattimo
+import datetime
 import time
 import logging
 import numpy as np
 import scipy
 import math
 import requests
-import sys
+import csv
 import pathlib
 import itertools
 
@@ -37,40 +38,61 @@ def get_datasets():
 datasets = get_datasets()
 datasets = ["Bird12-Week3_2018_1_10"]
 
-# dataset = "FingerFlexionECoG"
-
-
-k = 9
+support = 9
 windows = [512, 1024, 2048, 4096, 8192]
 windows = [1024]
 
-for dataset, w in itertools.product(datasets, windows):
-    print("============== dataset", dataset, "w", w)
-    path = f"data/{dataset}.mat"
-    data = scipy.io.loadmat(path)
-    for name in data.keys():
-        if not hasattr(data[name], "shape"):
-            continue
-        ts = data[name].flatten()
-        np.savetxt(f"data/{dataset}.csv", ts, fmt="%.8f")
-        n = ts.shape[0]
-        if n < 10:
-            continue
-        start = time.time()
-        m_iter = pyattimo.MotifletsIterator(
-            ts,
-            w,
-            delta=0.5,
-            support=9,
-            max_memory="10GB",
-            exclusion_zone=w // 2,
-            stop_on_threshold=True,
-            fraction_threshold=math.log(n) / n,
-            observability_file="obs.csv",
-        )
+with open("results.csv", "w") as fp:
+    writer = csv.DictWriter(fp, ["timestamp", "dataset", "w", "delta", "mem", "support", "time_s", "cnt_confirmed", "cnt_estimated"])
+    writer.writeheader()
+    for dataset, w in itertools.product(datasets, windows):
+        print("============== dataset", dataset, "w", w)
+        path = f"data/{dataset}.mat"
+        data = scipy.io.loadmat(path)
+        for name in data.keys():
+            if not hasattr(data[name], "shape"):
+                continue
+            ts = data[name].flatten()
+            np.savetxt(f"data/{dataset}.csv", ts, fmt="%.8f")
+            n = ts.shape[0]
+            if n < 10:
+                continue
+            start = time.time()
+            mem = "20GB"
+            delta = 0.1
+            m_iter = pyattimo.MotifletsIterator(
+                ts,
+                w,
+                delta=delta,
+                support=support,
+                max_memory=mem,
+                exclusion_zone=w // 2,
+                stop_on_threshold=True,
+                fraction_threshold=math.log(n) / n,
+                observability_file=f"observe-dataset-{dataset}-support{support}-w{w}-mem{mem}-delta{delta}.csv",
+            )
 
-        for m in m_iter:
-            print(m, "support", m.support, "lower bound: ", m.lower_bound)
+            cnt_confirmed = 0
+            cnt_estimated = 0
+            for m in m_iter:
+                print(m, "support", m.support, "lower bound: ", m.lower_bound)
+                if m.extent == m.lower_bound:
+                    cnt_confirmed += 1
+                else:
+                    cnt_estimated += 1
 
-        end = time.time()
-        print("Discovered motiflets in", end - start, "seconds")
+            end = time.time()
+            print("Discovered motiflets in", end - start, "seconds")
+            writer.writerow(
+                {
+                    "timestamp": datetime.datetime.now().isoformat(),
+                    "dataset": dataset,
+                    "w": w,
+                    "delta": delta,
+                    "mem": mem,
+                    "support": support,
+                    "time_s": end - start,
+                    "cnt_confirmed": cnt_confirmed,
+                    "cnt_estimated": cnt_estimated
+                }
+            )
