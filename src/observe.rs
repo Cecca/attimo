@@ -68,8 +68,8 @@ macro_rules! observe {
     };
     ($name: literal, $value: expr) => {
         crate::observe::OBSERVER.lock().unwrap().append(
-            REPETITION.load(std::sync::atomic::Ordering::Relaxed),
-            PREFIX.load(std::sync::atomic::Ordering::Relaxed),
+            crate::observe::REPETITION.load(std::sync::atomic::Ordering::Relaxed),
+            crate::observe::PREFIX.load(std::sync::atomic::Ordering::Relaxed),
             $name,
             $value,
         );

@@ -37,11 +37,10 @@ def get_datasets():
 
 datasets = get_datasets()
 datasets = ["Bird12-Week3_2018_1_10"]
-datasets = ["Lab_FD_061014"]
 
 support = 9
 windows = [512, 1024, 2048, 4096, 8192]
-windows = [512]
+windows = [1024]
 
 with open("results.csv", "w") as fp:
     writer = csv.DictWriter(fp, ["timestamp", "dataset", "name", "w", "delta", "mem", "support", "time_s", "cnt_confirmed", "cnt_estimated"])

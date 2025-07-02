@@ -504,6 +504,15 @@ impl MotifletsIterator {
         // get some stats about distances
         let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
 
+        for prefix in 1..=8 {
+            let cp = index.at_least_one_collision_prob(
+                Distance(average_pairwise_distance),
+                index.max_repetitions(),
+                prefix,
+            );
+            dbg!(prefix, cp);
+        }
+
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 1 << 20];
 
         let mut stats = MotifletsIteratorStats::default();
@@ -711,21 +720,38 @@ impl MotifletsIterator {
             self.delta,
         );
 
+        let mut idx_buf = vec![0; self.ts.num_subsequences()];
+        let mut dist_buf = vec![0.0f64; self.ts.num_subsequences()];
+        let mut scratch = vec![0.0f64; self.ts.w];
+
         let mut time_extents = Duration::from_secs(0);
         let mut cnt_extents = 0;
         let mut cnt_skipped = 0;
+        // TODO: check here the neighborhoods that are returned
         for (neighborhoods_ids, dists) in self.graph.neighborhoods(self.max_k + 1) {
             // compute all the extents in one go if one of the
             // distances is smaller than the correponding extent.
-            if dists
-                .iter()
-                .skip(1)
-                .zip(self.top.iter().skip(2).map(|pair| pair.kth_distance()))
-                .any(|(d, ld)| *d < ld.unwrap_or(Distance::infinity()))
+            if true
+                || dists
+                    .iter()
+                    .skip(1)
+                    .zip(self.top.iter().skip(2).map(|pair| pair.kth_distance()))
+                    .any(|(d, ld)| *d < ld.unwrap_or(Distance::infinity()))
             {
                 cnt_extents += 1;
                 let t = Instant::now();
-                let extents = compute_extents(&self.ts, &neighborhoods_ids);
+                // let extents = compute_extents(&self.ts, &neighborhoods_ids);
+                // dbg!(&extents);
+                let (extents, neighborhoods_ids) = dbg!(k_extents_bf(
+                    &self.ts,
+                    neighborhoods_ids[0],
+                    &self.fft_data,
+                    self.max_k,
+                    self.exclusion_zone,
+                    &mut idx_buf,
+                    &mut dist_buf,
+                    &mut scratch,
+                ));
                 time_extents += t.elapsed();
                 for i in 1..neighborhoods_ids.len() {
                     let ids = &neighborhoods_ids[..=i];
@@ -960,7 +986,7 @@ impl MotifletsIterator {
                 return Ok(None);
             }
 
-            if self.stats.effort_so_far() > self.collisions_threshold {
+            if self.stats.effort_so_far() > self.collisions_threshold || self.prefix == 1 {
                 warn!(
                     "Too much effort! {} > {} (max support smallest non-emitted distance {:?})",
                     self.stats.effort_so_far(),
@@ -1003,7 +1029,6 @@ impl MotifletsIterator {
 
             self.stats.graph_stats = self.graph.stats();
             debug!("[{}@{}] {:#?}", self.rep, self.prefix, self.stats);
-            // debug!("[{}@{}] {:?}", self.rep, self.prefix, self.best_motiflet);
             debug!(
                 "[{}@{}] First non confirmed distance {:?} (fp={:?})",
                 self.rep,
