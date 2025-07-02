@@ -516,8 +516,12 @@ impl MotifletsIterator {
         top[0].disable();
         top[1].disable();
         // we initialize the top queue with motiflets rooted at
-        // a random index
-        let random_root = rng.sample(Uniform::new(0, ts.num_subsequences()));
+        // a random index, provided the corresponding subsequence is not flat
+        let random_root = Uniform::new(0, ts.num_subsequences())
+            .sample_iter(&mut rng)
+            .filter(|t| !ts.is_flat(*t))
+            .next()
+            .unwrap();
         for motiflet in build_rooted_motiflets(
             &ts,
             random_root,
@@ -892,6 +896,12 @@ impl MotifletsIterator {
             });
 
             let next_prefix = if hope >= 0.5 {
+                log::debug!(
+                    "continuing on prefix {}, hope for something at distance {} is {}",
+                    self.prefix,
+                    largest_confirmed,
+                    hope
+                );
                 self.prefix
             } else {
                 match (additional_collisions_at_prefix, collisions_at_shorter) {

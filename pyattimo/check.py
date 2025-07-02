@@ -37,23 +37,24 @@ def get_datasets():
 
 datasets = get_datasets()
 datasets = ["Bird12-Week3_2018_1_10"]
+datasets = ["Lab_FD_061014"]
 
 support = 9
 windows = [512, 1024, 2048, 4096, 8192]
-windows = [1024]
+windows = [512]
 
 with open("results.csv", "w") as fp:
-    writer = csv.DictWriter(fp, ["timestamp", "dataset", "w", "delta", "mem", "support", "time_s", "cnt_confirmed", "cnt_estimated"])
+    writer = csv.DictWriter(fp, ["timestamp", "dataset", "name", "w", "delta", "mem", "support", "time_s", "cnt_confirmed", "cnt_estimated"])
     writer.writeheader()
     for dataset, w in itertools.product(datasets, windows):
         print("============== dataset", dataset, "w", w)
         path = f"data/{dataset}.mat"
         data = scipy.io.loadmat(path)
         for name in data.keys():
+            print("----------", name)
             if not hasattr(data[name], "shape"):
                 continue
             ts = data[name].flatten()
-            np.savetxt(f"data/{dataset}.csv", ts, fmt="%.8f")
             n = ts.shape[0]
             if n < 10:
                 continue
@@ -69,7 +70,7 @@ with open("results.csv", "w") as fp:
                 exclusion_zone=w // 2,
                 stop_on_threshold=True,
                 fraction_threshold=math.log(n) / n,
-                observability_file=f"observe-dataset-{dataset}-support{support}-w{w}-mem{mem}-delta{delta}.csv",
+                observability_file=f"observe-dataset-{dataset}-{name}-support{support}-w{w}-mem{mem}-delta{delta}.csv",
             )
 
             cnt_confirmed = 0
@@ -87,6 +88,7 @@ with open("results.csv", "w") as fp:
                 {
                     "timestamp": datetime.datetime.now().isoformat(),
                     "dataset": dataset,
+                    "name": name,
                     "w": w,
                     "delta": delta,
                     "mem": mem,
