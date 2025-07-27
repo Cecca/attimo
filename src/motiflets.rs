@@ -992,13 +992,14 @@ impl MotifletsIterator {
             }
 
             let timer = Instant::now();
+            observe_iter(self.rep, self.prefix);
             self.update_graph();
             self.emit_confirmed();
             let repetition_elapsed = timer.elapsed();
             #[rustfmt::skip]
-            observe!(self.rep, self.prefix, "repetition_elapsed_s", repetition_elapsed.as_secs_f64());
+            observe!("repetition_elapsed_s", repetition_elapsed.as_secs_f64());
             #[rustfmt::skip]
-            observe!(self.rep, self.prefix, "allocated_bytes", Bytes::allocated().0);
+            observe!("allocated_bytes", Bytes::allocated().0);
 
             self.stats.graph_stats = self.graph.stats();
             debug!("[{}@{}] {:#?}", self.rep, self.prefix, self.stats);

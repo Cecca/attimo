@@ -1,6 +1,7 @@
 use std::io::prelude::*;
 use std::ops::DerefMut;
 use std::path::Path;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Mutex;
 use std::time::Instant;
 use std::{fmt::Display, fs::File, io::BufWriter};
@@ -42,6 +43,8 @@ impl Drop for Observer {
     }
 }
 
+pub static REPETITION: AtomicUsize = AtomicUsize::new(0);
+pub static PREFIX: AtomicUsize = AtomicUsize::new(0);
 pub static OBSERVER: Lazy<Mutex<Observer>> = Lazy::new(|| Mutex::new(Observer::new("observe.csv")));
 
 pub fn reset_observer<P: AsRef<Path>>(path: P) {
@@ -63,11 +66,32 @@ macro_rules! observe {
             .unwrap()
             .append($rep, $prefix, $name, $value);
     };
+    ($name: literal, $value: expr) => {
+        crate::observe::OBSERVER.lock().unwrap().append(
+            REPETITION.load(std::sync::atomic::Ordering::Relaxed),
+            PREFIX.load(std::sync::atomic::Ordering::Relaxed),
+            $name,
+            $value,
+        );
+    };
+}
+
+pub fn observe_iter(rep: usize, prefix: usize) {
+    #[cfg(feature = "observe")]
+    {
+        REPETITION.store(rep, std::sync::atomic::Ordering::Relaxed);
+        PREFIX.store(prefix, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 #[cfg(not(feature = "observe"))]
 macro_rules! observe {
     ($rep: expr, $prefix: expr, $name: literal, $value: expr) => {};
+}
+
+#[cfg(not(feature = "observe"))]
+macro_rules! observe_iter {
+    ($rep: expr, $prefix: expr) => {};
 }
 
 pub(crate) use observe;

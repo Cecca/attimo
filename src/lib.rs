@@ -13,6 +13,7 @@ pub mod knn;
 pub mod load;
 pub mod motiflets;
 pub mod motifs;
+#[macro_use]
 pub mod observe;
 #[cfg(feature = "pprof")]
 pub mod profiler;
