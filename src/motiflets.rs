@@ -720,10 +720,6 @@ impl MotifletsIterator {
             self.delta,
         );
 
-        let mut idx_buf = vec![0; self.ts.num_subsequences()];
-        let mut dist_buf = vec![0.0f64; self.ts.num_subsequences()];
-        let mut scratch = vec![0.0f64; self.ts.w];
-
         let mut time_extents = Duration::from_secs(0);
         let mut cnt_extents = 0;
         let mut cnt_skipped = 0;
@@ -740,18 +736,7 @@ impl MotifletsIterator {
             {
                 cnt_extents += 1;
                 let t = Instant::now();
-                // let extents = compute_extents(&self.ts, &neighborhoods_ids);
-                // dbg!(&extents);
-                let (extents, neighborhoods_ids) = dbg!(k_extents_bf(
-                    &self.ts,
-                    neighborhoods_ids[0],
-                    &self.fft_data,
-                    self.max_k,
-                    self.exclusion_zone,
-                    &mut idx_buf,
-                    &mut dist_buf,
-                    &mut scratch,
-                ));
+                let extents = compute_extents(&self.ts, &neighborhoods_ids);
                 time_extents += t.elapsed();
                 for i in 1..neighborhoods_ids.len() {
                     let ids = &neighborhoods_ids[..=i];

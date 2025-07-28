@@ -79,6 +79,7 @@
               valgrind
               rr
               gdb
+              marimo
             ]
             ++ (with python.pkgs; [
               venvShellHook
@@ -86,6 +87,7 @@
               maturin
               scipy
               requests
+              matplotlib
             ]);
         };
       }
