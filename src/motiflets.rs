@@ -383,7 +383,7 @@ impl MotifletsIteratorStats {
             * self.index_stats.num_repetitions
             * self.timeseries_stats.num_subsequences
             / self.timeseries_stats.window;
-        self.cnt_candidates + hashing_cost
+        self.cnt_candidates //+ hashing_cost
     }
 }
 
@@ -503,15 +503,6 @@ impl MotifletsIterator {
 
         // get some stats about distances
         let average_pairwise_distance = ts.average_pairwise_distance(1234, exclusion_zone);
-
-        for prefix in 1..=8 {
-            let cp = index.at_least_one_collision_prob(
-                Distance(average_pairwise_distance),
-                index.max_repetitions(),
-                prefix,
-            );
-            dbg!(prefix, cp);
-        }
 
         let pairs_buffer = vec![(0, 0, Distance(0.0)); 1 << 20];
 
