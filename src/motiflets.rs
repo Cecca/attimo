@@ -1,7 +1,7 @@
 use crate::allocator::*;
 use crate::distance::zeucl_threshold;
 use crate::graph::{AdjacencyGraph, GraphStats};
-use crate::index::LSHIndexStats;
+use crate::index::{CostEstimator, LSHIndexStats};
 use crate::observe::*;
 use crate::timeseries::{overlap_count_iter, TimeseriesStats};
 use crate::{
@@ -610,6 +610,7 @@ impl MotifletsIterator {
         let index = &mut self.index;
 
         let mut time_distance_computation = Duration::default();
+        let mut count_collisions = 0;
         let mut time_update_graph = Duration::default();
         let mut enumerator = index.collisions(rep, prefix, self.previous_prefix);
         loop {
@@ -622,6 +623,7 @@ impl MotifletsIterator {
                 break;
             }
             let cnt = maybe_cnt.unwrap();
+            count_collisions += cnt;
             let t = Instant::now();
             // Fixup the distances
             let pairs_buffer = &mut self.pairs_buffer[0..cnt];
@@ -687,6 +689,10 @@ impl MotifletsIterator {
             );
             time_update_graph += t_graph.elapsed();
         } // while there are collisions
+        self.index
+            .cost_estimator
+            .update_collision_time(time_distance_computation, count_collisions);
+
         log::debug!("{}", self.mem_tree());
         #[rustfmt::skip]
         observe!(rep, prefix, "profile/repetition/update_graph/distance_computation", time_distance_computation.as_secs_f64());
@@ -862,14 +868,18 @@ impl MotifletsIterator {
 
             // will be None if the next distance to confirm is either None or cannot
             // be confirmed at the current prefix
-            let additional_collisions_at_prefix = self.next_to_confirm.and_then(|d| {
-                self.repetitions_to_confirm(d, self.prefix, self.previous_prefix)
-                    .map(|expected_reps_at_level| {
-                        // compute the additional collisions at the current prefix
-                        (expected_reps_at_level - self.rep) as f64
-                            * expected_collisions[self.prefix]
-                    })
-            });
+            let additional_collisions_and_repetitions_at_prefix =
+                self.next_to_confirm.and_then(|d| {
+                    self.repetitions_to_confirm(d, self.prefix, self.previous_prefix)
+                        .map(|expected_reps_at_level| {
+                            // compute the additional collisions at the current prefix
+                            let additional_collisions = (expected_reps_at_level - self.rep) as f64
+                                * expected_collisions[self.prefix];
+                            let new_repetitions =
+                                expected_reps_at_level - self.index.get_repetitions();
+                            (additional_collisions, new_repetitions)
+                        })
+                });
 
             // will be None if either there is no next distance to confirm or if
             // the current next distance to confirm cannot be confirmed at any
@@ -906,16 +916,31 @@ impl MotifletsIterator {
                 );
                 self.prefix
             } else {
-                match (additional_collisions_at_prefix, collisions_at_shorter) {
-                    (Some(current), Some((shorter, prefix))) => {
-                        if current < shorter {
+                match (
+                    additional_collisions_and_repetitions_at_prefix,
+                    collisions_at_shorter,
+                ) {
+                    (
+                        Some((current_collisions, repetitions_to_add)),
+                        Some((shorter_collisions, prefix)),
+                    ) => {
+                        let cost_estimator = self.index.cost_estimator;
+                        let current_estimated_cost = cost_estimator.collision_time().as_secs_f64()
+                            * current_collisions
+                            + cost_estimator.repetition_time().as_secs_f64()
+                                * repetitions_to_add as f64;
+                        let shorter_estimated_cost =
+                            cost_estimator.collision_time().as_secs_f64() * shorter_collisions;
+                        dbg!(current_estimated_cost);
+                        dbg!(shorter_estimated_cost);
+                        if current_estimated_cost < shorter_estimated_cost {
                             self.prefix
                         } else {
                             prefix
                         }
                     }
-                    (None, Some((_, prefix))) => prefix,
-                    (None, None) => self.prefix - 1,
+                    // (None, Some((_, prefix))) => prefix,
+                    (None, None) | (None, Some(_)) => self.prefix - 1,
                     (Some(_), None) => unreachable!(),
                 }
             };
@@ -929,11 +954,8 @@ impl MotifletsIterator {
 
             // possibly add the repetition, if we didn't materialize it previously
             if self.rep + 1 > self.index.get_repetitions() {
-                let elapsed =
-                    self.index
-                        .add_repetitions(&self.ts, &self.fft_data, self.rep + 1, self.prefix);
-                #[rustfmt::skip]
-                observe!(self.rep, self.prefix, "repetition_setup_s", elapsed.as_secs_f64());
+                self.index
+                    .add_repetitions(&self.ts, &self.fft_data, self.rep + 1, self.prefix);
             }
         } else {
             // we take this branch if we exhausted all possible repetitions

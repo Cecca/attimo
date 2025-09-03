@@ -35,8 +35,9 @@ def get_datasets():
     return datasets
 
 
-datasets = get_datasets()
-datasets = ["Bird12-Week3_2018_1_10"]
+# datasets = get_datasets()
+# datasets = ["Bird12-Week3_2018_1_10"]
+datasets = ["recorddata"]
 
 support = 9
 windows = [512, 1024, 2048, 4096, 8192]

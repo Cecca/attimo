@@ -4,6 +4,7 @@ use rand::prelude::*;
 use rand_distr::{Normal, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
+use rustfft::num_complex;
 use std::{
     mem::size_of,
     ops::Range,
@@ -363,14 +364,61 @@ impl LSHIndexStats {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct Average {
+    total: Duration,
+    count: u32,
+}
+
+impl std::fmt::Debug for Average {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.average())
+    }
+}
+
+impl Average {
+    fn average(&self) -> Duration {
+        self.total / self.count
+    }
+
+    fn update(&mut self, add_total: Duration, add_count: usize) {
+        self.total += add_total;
+        self.count += add_count as u32;
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CostEstimator {
+    repetition_time: Average,
+    collision_time: Average,
+}
+
+impl CostEstimator {
+    pub fn repetition_time(&self) -> Duration {
+        self.repetition_time.average()
+    }
+
+    pub fn collision_time(&self) -> Duration {
+        self.collision_time.average()
+    }
+
+    pub fn update_repetition_time(&mut self, elapsed: Duration, num_new_repetitions: usize) {
+        self.repetition_time.update(elapsed, num_new_repetitions);
+    }
+
+    pub fn update_collision_time(&mut self, elapsed: Duration, num_new_collisions: usize) {
+        self.collision_time.update(elapsed, num_new_collisions);
+    }
+}
+
 pub struct LSHIndex {
     rng: Xoshiro256PlusPlus,
     quantization_width: f64,
     functions: Vec<Hasher>,
     repetitions: Vec<Repetition>,
-    repetitions_setup_time: Duration,
     max_repetitions: usize,
     collision_profile: Vec<f64>,
+    pub cost_estimator: CostEstimator,
 }
 
 impl ByteSize for LSHIndex {
@@ -489,7 +537,7 @@ impl LSHIndex {
                 {
                     // the quantization width is too large: too many subsequences
                     qw_upper.replace(qw);
-                    qw /= 2.0;
+                    qw /= 2.0; // FIXME: this ends up repeating the qw value already inspected in the previous step
                     debug!("Halving the quantization width {}", qw);
                 } else {
                     debug!("Settling on quantization width {}", qw);
@@ -518,13 +566,12 @@ impl LSHIndex {
             quantization_width: qw,
             functions: Vec::new(),
             repetitions: Vec::new(),
-            repetitions_setup_time: Duration::from_secs(0),
             max_repetitions,
             collision_profile,
+            cost_estimator: CostEstimator::default(),
         };
-        let avg_dur = slf.add_repetitions(ts, fft_data, 1, K);
+        slf.add_repetitions(ts, fft_data, 1, K);
 
-        slf.repetitions_setup_time = avg_dur;
         observe!(0, 0, "profile/index_setup", t.elapsed().as_secs_f64());
         return slf;
     }
@@ -535,7 +582,7 @@ impl LSHIndex {
         fft_data: &FFTData,
         total_repetitions: usize,
         max_k: usize,
-    ) -> Duration {
+    ) {
         assert!(
             total_repetitions > self.get_repetitions(),
             "total_repetitions {} is not > self.get_repetitions() {}",
@@ -563,11 +610,8 @@ impl LSHIndex {
 
         let elapsed = timer.elapsed();
         log::debug!("Added {} new repetitions in {:?}", new_repetitions, elapsed);
-        let average_time = elapsed / new_repetitions as u32;
-
-        // self.functions.extend(new_hashers);
-
-        average_time
+        self.cost_estimator
+            .update_repetition_time(elapsed, new_repetitions)
     }
 
     /// Get how many repetitions are available in this index
