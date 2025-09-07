@@ -688,6 +688,11 @@ impl MotifletsIterator {
                 graph.stats(),
             );
             time_update_graph += t_graph.elapsed();
+
+            if self.stats.cnt_candidates >= self.collisions_threshold {
+                log::info!("Early return from update_graph");
+                return;
+            }
         } // while there are collisions
         self.index
             .cost_estimator
@@ -984,6 +989,16 @@ impl MotifletsIterator {
                 return Ok(None);
             }
 
+            let timer = Instant::now();
+            observe_iter(self.rep, self.prefix);
+            self.update_graph();
+            self.emit_confirmed();
+            let repetition_elapsed = timer.elapsed();
+            #[rustfmt::skip]
+            observe!("repetition_elapsed_s", repetition_elapsed.as_secs_f64());
+            #[rustfmt::skip]
+            observe!("allocated_bytes", Bytes::allocated().0);
+
             if self.stats.effort_so_far() > self.collisions_threshold || self.prefix == 1 {
                 warn!(
                     "Too much effort! {} > {} (max support smallest non-emitted distance {:?})",
@@ -1014,16 +1029,6 @@ impl MotifletsIterator {
                     break;
                 }
             }
-
-            let timer = Instant::now();
-            observe_iter(self.rep, self.prefix);
-            self.update_graph();
-            self.emit_confirmed();
-            let repetition_elapsed = timer.elapsed();
-            #[rustfmt::skip]
-            observe!("repetition_elapsed_s", repetition_elapsed.as_secs_f64());
-            #[rustfmt::skip]
-            observe!("allocated_bytes", Bytes::allocated().0);
 
             self.stats.graph_stats = self.graph.stats();
             debug!("[{}@{}] {:#?}", self.rep, self.prefix, self.stats);
