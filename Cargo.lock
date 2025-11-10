@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "attimo"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "argh",
@@ -1008,7 +1008,7 @@ dependencies = [
 
 [[package]]
 name = "pyattimo"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "attimo",
