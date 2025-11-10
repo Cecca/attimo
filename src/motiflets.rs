@@ -491,6 +491,7 @@ impl MotifletsIterator {
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
         let start = Instant::now();
         let n = ts.num_subsequences();
+        debug!("computing FFT data");
         let fft_data = FFTData::new(&ts);
 
         let mem_gauge = MemoryGauge::allocated();

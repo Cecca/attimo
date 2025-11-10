@@ -494,12 +494,15 @@ impl LSHIndex {
             let mut qw_lower: Option<f64> = None;
             let mut qw_upper: Option<f64> = None;
             let mut tmp = Vec::new();
+            log::debug!("compute quantization width");
             let mut qw = Hasher::compute_width(ts, fft_data, exclusion_zone, &mut rng);
+            log::debug!("initial value {}", qw);
             let mut collision_profile = vec![0.0f64; K + 1];
 
             loop {
                 if let (Some(lower), Some(upper)) = (qw_lower, qw_upper) {
                     qw = (upper + lower) / 2.0;
+                    log::debug!("new guess {}", qw);
                 }
 
                 collision_profile.fill(0.0);

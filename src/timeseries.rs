@@ -772,9 +772,10 @@ impl ByteSize for FFTData {
 impl FFTData {
     pub fn new(ts: &WindowedTimeseries) -> Self {
         let fft_length = std::cmp::min(
-            std::cmp::max(1 << 14, ts.w.next_power_of_two()),
+            std::cmp::max(1 << 14, ts.w.next_power_of_two() * 2),
             ts.data.len().next_power_of_two(),
         );
+        dbg!(fft_length);
         let mut fft_chunks = Vec::new();
 
         let mut planner = FftPlanner::new();
@@ -784,6 +785,7 @@ impl FFTData {
         let mut begin = 0;
         while begin < ts.data.len() {
             let end = std::cmp::min(begin + fft_length, ts.data.len());
+            log::trace!("computing chunk from {} to {}", begin, end);
             let mut chunk: Vec<Complex<f64>> = ts.data[begin..end]
                 .iter()
                 .map(|x| Complex {
@@ -799,6 +801,7 @@ impl FFTData {
             //// since we need to compute all dot products
             begin += fft_length - ts.w;
         }
+        log::debug!("Computed FFT data");
         Self {
             chunk_size: fft_length - ts.w,
             fft_length,

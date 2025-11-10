@@ -21,6 +21,8 @@ def get_datasets():
     ).json()
     for f in resp["tree"]:
         path = f["path"]
+        if "swtAttack7" not in path:
+            continue
         if "momp" in path and path.endswith(".mat"):
             name = pathlib.Path(path).name.strip(".mat")
             url = f"https://github.com/patrickzib/motiflets/raw/refs/heads/pyattimo_refactor/datasets/momp/{name}.mat"
@@ -35,13 +37,13 @@ def get_datasets():
     return datasets
 
 
-# datasets = get_datasets()
+datasets = get_datasets()
 # datasets = ["Bird12-Week3_2018_1_10"]
-datasets = ["recorddata"]
+# datasets = ["recorddata"]
 
 support = 9
 windows = [512, 1024, 2048, 4096, 8192]
-windows = [1024]
+windows = [16384]
 
 with open("results.csv", "w") as fp:
     writer = csv.DictWriter(fp, ["timestamp", "dataset", "name", "w", "delta", "mem", "support", "time_s", "cnt_confirmed", "cnt_estimated"])
@@ -59,7 +61,7 @@ with open("results.csv", "w") as fp:
             if n < 10:
                 continue
             start = time.time()
-            mem = "20GB"
+            mem = "4GB"
             delta = 0.1
             m_iter = pyattimo.MotifletsIterator(
                 ts,
