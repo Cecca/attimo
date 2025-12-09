@@ -806,6 +806,16 @@ impl MotifletsIterator {
             .sum::<usize>();
         self.stats.next_distance = self.next_to_confirm.unwrap_or(Distance::infinity());
 
+        for (k, top) in self.top.iter().enumerate() {
+            if k >= 2 {
+                let candidate_dist = top.kth_distance().map(|d| d.0).unwrap_or(f64::INFINITY);
+                let key = &format!("extent@{}", k);
+
+                // #[rustfmt::skip]
+                observe!(self.rep, self.prefix, key, candidate_dist);
+            }
+        }
+
         #[rustfmt::skip]
         observe!(self.rep, self.prefix, "profile/repetition/emit_confirmed", timer.elapsed().as_secs_f64());
     }

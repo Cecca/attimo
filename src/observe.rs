@@ -60,6 +60,12 @@ pub fn flush_observer() {
 
 #[cfg(feature = "observe")]
 macro_rules! observe {
+    ($rep: expr, $prefix: expr, $name: expr, $value: expr) => {
+        crate::observe::OBSERVER
+            .lock()
+            .unwrap()
+            .append($rep, $prefix, $name, $value);
+    };
     ($rep: expr, $prefix: expr, $name: literal, $value: expr) => {
         crate::observe::OBSERVER
             .lock()
