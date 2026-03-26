@@ -3,6 +3,7 @@ use attimo::motiflets::brute_force_motiflets;
 use attimo::timeseries::WindowedTimeseries;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -307,6 +308,7 @@ impl MotifletsIterator {
             "max_k * exclusion_zone should be less than the number of subsequences. We have instead {} * {} > {}",
             support, exclusion_zone, ts.num_subsequences()
         );
+        // FIXME: on None it should not log anything
         let observability_file = observability_file.unwrap_or_else(|| {
             std::env::temp_dir().join(
                 format!(
@@ -380,6 +382,18 @@ impl MotifletsIterator {
         if let Ok(None) = res.as_ref() {
             // flush the observer if we are done with it
             attimo::observe::flush_observer();
+        }
+
+        res
+    }
+
+    fn timings(&self) -> HashMap<String, f64> {
+        let mut res = HashMap::new();
+        if let MotifletsIteratorImpl::Enumerator(inner) = &self.inner {
+            res.entry("repetition_setup_s".to_owned())
+                .or_insert(inner.timing_stats.repetition_setup.as_secs_f64());
+            res.entry("pair_discovery_s".to_owned())
+                .or_insert(inner.timing_stats.pair_discovery.as_secs_f64());
         }
 
         res

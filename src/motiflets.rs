@@ -425,6 +425,12 @@ fn build_rooted_motiflets(
     res
 }
 
+#[derive(Default, Debug)]
+pub struct TimingStats {
+    pub repetition_setup: Duration,
+    pub pair_discovery: Duration,
+}
+
 pub struct MotifletsIterator {
     pub max_k: usize,
     ts: Arc<WindowedTimeseries>,
@@ -448,6 +454,7 @@ pub struct MotifletsIterator {
     stats: MotifletsIteratorStats,
     collisions_threshold: usize,
     stop_on_collisions_threshold: bool,
+    pub timing_stats: TimingStats,
     rng: Xoshiro256PlusPlus,
 }
 
@@ -541,6 +548,8 @@ impl MotifletsIterator {
         let collisions_threshold = stats.timeseries_stats.num_subsequence_pairs / 10;
 
         let next_to_confirm = top[2].smallest_non_emitted_distance();
+        let mut timing_stats = TimingStats::default();
+        timing_stats.repetition_setup = start.elapsed();
         let slf = Self {
             ts,
             fft_data,
@@ -559,6 +568,7 @@ impl MotifletsIterator {
             stats,
             collisions_threshold,
             stop_on_collisions_threshold: false,
+            timing_stats,
             rng,
         };
 
@@ -970,8 +980,10 @@ impl MotifletsIterator {
 
             // possibly add the repetition, if we didn't materialize it previously
             if self.rep + 1 > self.index.get_repetitions() {
+                let t = Instant::now();
                 self.index
                     .add_repetitions(&self.ts, &self.fft_data, self.rep + 1, self.prefix);
+                self.timing_stats.repetition_setup += t.elapsed();
             }
         } else {
             // we take this branch if we exhausted all possible repetitions
@@ -1005,6 +1017,7 @@ impl MotifletsIterator {
             self.update_graph();
             self.emit_confirmed();
             let repetition_elapsed = timer.elapsed();
+            self.timing_stats.pair_discovery += repetition_elapsed;
             #[rustfmt::skip]
             observe!("repetition_elapsed_s", repetition_elapsed.as_secs_f64());
             #[rustfmt::skip]
