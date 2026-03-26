@@ -309,19 +309,9 @@ impl MotifletsIterator {
             support, exclusion_zone, ts.num_subsequences()
         );
         // FIXME: on None it should not log anything
-        let observability_file = observability_file.unwrap_or_else(|| {
-            std::env::temp_dir().join(
-                format!(
-                    "attimo-{}.csv",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis()
-                )
-                .as_str(),
-            )
-        });
-        attimo::observe::reset_observer(&observability_file);
+        if let Some(observability_file) = observability_file {
+            attimo::observe::reset_observer(&observability_file);
+        }
         let num_pairs = ts.num_subsequence_pairs();
         if ts.num_subsequences() > brute_force_threshold {
             let max_memory = if let Some(max_mem_str) = max_memory {
