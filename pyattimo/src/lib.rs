@@ -279,7 +279,7 @@ struct MotifletsIterator {
     // inner: attimo::motiflets::MotifletsIterator,
     inner: MotifletsIteratorImpl,
     #[pyo3(get)]
-    observability_file: PathBuf,
+    observability_file: Option<PathBuf>,
 }
 
 #[pymethods]
@@ -309,7 +309,7 @@ impl MotifletsIterator {
             support, exclusion_zone, ts.num_subsequences()
         );
         // FIXME: on None it should not log anything
-        if let Some(observability_file) = observability_file {
+        if let Some(observability_file) = &observability_file {
             attimo::observe::reset_observer(&observability_file);
         }
         let num_pairs = ts.num_subsequence_pairs();
