@@ -826,6 +826,11 @@ impl MotifletsIterator {
             }
         }
 
+        let threshold = self.top[self.max_k]
+            .kth_distance()
+            .unwrap_or(Distance::infinity());
+        self.graph.prune(threshold);
+
         #[rustfmt::skip]
         observe!(self.rep, self.prefix, "profile/repetition/emit_confirmed", timer.elapsed().as_secs_f64());
     }

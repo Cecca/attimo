@@ -38,7 +38,7 @@ def get_datasets():
 
 
 datasets = get_datasets()
-datasets = ["Bird12-Week3_2018_1_10"]
+datasets = ["Lab_K_060314"]
 # datasets = ["recorddata"]
 
 support = 9
@@ -61,7 +61,7 @@ with open("results.csv", "w") as fp:
             if n < 10:
                 continue
             start = time.time()
-            mem = "4GB"
+            mem = "2GB"
             delta = 0.1
             m_iter = pyattimo.MotifletsIterator(
                 ts,

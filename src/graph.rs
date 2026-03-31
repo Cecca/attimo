@@ -170,6 +170,18 @@ impl AdjacencyGraph {
             });
     }
 
+    pub fn prune(&mut self, distance: Distance) {
+        let updated = &self.updated;
+        self.neighborhoods
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(i, nn)| {
+                if updated[i] {
+                    nn.retain(|pair| pair.0.distance() <= distance);
+                }
+            });
+    }
+
     pub fn neighborhoods(
         &mut self,
         k: usize,
