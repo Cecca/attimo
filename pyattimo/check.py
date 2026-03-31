@@ -46,14 +46,16 @@ windows = [512, 1024, 2048, 4096, 8192]
 windows = [512]
 
 with open("results.csv", "w") as fp:
-    writer = csv.DictWriter(fp, ["timestamp", "dataset", "name", "w", "delta", "mem", "support", "time_s", "cnt_confirmed", "cnt_estimated"])
+    writer = csv.DictWriter(fp, ["timestamp", "dataset", "name", "w", "delta", "mem", "support", "lower_bound", "extent", "time_s", "cnt_confirmed", "cnt_estimated", "repetition_setup_s", "pair_discovery_s"])
     writer.writeheader()
-    for dataset, w in itertools.product(datasets, windows):
+    for dataset, w, mem in itertools.product(datasets, windows, ["512MB", "1GB", "2GB", "4GB"]):
         print("============== dataset", dataset, "w", w)
         path = f"data/{dataset}.mat"
         data = scipy.io.loadmat(path)
         for name in data.keys():
             print("----------", name)
+            if name != "volts":
+                continue
             if not hasattr(data[name], "shape"):
                 continue
             ts = data[name].flatten()
@@ -61,7 +63,6 @@ with open("results.csv", "w") as fp:
             if n < 10:
                 continue
             start = time.time()
-            mem = "2GB"
             delta = 0.1
             m_iter = pyattimo.MotifletsIterator(
                 ts,
@@ -75,9 +76,11 @@ with open("results.csv", "w") as fp:
                 observability_file=f"observe-dataset-{dataset}-{name}-support{support}-w{w}-mem{mem}-delta{delta}.csv",
             )
 
+            motiflets = dict()
             cnt_confirmed = 0
             cnt_estimated = 0
             for m in m_iter:
+                motiflets[m.support] = m
                 print(m, "support", m.support, "lower bound: ", m.lower_bound)
                 if m.extent == m.lower_bound:
                     cnt_confirmed += 1
@@ -97,8 +100,12 @@ with open("results.csv", "w") as fp:
                     "delta": delta,
                     "mem": mem,
                     "support": support,
+                    "lower_bound": motiflets[support].lower_bound,
+                    "extent": motiflets[support].extent,
                     "time_s": end - start,
                     "cnt_confirmed": cnt_confirmed,
-                    "cnt_estimated": cnt_estimated
+                    "cnt_estimated": cnt_estimated,
+                    "repetition_setup_s": m_iter.timings()["repetition_setup_s"],
+                    "pair_discovery_s": m_iter.timings()["pair_discovery_s"],
                 }
             )
