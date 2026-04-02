@@ -13,6 +13,7 @@ use std::{
 
 use crate::{
     allocator::{ByteSize, Bytes},
+    distance::zeucl,
     knn::Distance,
     observe::*,
     timeseries::{FFTData, Overlaps, WindowedTimeseries},
@@ -243,6 +244,7 @@ impl Hasher {
                 output,
                 move |i, mut h, out| {
                     if out.1 == u32::MAX {
+                        // TODO: count how many we have in output
                         // the subsequence had an overflown hash value, skip it
                         return;
                     }
@@ -270,6 +272,7 @@ impl Hasher {
 }
 
 struct Repetition {
+    oob_count: usize,
     hashes: Vec<HashValue>,
     indices: Vec<u32>,
 }
@@ -305,6 +308,7 @@ impl Repetition {
     }
 
     fn from_pairs<I: IntoIterator<Item = (HashValue, u32)>>(n: usize, pairs: I) -> Self {
+        let mut oob_count = 0;
         let mut hashes = Vec::with_capacity(n);
         let mut indices = Vec::with_capacity(n);
         for (h, idx) in pairs {
@@ -312,11 +316,17 @@ impl Repetition {
                 // remove subsequences with overflown hash
                 hashes.push(h);
                 indices.push(idx);
+            } else {
+                oob_count += 1;
             }
         }
         hashes.shrink_to_fit();
         indices.shrink_to_fit();
-        Self { hashes, indices }
+        Self {
+            oob_count,
+            hashes,
+            indices,
+        }
     }
 
     fn bytes(&self) -> Bytes {
@@ -330,6 +340,10 @@ impl Repetition {
 
     fn get_indices(&self) -> &[u32] {
         &self.indices
+    }
+
+    pub fn count_out_of_bounds(&self) -> usize {
+        self.oob_count
     }
 
     fn collisions(&self, prefix: usize, prev_prefix: Option<usize>) -> CollisionEnumerator<'_> {
@@ -417,7 +431,6 @@ pub struct LSHIndex {
     functions: Vec<Hasher>,
     repetitions: Vec<Repetition>,
     max_repetitions: usize,
-    collision_profile: Vec<f64>,
     pub cost_estimator: CostEstimator,
 }
 
@@ -470,86 +483,75 @@ impl LSHIndex {
         let sqrt_n = (ts.num_subsequences() as f64).sqrt().ceil() as usize;
 
         let t = Instant::now();
-        let (qw, collision_profile) = if let Ok(qw) = std::env::var("ATTIMO_QUANTIZATION") {
+        let qw = if let Ok(qw) = std::env::var("ATTIMO_QUANTIZATION") {
             let qw = qw
                 .parse::<f64>()
                 .expect("Unable to parse ATTIMO_QUANTIZATION as a float");
-
-            let mut tmp = Vec::new();
-            let mut collision_profile = vec![0.0f64; K + 1];
-            const SAMPLES: usize = 8;
-            for _ in 0..SAMPLES {
-                let cp = Repetition::sample(ts, qw, K, fft_data, &mut rng, &mut tmp)
-                    .1
-                    .collision_profile();
-                for (acc, c) in collision_profile.iter_mut().zip(cp) {
-                    *acc += c;
-                }
-            }
-            for c in collision_profile.iter_mut() {
-                *c /= SAMPLES as f64;
-            }
-            (qw, collision_profile)
+            qw
         } else {
-            let mut qw_lower: Option<f64> = None;
-            let mut qw_upper: Option<f64> = None;
+            let threshold_upper = 10 * sqrt_n;
             let mut tmp = Vec::new();
             log::debug!("compute quantization width");
             let mut qw = Hasher::compute_width(ts, fft_data, exclusion_zone, &mut rng);
             log::debug!("initial value {}", qw);
-            let mut collision_profile = vec![0.0f64; K + 1];
 
-            loop {
-                if let (Some(lower), Some(upper)) = (qw_lower, qw_upper) {
-                    qw = (upper + lower) / 2.0;
-                    log::debug!("new guess {}", qw);
-                }
+            let mut dp = vec![0.0; ts.num_subsequences()];
+            let mut buf = vec![0.0; ts.w];
+            ts.distance_profile(fft_data, 0, &mut dp, &mut buf);
+            let mut upper: f64 = *dp.iter().max_by(|a, b| a.total_cmp(b)).unwrap();
+            let mut lower = 0.0;
 
-                collision_profile.fill(0.0);
+            // Do a limited number of iterations of binary search
+            for _ in 0..40 {
+                qw = (upper + lower) / 2.0;
                 let mut longest_prefix_collisions = Vec::<usize>::new();
                 const SAMPLES: usize = 8;
+                let mut scratch = vec![(0, 0, Distance::infinity()); 1024];
+                let mut most_oob = 0;
                 for _ in 0..SAMPLES {
-                    let cp = Repetition::sample(ts, qw, K, fft_data, &mut rng, &mut tmp)
-                        .1
-                        .collision_profile();
-                    longest_prefix_collisions.push(*cp.last().unwrap() as usize);
-                    for (acc, c) in collision_profile.iter_mut().zip(cp) {
-                        *acc += c;
+                    let rep = Repetition::sample(ts, qw, K, fft_data, &mut rng, &mut tmp).1;
+                    most_oob = rep.count_out_of_bounds().max(most_oob);
+                    let mut cs = rep.collisions(K, None);
+                    let mut collisions = 0;
+                    let mut closest = std::f64::INFINITY;
+                    while let Some(cnt) = cs.next(&mut scratch, exclusion_zone) {
+                        collisions += cnt;
+                        for (a, b, _) in &scratch[..cnt] {
+                            let d = zeucl(ts, *a as usize, *b as usize);
+                            if d < closest {
+                                closest = d;
+                            }
+                        }
+                        if collisions > threshold_upper {
+                            break;
+                        }
                     }
-                }
-                for c in collision_profile.iter_mut() {
-                    *c /= SAMPLES as f64;
+                    assert!(collisions == 0 || closest.is_finite());
+                    longest_prefix_collisions.push(collisions);
                 }
 
                 longest_prefix_collisions.sort();
                 let median_collisions =
                     longest_prefix_collisions[longest_prefix_collisions.len() / 2];
-                let avg_collisions = collision_profile.last().unwrap();
-
                 debug!(
-                "Num collisions with quantization_width={}: {} median {} average (lower {:?}, upper {:?})",
-                qw, median_collisions, avg_collisions, qw_lower, qw_upper
-            );
-                if median_collisions < sqrt_n {
-                    // the quantization width is too small
-                    qw_lower.replace(qw);
-                    qw *= 2.0;
-                    debug!("Doubling the quantization width to {}", qw);
-                } else if median_collisions > 10 * sqrt_n
-                    && qw_upper.unwrap_or(f64::INFINITY) - qw_lower.unwrap_or(0.0) > 1e-7
+                    "Num collisions with quantization_width={}: {} median",
+                    qw, median_collisions
+                );
+                if median_collisions < sqrt_n
+                    || most_oob as f64 > 0.01 * ts.num_subsequences() as f64
                 {
+                    // the quantization width is too small
+                    lower = qw;
+                } else if median_collisions > threshold_upper && upper - lower > 1e-7 {
                     // the quantization width is too large: too many subsequences
-                    qw_upper.replace(qw);
-                    qw /= 2.0; // FIXME: this ends up repeating the qw value already inspected in the previous step
-                    debug!("Halving the quantization width {}", qw);
+                    upper = qw;
                 } else {
-                    debug!("Settling on quantization width {}", qw);
                     break;
                 }
             }
-            (qw, collision_profile)
+
+            qw
         };
-        debug!("Collision profile: {:?}", collision_profile);
         debug!("sqrt(n) = {}", sqrt_n);
 
         let mut max_repetitions = 0;
@@ -570,7 +572,6 @@ impl LSHIndex {
             functions: Vec::new(),
             repetitions: Vec::new(),
             max_repetitions,
-            collision_profile,
             cost_estimator: CostEstimator::default(),
         };
         slf.add_repetitions(ts, fft_data, 1, K);
@@ -753,10 +754,6 @@ impl LSHIndex {
         assert!(prefix > 0 && prefix <= K, "illegal prefix {}", prefix);
         let rep = &self.repetitions[repetition];
         rep.collisions(prefix, prev_prefix)
-    }
-
-    pub fn collision_profile(&self) -> &[f64] {
-        &self.collision_profile
     }
 }
 
