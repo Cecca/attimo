@@ -499,7 +499,11 @@ impl LSHIndex {
 
             let mut dp = vec![0.0; ts.num_subsequences()];
             let mut buf = vec![0.0; ts.w];
-            ts.distance_profile(fft_data, 0, &mut dp, &mut buf);
+            let mut from = 0;
+            while ts.is_flat(from) {
+                from += 1;
+            }
+            ts.distance_profile(fft_data, from, &mut dp, &mut buf);
             let mut upper: f64 = *dp
                 .iter()
                 .filter(|x| x.is_finite())

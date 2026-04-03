@@ -38,12 +38,12 @@ def get_datasets():
 
 
 datasets = get_datasets()
-datasets = ["stator_winding"]
+datasets = ["house"]
 # datasets = ["recorddata"]
 
 support = 9
 windows = [512, 1024, 2048, 4096, 8192]
-windows = [1024]
+windows = [512]
 
 with open("results.csv", "w") as fp:
     writer = csv.DictWriter(fp, ["timestamp", "dataset", "name", "w", "delta", "mem", "support", "lower_bound", "extent", "time_s", "cnt_confirmed", "cnt_estimated", "repetition_setup_s", "pair_discovery_s"])

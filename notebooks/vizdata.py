@@ -62,11 +62,12 @@ def _(asel, bsel, np, plt, ts, wsel):
     plt.plot(znorm(a))
     plt.plot(znorm(b))
     plt.title("distance: " + str(np.linalg.norm(znorm(a) - znorm(b))))
-    return
+    return (a,)
 
 
 @app.cell
-def _():
+def _(a):
+    a
     return
 
 

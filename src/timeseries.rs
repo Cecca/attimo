@@ -450,11 +450,13 @@ impl WindowedTimeseries {
             let sd = self.sd(i);
             if sd < FLAT_SD_THRESHOLD {
                 // subsequence is flat, cannot z-normalize
+                assert!(self.is_flat(i));
                 action(i, f64::NAN);
             } else {
                 let m = self.mean(i);
                 assert!(sd > 0.0);
-                action(i, val / sd - sumv * m / sd);
+                let out = val / sd - sumv * m / sd;
+                action(i, out);
             }
         });
     }
@@ -568,6 +570,7 @@ impl WindowedTimeseries {
                     // branch would return NaN. We just out[i] to 0 in this case.
                     out[i] = 0.0;
                 } else {
+                    assert!(!out[i].is_nan());
                     out[i] = (2.0 * self.w as f64 - 2.0 * out[i]).sqrt();
                     assert!(!out[i].is_nan());
                 }
