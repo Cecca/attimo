@@ -116,6 +116,8 @@ impl ByteSize for Hasher {
 
 impl Hasher {
     fn new<R: Rng>(dimension: usize, width: f64, rng: &mut R) -> Self {
+        assert!(width > 0.0);
+        assert!(width.is_finite());
         let uniform = Uniform::new(0.0, width);
         let shifts = [
             uniform.sample(rng),
@@ -498,7 +500,12 @@ impl LSHIndex {
             let mut dp = vec![0.0; ts.num_subsequences()];
             let mut buf = vec![0.0; ts.w];
             ts.distance_profile(fft_data, 0, &mut dp, &mut buf);
-            let mut upper: f64 = *dp.iter().max_by(|a, b| a.total_cmp(b)).unwrap();
+            let mut upper: f64 = *dp
+                .iter()
+                .filter(|x| x.is_finite())
+                .max_by(|a, b| a.total_cmp(b))
+                .unwrap();
+            assert!(upper.is_finite());
             let mut lower = 0.0;
 
             // Do a limited number of iterations of binary search
