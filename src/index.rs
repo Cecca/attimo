@@ -493,14 +493,15 @@ impl LSHIndex {
         } else {
             let threshold_upper = 10 * sqrt_n;
             let mut tmp = Vec::new();
-            log::debug!("compute quantization width");
-            let mut qw = Hasher::compute_width(ts, fft_data, exclusion_zone, &mut rng);
-            log::debug!("initial value {}", qw);
+            // log::debug!("compute quantization width");
+            // let mut qw = Hasher::compute_width(ts, fft_data, exclusion_zone, &mut rng);
+            // log::debug!("initial value {}", qw);
+            let mut qw = 0.0;
 
             let mut dp = vec![0.0; ts.num_subsequences()];
             let mut buf = vec![0.0; ts.w];
             let mut from = 0;
-            while ts.is_flat(from) {
+            while from < ts.num_subsequences() && ts.is_flat(from) {
                 from += 1;
             }
             ts.distance_profile(fft_data, from, &mut dp, &mut buf);
@@ -511,51 +512,53 @@ impl LSHIndex {
                 .unwrap();
             assert!(upper.is_finite());
             let mut lower = 0.0;
+            let mut scratch = vec![(0, 0, Distance::infinity()); 1024];
 
             // Do a limited number of iterations of binary search
             for _ in 0..40 {
                 qw = (upper + lower) / 2.0;
+                debug!("Testing qw={}", qw);
                 let mut longest_prefix_collisions = Vec::<usize>::new();
+                let mut oob_counts = Vec::<usize>::new();
                 const SAMPLES: usize = 8;
-                let mut scratch = vec![(0, 0, Distance::infinity()); 1024];
-                let mut most_oob = 0;
                 for _ in 0..SAMPLES {
                     let rep = Repetition::sample(ts, qw, K, fft_data, &mut rng, &mut tmp).1;
-                    most_oob = rep.count_out_of_bounds().max(most_oob);
+                    oob_counts.push(rep.count_out_of_bounds());
                     let mut cs = rep.collisions(K, None);
                     let mut collisions = 0;
-                    let mut closest = std::f64::INFINITY;
                     while let Some(cnt) = cs.next(&mut scratch, exclusion_zone) {
                         collisions += cnt;
-                        for (a, b, _) in &scratch[..cnt] {
-                            let d = zeucl(ts, *a as usize, *b as usize);
-                            if d < closest {
-                                closest = d;
-                            }
-                        }
                         if collisions > threshold_upper {
                             break;
                         }
                     }
-                    assert!(collisions == 0 || closest.is_finite());
                     longest_prefix_collisions.push(collisions);
                 }
 
                 longest_prefix_collisions.sort();
                 let median_collisions =
                     longest_prefix_collisions[longest_prefix_collisions.len() / 2];
+                let median_oob = oob_counts[oob_counts.len() / 2];
+
                 debug!(
                     "Num collisions with quantization_width={}: {} median",
                     qw, median_collisions
                 );
-                if median_collisions < sqrt_n
-                    || most_oob as f64 > 0.01 * ts.num_subsequences() as f64
-                {
+                if median_collisions < sqrt_n {
                     // the quantization width is too small
                     lower = qw;
+                    debug!("too few collisions, setting lower bound to {}", lower);
+                } else if median_oob as f64 > 0.1 * ts.num_subsequences() as f64 {
+                    // the quantization width is too small
+                    lower = qw;
+                    debug!(
+                        "too many out of bound hashes ({}), setting lower bound to {}",
+                        median_oob, lower
+                    );
                 } else if median_collisions > threshold_upper && upper - lower > 1e-7 {
                     // the quantization width is too large: too many subsequences
                     upper = qw;
+                    debug!("too many collisions, setting upper bound to {}", upper);
                 } else {
                     break;
                 }
